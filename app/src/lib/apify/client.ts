@@ -1,0 +1,100 @@
+import { ApifyClient } from 'apify-client';
+import type { BrandProfile } from '@/lib/types';
+import type { ActorConfig } from './actors';
+
+let _client: ApifyClient | null = null;
+
+function getClient(): ApifyClient {
+  if (!_client) {
+    const token = process.env.APIFY_API_TOKEN;
+    if (!token) throw new Error('APIFY_API_TOKEN is not set');
+    _client = new ApifyClient({ token });
+  }
+  return _client;
+}
+
+export interface ActorRunResult {
+  actorId: string;
+  runId: string;
+  datasetId: string;
+  items: Record<string, unknown>[];
+}
+
+/**
+ * Build the actor input payload for a given actor and brand profile.
+ * Each actor expects a different input shape — map brand profile fields accordingly.
+ */
+function buildActorInput(actorId: string, brand: BrandProfile): Record<string, unknown> {
+  const searchTerms = [brand.name, ...brand.keywords];
+  const primaryQuery = searchTerms.join(' OR ');
+
+  // Actor-specific input mappings
+  switch (actorId) {
+    case 'apify/google-search-scraper':
+      return { queries: primaryQuery, maxPagesPerQuery: 3, resultsPerPage: 10 };
+
+    case 'apify/instagram-search-scraper':
+      return { searchQueries: searchTerms, maxResults: 20 };
+
+    case 'data-slayer/twitter-search':
+      return { searchTerms: searchTerms, maxTweets: 50 };
+
+    case 'apify/facebook-search-scraper':
+      return { queries: searchTerms, maxResults: 20 };
+
+    case 'apilab/google-play-scraper':
+      return { searchQuery: brand.name, country: 'us', limit: 20 };
+
+    case 'dan.scraper/apple-app-store-search-scraper':
+      return { searchTerm: brand.name, country: 'us', limit: 20 };
+
+    case 'doppelspotter/whoisxml-brand-alert':
+      return {
+        brandKeywords: searchTerms,
+        apiKey: process.env.WHOISXML_API_KEY,
+        lookbackDays: 1,
+      };
+
+    case 'ryanclinton/euipo-trademark-search':
+      return { searchTerm: brand.name, maxResults: 50 };
+
+    default:
+      return { query: primaryQuery };
+  }
+}
+
+/**
+ * Run a single Apify actor synchronously and return its dataset items.
+ * For long-running actors, consider using startRun + webhook instead.
+ */
+export async function runActor(
+  actor: ActorConfig,
+  brand: BrandProfile,
+  webhookUrl?: string,
+): Promise<ActorRunResult> {
+  const client = getClient();
+  const input = buildActorInput(actor.actorId, brand);
+
+  const runOptions: Record<string, unknown> = { input };
+
+  if (webhookUrl) {
+    runOptions.webhooks = [
+      {
+        eventTypes: ['ACTOR.RUN.SUCCEEDED', 'ACTOR.RUN.FAILED', 'ACTOR.RUN.ABORTED'],
+        requestUrl: webhookUrl,
+        headersTemplate: `{"X-Apify-Webhook-Secret": "${process.env.APIFY_WEBHOOK_SECRET}"}`,
+      },
+    ];
+  }
+
+  const run = await client.actor(actor.actorId).call(input, runOptions);
+
+  const { items } = await client.dataset(run.defaultDatasetId).listItems();
+
+  return {
+    actorId: actor.actorId,
+    runId: run.id,
+    datasetId: run.defaultDatasetId,
+    items: items as Record<string, unknown>[],
+  };
+}
