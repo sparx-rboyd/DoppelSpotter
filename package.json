@@ -1,0 +1,7 @@
+{
+  "name": "doppelspotter",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy"
+  }
+}

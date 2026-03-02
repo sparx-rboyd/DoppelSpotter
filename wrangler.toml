@@ -1,0 +1,5 @@
+name = "doppelspotter-pitch"
+compatibility_date = "2025-03-02"
+
+[assets]
+directory = "./landing-page"

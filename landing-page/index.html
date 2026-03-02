@@ -7,6 +7,7 @@
     <meta name="description" content="AI-powered brand protection. GenAI Zürich 2026 Hackathon project (Apify Track).">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <script>
         tailwind.config = {
@@ -63,11 +64,6 @@
                     <a href="#architecture" class="text-gray-500 hover:text-gray-900 font-medium transition">Architecture</a>
                     <a href="#alignment" class="text-gray-500 hover:text-gray-900 font-medium transition">Challenge Alignment</a>
                 </div>
-                <div>
-                    <span class="bg-gray-100 text-gray-500 px-5 py-2.5 rounded-full font-medium shadow-sm flex items-center gap-2 cursor-not-allowed border border-gray-200" title="Repo will be available soon">
-                        <i data-lucide="github" class="w-4 h-4"></i> Source Code (Soon)
-                    </span>
-                </div>
             </div>
         </div>
     </nav>
@@ -79,14 +75,14 @@
         </div>
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
             <div class="text-center max-w-4xl mx-auto">
-                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 text-brand-700 text-sm font-semibold mb-6 border border-brand-100">
-                    <i data-lucide="trophy" class="w-4 h-4"></i>
-                    GenAI Zürich 2026 Hackathon &middot; Apify Track
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 text-brand-700 text-xs sm:text-sm font-semibold mb-6 border border-brand-100">
+                    <i data-lucide="trophy" class="w-4 h-4 flex-shrink-0"></i>
+                    <span>GenAI Zürich 2026 Hackathon &middot; Apify Track</span>
                 </div>
-                <h1 class="text-5xl lg:text-7xl font-bold tracking-tight text-gray-900 mb-8 leading-tight">
+                <h1 class="text-4xl sm:text-5xl lg:text-7xl font-bold tracking-tight text-gray-900 mb-6 sm:mb-8 leading-tight">
                     Spot your brand's <span class="gradient-text">doppelgängers</span> across the web.
                 </h1>
-                <p class="text-xl text-gray-600 mb-10 max-w-2xl mx-auto leading-relaxed">
+                <p class="text-lg sm:text-xl text-gray-600 mb-8 sm:mb-10 max-w-2xl mx-auto leading-relaxed">
                     An AI-powered autonomous pipeline that uses live web data to detect lookalike domains, fake social accounts, and clone apps. Built for SMEs who can't afford enterprise protection.
                 </p>
                 
@@ -103,60 +99,61 @@
             <!-- Dashboard Mockup -->
             <div class="mt-20 relative mx-auto max-w-5xl rounded-2xl border border-gray-200/50 bg-white shadow-2xl overflow-hidden ring-1 ring-gray-900/5">
                 <div class="bg-gray-50 border-b border-gray-100 px-4 py-3 flex items-center gap-2">
-                    <div class="flex gap-1.5">
+                    <div class="flex gap-1.5 flex-shrink-0">
                         <div class="w-3 h-3 rounded-full bg-red-400"></div>
                         <div class="w-3 h-3 rounded-full bg-amber-400"></div>
                         <div class="w-3 h-3 rounded-full bg-green-400"></div>
                     </div>
-                    <div class="mx-auto bg-white rounded-md text-xs text-gray-400 px-24 py-1 flex items-center gap-2 border border-gray-100 shadow-sm">
-                        <i data-lucide="lock" class="w-3 h-3"></i> app.doppelspotter.com
+                    <div class="mx-auto bg-white rounded-md text-xs text-gray-400 px-4 sm:px-12 py-1 flex items-center gap-2 border border-gray-100 shadow-sm min-w-0">
+                        <i data-lucide="lock" class="w-3 h-3 flex-shrink-0"></i>
+                        <span class="truncate">app.doppelspotter.com</span>
                     </div>
                 </div>
-                <div class="p-8 bg-gray-50/50">
-                    <div class="flex items-center justify-between mb-8">
+                <div class="p-4 sm:p-8 bg-gray-50/50">
+                    <div class="flex items-center justify-between mb-6 gap-4">
                         <div>
-                            <h3 class="text-xl font-semibold text-gray-900">Recent Threats Detected</h3>
-                            <p class="text-sm text-gray-500">Live web data retrieved via Apify Actors</p>
+                            <h3 class="text-base sm:text-xl font-semibold text-gray-900">Recent Threats Detected</h3>
+                            <p class="text-xs sm:text-sm text-gray-500">Live web data retrieved via Apify Actors</p>
                         </div>
-                        <span class="bg-red-50 text-red-700 text-xs font-bold px-3 py-1 rounded-full border border-red-100 flex items-center gap-1">
+                        <span class="bg-red-50 text-red-700 text-xs font-bold px-3 py-1 rounded-full border border-red-100 flex items-center gap-1 flex-shrink-0">
                             <i data-lucide="alert-circle" class="w-3 h-3"></i> 2 High Risk
                         </span>
                     </div>
 
                     <div class="space-y-4">
                         <!-- Mock Item 1 -->
-                        <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-start gap-5 hover:border-brand-300 transition cursor-pointer">
-                            <div class="bg-red-50 p-3 rounded-lg text-red-600">
-                                <i data-lucide="globe" class="w-6 h-6"></i>
+                        <div class="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 shadow-sm flex items-start gap-3 sm:gap-5 hover:border-brand-300 transition cursor-pointer">
+                            <div class="bg-red-50 p-2 sm:p-3 rounded-lg text-red-600 flex-shrink-0">
+                                <i data-lucide="globe" class="w-5 h-5 sm:w-6 sm:h-6"></i>
                             </div>
-                            <div class="flex-1">
-                                <div class="flex items-center gap-3 mb-1">
-                                    <h4 class="font-semibold text-gray-900">Lookalike Domain Registered</h4>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex flex-wrap items-center gap-2 mb-1">
+                                    <h4 class="font-semibold text-gray-900 text-sm sm:text-base">Lookalike Domain Registered</h4>
                                     <span class="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100">High Severity</span>
-                                    <span class="text-xs text-gray-400 font-mono ml-auto">via doppelspotter/whoisxml-brand-alert</span>
+                                    <span class="text-xs text-gray-400 font-mono hidden sm:inline">via doppelspotter/whoisxml-brand-alert</span>
                                 </div>
-                                <p class="text-sm text-gray-500 mb-2"><code>yourbränd-support.com</code> was registered 4 hours ago via Namecheap.</p>
-                                <div class="bg-gray-50 rounded-lg p-3 text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
-                                    <i data-lucide="bot" class="w-4 h-4 text-brand-500 mt-0.5"></i>
+                                <p class="text-xs sm:text-sm text-gray-500 mb-2"><code>yourbränd-support.com</code> was registered 4 hours ago via Namecheap.</p>
+                                <div class="bg-gray-50 rounded-lg p-2 sm:p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
+                                    <i data-lucide="bot" class="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0"></i>
                                     <p><strong>LLM Analysis:</strong> This domain employs a homoglyph substitution ('ä' instead of 'a') and targets the "support" keyword. Combined with the recent registration date, there is a 98% probability this is being set up for a phishing campaign targeting your customers.</p>
                                 </div>
                             </div>
                         </div>
 
                         <!-- Mock Item 2 -->
-                        <div class="bg-white p-5 rounded-xl border border-gray-200 shadow-sm flex items-start gap-5 hover:border-brand-300 transition cursor-pointer">
-                            <div class="bg-amber-50 p-3 rounded-lg text-amber-600">
-                                <i data-lucide="instagram" class="w-6 h-6"></i>
+                        <div class="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 shadow-sm flex items-start gap-3 sm:gap-5 hover:border-brand-300 transition cursor-pointer">
+                            <div class="bg-amber-50 p-2 sm:p-3 rounded-lg text-amber-600 flex-shrink-0">
+                                <i data-lucide="instagram" class="w-5 h-5 sm:w-6 sm:h-6"></i>
                             </div>
-                            <div class="flex-1">
-                                <div class="flex items-center gap-3 mb-1">
-                                    <h4 class="font-semibold text-gray-900">Fake Social Account</h4>
+                            <div class="flex-1 min-w-0">
+                                <div class="flex flex-wrap items-center gap-2 mb-1">
+                                    <h4 class="font-semibold text-gray-900 text-sm sm:text-base">Fake Social Account</h4>
                                     <span class="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">Medium Severity</span>
-                                    <span class="text-xs text-gray-400 font-mono ml-auto">via apify/instagram-search-scraper</span>
+                                    <span class="text-xs text-gray-400 font-mono hidden sm:inline">via apify/instagram-search-scraper</span>
                                 </div>
-                                <p class="text-sm text-gray-500 mb-2">Instagram profile <code>@official_yourbrand_deals</code> using your logo.</p>
-                                <div class="bg-gray-50 rounded-lg p-3 text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
-                                    <i data-lucide="bot" class="w-4 h-4 text-brand-500 mt-0.5"></i>
+                                <p class="text-xs sm:text-sm text-gray-500 mb-2">Instagram profile <code>@official_yourbrand_deals</code> using your logo.</p>
+                                <div class="bg-gray-50 rounded-lg p-2 sm:p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
+                                    <i data-lucide="bot" class="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0"></i>
                                     <p><strong>LLM Analysis:</strong> Account is scraping and reposting your official content while embedding a suspicious link tree in the bio. Intent is likely affiliate fraud or counterfeit diversion.</p>
                                 </div>
                             </div>
@@ -240,7 +237,7 @@
                             <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold">4</div>
                             <div>
                                 <h4 class="text-xl font-semibold text-gray-900 mb-2">Ranked Digest</h4>
-                                <p class="text-gray-600">Findings are prioritized automatically, accompanied by plain-language explanations of the concrete business risk.</p>
+                                <p class="text-gray-600">Findings are prioritised automatically, accompanied by plain-language explanations of the concrete business risk.</p>
                             </div>
                         </div>
                     </div>
@@ -254,7 +251,7 @@
                         <div class="space-y-6 relative z-10">
                             <div class="bg-gray-800/80 backdrop-blur-sm p-5 rounded-xl border border-gray-700">
                                 <div class="flex items-center gap-3 mb-2">
-                                    <i data-lucide="brain-circuit" class="w-5 h-5 text-brand-400"></i>
+                                    <i data-lucide="brain-circuit" class="w-5 h-5 text-sky-400"></i>
                                     <h4 class="font-semibold text-white">Classifies Intent</h4>
                                 </div>
                                 <p class="text-sm text-gray-400">Goes beyond dumb keyword matching to understand context at scale—separating legitimate mentions from malicious activity.</p>
@@ -265,7 +262,7 @@
                                     <i data-lucide="bar-chart-3" class="w-5 h-5 text-purple-400"></i>
                                     <h4 class="font-semibold text-white">Scores Severity</h4>
                                 </div>
-                                <p class="text-sm text-gray-400">Doesn't just dump raw data. Automatically prioritizes threats so users can act immediately on what matters most.</p>
+                                <p class="text-sm text-gray-400">Doesn't just dump raw data. Automatically prioritises threats so users can act immediately on what matters most.</p>
                             </div>
                             
                             <div class="bg-gray-800/80 backdrop-blur-sm p-5 rounded-xl border border-gray-700">
@@ -315,38 +312,38 @@
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="bg-gray-50 border-b border-gray-200">
-                                <th class="p-4 font-semibold text-gray-900">Surface</th>
-                                <th class="p-4 font-semibold text-gray-900">Apify Actor</th>
-                                <th class="p-4 font-semibold text-gray-900">Function</th>
+                                <th class="p-3 sm:p-4 font-semibold text-gray-900 text-sm">Surface</th>
+                                <th class="p-3 sm:p-4 font-semibold text-gray-900 text-sm">Apify Actor</th>
+                                <th class="p-3 sm:p-4 font-semibold text-gray-900 text-sm hidden md:table-cell">Function</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200">
                             <tr>
-                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap"><i data-lucide="share-2" class="w-4 h-4 inline mr-2 text-brand-500"></i>Social Media</td>
-                                <td class="p-4 font-mono text-sm text-gray-600">
+                                <td class="p-3 sm:p-4 font-medium text-gray-900 whitespace-nowrap text-sm"><i data-lucide="share-2" class="w-4 h-4 inline mr-1 text-brand-500"></i>Social Media</td>
+                                <td class="p-3 sm:p-4 font-mono text-xs text-gray-600">
                                     apify/instagram-search-scraper<br>
                                     data-slayer/twitter-search<br>
                                     apify/facebook-search-scraper
                                 </td>
-                                <td class="p-4 text-sm text-gray-600">Keyword search across platforms to identify impersonator accounts.</td>
+                                <td class="p-3 sm:p-4 text-sm text-gray-600 hidden md:table-cell">Keyword search across platforms to identify impersonator accounts.</td>
                             </tr>
                             <tr class="bg-brand-50">
-                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap"><i data-lucide="globe-2" class="w-4 h-4 inline mr-2 text-brand-500"></i>New Domains</td>
-                                <td class="p-4 font-mono text-sm text-brand-700 font-semibold">
+                                <td class="p-3 sm:p-4 font-medium text-gray-900 whitespace-nowrap text-sm"><i data-lucide="globe-2" class="w-4 h-4 inline mr-1 text-brand-500"></i>New Domains</td>
+                                <td class="p-3 sm:p-4 font-mono text-xs text-brand-700 font-semibold">
                                     doppelspotter/whoisxml-brand-alert<br>
                                     <span class="text-xs font-sans font-normal text-brand-600 bg-brand-100 px-2 py-0.5 rounded mt-1 inline-block">Published for Hackathon</span>
                                 </td>
-                                <td class="p-4 text-sm text-gray-700">Wraps WhoisXML Brand Alert API. Detects domains containing brand keywords registered in the past 24 hours.</td>
+                                <td class="p-3 sm:p-4 text-sm text-gray-700 hidden md:table-cell">Wraps WhoisXML Brand Alert API. Detects domains containing brand keywords registered in the past 24 hours.</td>
                             </tr>
                             <tr>
-                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap"><i data-lucide="search" class="w-4 h-4 inline mr-2 text-brand-500"></i>Web / Google</td>
-                                <td class="p-4 font-mono text-sm text-gray-600">apify/google-search-scraper</td>
-                                <td class="p-4 text-sm text-gray-600">Surfaces websites misusing brand names in titles and URLs.</td>
+                                <td class="p-3 sm:p-4 font-medium text-gray-900 whitespace-nowrap text-sm"><i data-lucide="search" class="w-4 h-4 inline mr-1 text-brand-500"></i>Web / Google</td>
+                                <td class="p-3 sm:p-4 font-mono text-xs text-gray-600">apify/google-search-scraper</td>
+                                <td class="p-3 sm:p-4 text-sm text-gray-600 hidden md:table-cell">Surfaces websites misusing brand names in titles and URLs.</td>
                             </tr>
                             <tr>
-                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap"><i data-lucide="smartphone" class="w-4 h-4 inline mr-2 text-brand-500"></i>App Stores</td>
-                                <td class="p-4 font-mono text-sm text-gray-600">apilab/google-play-scraper</td>
-                                <td class="p-4 text-sm text-gray-600">Detects clone apps bypassing store security.</td>
+                                <td class="p-3 sm:p-4 font-medium text-gray-900 whitespace-nowrap text-sm"><i data-lucide="smartphone" class="w-4 h-4 inline mr-1 text-brand-500"></i>App Stores</td>
+                                <td class="p-3 sm:p-4 font-mono text-xs text-gray-600">apilab/google-play-scraper</td>
+                                <td class="p-3 sm:p-4 text-sm text-gray-600 hidden md:table-cell">Detects clone apps bypassing store security.</td>
                             </tr>
                         </tbody>
                     </table>
@@ -377,7 +374,7 @@
                         <span class="font-bold text-xl">3</span>
                     </div>
                     <h3 class="text-xl font-bold mb-3">Path 3: Build an Actor</h3>
-                    <p class="text-gray-400">The <code>doppelspotter/whoisxml-brand-alert</code> wrapper is published to the Apify Store as a standalone, reusable Actor. Any developer building domain monitoring tools can utilize it.</p>
+                    <p class="text-gray-400">The <code>doppelspotter/whoisxml-brand-alert</code> wrapper is published to the Apify Store as a standalone, reusable Actor. Any developer building domain monitoring tools can utilise it.</p>
                 </div>
             </div>
 
