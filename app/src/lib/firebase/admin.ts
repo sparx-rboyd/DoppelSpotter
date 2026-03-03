@@ -25,7 +25,7 @@ function getAdminApp(): App {
 
 const adminApp = getAdminApp();
 const adminAuth = getAuth(adminApp);
-const adminDb = getFirestore(adminApp);
+const adminDb = getFirestore(adminApp, process.env.FIRESTORE_DATABASE_ID ?? '(default)');
 
 export { adminApp, adminAuth, adminDb };
 

@@ -35,8 +35,9 @@ AI-powered brand protection for SMEs. This repository is the submission for the 
 │       │       ├── brands/route.ts           # Brand CRUD
 │       │       ├── brands/[brandId]/route.ts
 │       │       ├── brands/[brandId]/findings/route.ts
+│       │       ├── findings/route.ts         # Cross-brand recent findings (dashboard)
 │       │       ├── scan/route.ts             # Trigger scans, poll status
-│       │       └── webhooks/apify/route.ts   # Apify webhook receiver
+│       │       └── webhooks/apify/route.ts   # Apify webhook receiver + LLM analysis pipeline
 │       ├── components/    # React components
 │       │   ├── ui/        # Primitives: Button, Card, Badge, Input
 │       │   ├── auth-guard.tsx
@@ -53,7 +54,7 @@ AI-powered brand protection for SMEs. This repository is the submission for the 
 │           │   └── auth-context.tsx          # React auth context provider
 │           ├── apify/
 │           │   ├── actors.ts                 # Actor registry + CORE_ACTOR_IDS
-│           │   └── client.ts                 # Apify client wrapper + runActor()
+│           │   └── client.ts                 # Apify client: startActorRun(), fetchDatasetItems(), runActor()
 │           └── analysis/
 │               ├── openrouter.ts             # OpenRouter LLM client
 │               ├── prompts.ts                # System prompt + buildAnalysisPrompt()
@@ -126,6 +127,8 @@ The Cloud Build trigger uses an **included files filter of `app/**`**, so change
 
 **GCP setup:** See `docs/GCP_SETUP.md` for complete step-by-step instructions including Firebase, Firestore, Artifact Registry, Cloud Build, and Secret Manager configuration.
 
+**Scan pipeline setup:** See `docs/PIPELINE_SETUP.md` for API key acquisition (Apify, OpenRouter, WhoisXML) and ngrok tunnel configuration for local webhook testing.
+
 ### Landing Page
 
 The `landing-page/` directory is deployed as a static site to **Cloudflare Pages** at `pitch.doppelspotter.com`.
@@ -149,8 +152,11 @@ All required environment variables are documented in `app/.env.local.example`. K
 | `WHOISXML_API_KEY` | Secret Manager → Cloud Run | WhoisXML Brand Alert actor |
 | `OPENROUTER_API_KEY` | Secret Manager → Cloud Run | LLM analysis |
 | `OPENROUTER_MODEL` | `.env.local` / Cloud Run | LLM model selection (default: `anthropic/claude-3.5-haiku`) |
+| `APP_URL` | `.env.local` / Cloud Run | Public base URL — used to construct Apify webhook callback URLs (use ngrok for local dev) |
 
 In production, secrets are stored in **GCP Secret Manager** and injected into Cloud Run at deploy time by `cloudbuild.yaml`.
+
+See `docs/PIPELINE_SETUP.md` for a step-by-step guide to obtaining API keys and configuring local webhook testing with ngrok.
 
 ---
 
@@ -159,7 +165,7 @@ In production, secrets are stored in **GCP Secret Manager** and injected into Cl
 ```
 users/{userId}                    ← Managed by Firebase Auth (no Firestore doc needed)
 brands/{brandId}                  ← BrandProfile: name, keywords, officialDomains
-scans/{scanId}                    ← Scan: brandId, status, actorIds, findingCount
+scans/{scanId}                    ← Scan: brandId, status, actorIds, actorRunIds, actorRuns, completedRunCount, findingCount
 findings/{findingId}              ← Finding: source, severity, title, llmAnalysis, rawData
 ```
 

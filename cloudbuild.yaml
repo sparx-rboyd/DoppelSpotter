@@ -63,7 +63,8 @@ steps:
       - '--memory=512Mi'
       - '--cpu=1'
       - '--port=8080'
-      - '--set-secrets=FIREBASE_SERVICE_ACCOUNT_KEY=firebase-service-account:latest,APIFY_API_TOKEN=apify-api-token:latest,OPENROUTER_API_KEY=openrouter-api-key:latest,APIFY_WEBHOOK_SECRET=apify-webhook-secret:latest'
+      - '--set-secrets=FIREBASE_SERVICE_ACCOUNT_KEY=firebase-service-account:latest,APIFY_API_TOKEN=apify-api-token:latest,OPENROUTER_API_KEY=openrouter-api-key:latest,APIFY_WEBHOOK_SECRET=apify-webhook-secret:latest,WHOISXML_API_KEY=whoisxml-api-key:latest'
+      - '--timeout=600'
 
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPO}/${_SERVICE}:$COMMIT_SHA'

@@ -43,6 +43,7 @@ export async function POST(request: NextRequest) {
 
   const docRef = adminDb.collection('brands').doc();
   const now = FieldValue.serverTimestamp();
+  const nowDate = new Date();
 
   const brandData = {
     userId: uid,
@@ -55,5 +56,9 @@ export async function POST(request: NextRequest) {
 
   await docRef.set(brandData);
 
-  return NextResponse.json({ data: { id: docRef.id, ...brandData } }, { status: 201 });
+  // Return JS Dates in the response — FieldValue.serverTimestamp() is a write sentinel
+  // that only resolves inside Firestore and cannot be serialised directly.
+  return NextResponse.json({
+    data: { id: docRef.id, ...brandData, createdAt: nowDate, updatedAt: nowDate },
+  }, { status: 201 });
 }

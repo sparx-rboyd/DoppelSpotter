@@ -1,7 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { adminDb } from '@/lib/firebase/admin';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { Scan } from '@/lib/types';
+import { fetchDatasetItems } from '@/lib/apify/client';
+import { chatCompletion } from '@/lib/analysis/openrouter';
+import { SYSTEM_PROMPT, buildAnalysisPrompt } from '@/lib/analysis/prompts';
+import { parseAnalysisOutput } from '@/lib/analysis/types';
+import type { BrandProfile, Finding, Scan } from '@/lib/types';
+
+/** Maximum items to analyse per actor run — caps LLM cost and latency */
+const MAX_ITEMS_PER_RUN = 50;
 
 /**
  * POST /api/webhooks/apify
@@ -47,16 +54,17 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Missing resource.id' }, { status: 400 });
   }
 
-  // Look up the scan associated with this actor run
-  // Convention: we store actorRunId on the scan document when triggering
+  // Look up the scan that owns this actor run using array-contains
+  // (actorRunIds is a flat array of Apify run IDs stored on the scan document)
   const snapshot = await adminDb
     .collection('scans')
-    .where('apifyRunId', '==', resource.id)
+    .where('actorRunIds', 'array-contains', resource.id)
     .limit(1)
     .get();
 
   if (snapshot.empty) {
     // Unknown run — acknowledge but take no action
+    console.warn(`[webhook] No scan found for runId=${resource.id}`);
     return NextResponse.json({ received: true });
   }
 
@@ -64,23 +72,222 @@ export async function POST(request: NextRequest) {
   const scan = scanDoc.data() as Scan;
 
   if (resource.status === 'SUCCEEDED') {
-    // TODO: Fetch dataset items, run LLM analysis, write findings to Firestore
-    // analyseScanResults({ scanId: scanDoc.id, brand, datasetId: resource.defaultDatasetId });
-
-    await scanDoc.ref.update({
-      status: 'completed',
-      completedAt: FieldValue.serverTimestamp(),
+    await handleSucceededRun({
+      runId: resource.id,
+      datasetId: resource.defaultDatasetId,
+      scanDoc,
+      scan,
     });
   } else if (resource.status === 'FAILED' || resource.status === 'ABORTED') {
-    await scanDoc.ref.update({
-      status: 'failed',
-      errorMessage: `Actor run ${resource.id} ended with status: ${resource.status}`,
-      completedAt: FieldValue.serverTimestamp(),
-    });
+    console.warn(`[webhook] Actor run ${resource.id} ended with status: ${resource.status}`);
+    await markActorRunComplete(scanDoc, scan, resource.id, 'failed');
   }
 
-  // Suppress TS unused variable warning on scan
-  void scan;
-
   return NextResponse.json({ received: true });
+}
+
+/**
+ * Handle a succeeded actor run: fetch dataset items, run LLM analysis on each,
+ * write findings to Firestore, then mark the actor run as complete.
+ */
+async function handleSucceededRun({
+  runId,
+  datasetId,
+  scanDoc,
+  scan,
+}: {
+  runId: string;
+  datasetId: string;
+  scanDoc: FirebaseFirestore.QueryDocumentSnapshot;
+  scan: Scan;
+}) {
+  // Fetch the brand profile for context in the LLM prompt
+  const brandDoc = await adminDb.collection('brands').doc(scan.brandId).get();
+  if (!brandDoc.exists) {
+    console.error(`[webhook] Brand ${scan.brandId} not found for scan ${scanDoc.id}`);
+    await markActorRunComplete(scanDoc, scan, runId, 'failed');
+    return;
+  }
+  const brand = brandDoc.data() as BrandProfile;
+
+  // Determine the source (surface) for this actor run
+  const actorRunInfo = scan.actorRuns?.[runId];
+  const source = actorRunInfo?.source ?? 'unknown';
+  const actorId = actorRunInfo?.actorId ?? 'unknown';
+
+  // Fetch raw scraping results from Apify's dataset
+  let items: Record<string, unknown>[];
+  try {
+    items = await fetchDatasetItems(datasetId);
+  } catch (err) {
+    console.error(`[webhook] Failed to fetch dataset ${datasetId}:`, err);
+    await markActorRunComplete(scanDoc, scan, runId, 'failed');
+    return;
+  }
+
+  if (items.length === 0) {
+    console.log(`[webhook] No items in dataset ${datasetId} for actor ${actorId}`);
+    await markActorRunComplete(scanDoc, scan, runId, 'succeeded');
+    return;
+  }
+
+  // Cap items to control LLM cost
+  const itemsToAnalyse = items.slice(0, MAX_ITEMS_PER_RUN);
+  if (items.length > MAX_ITEMS_PER_RUN) {
+    console.warn(
+      `[webhook] Dataset ${datasetId} has ${items.length} items — truncating to ${MAX_ITEMS_PER_RUN}`,
+    );
+  }
+
+  // Analyse each item sequentially to avoid rate-limiting OpenRouter
+  let newFindingCount = 0;
+  for (const item of itemsToAnalyse) {
+    try {
+      const analysisResult = await analyseItem({ brand, source, actorId, item });
+      if (!analysisResult.isFalsePositive) {
+        const findingRef = adminDb.collection('findings').doc();
+        const finding: Omit<Finding, 'id'> = {
+          scanId: scan.id ?? scanDoc.id,
+          brandId: scan.brandId,
+          userId: scan.userId,
+          source,
+          actorId,
+          severity: analysisResult.severity,
+          title: analysisResult.title,
+          description: analysisResult.llmAnalysis,
+          llmAnalysis: analysisResult.llmAnalysis,
+          url: extractUrl(item),
+          rawData: item,
+          createdAt: FieldValue.serverTimestamp() as unknown as import('firebase-admin/firestore').Timestamp,
+        };
+        await findingRef.set(finding);
+        newFindingCount++;
+      }
+    } catch (err) {
+      // On LLM failure, write a fallback finding so no data is silently lost
+      console.error(`[webhook] LLM analysis failed for item in dataset ${datasetId}:`, err);
+      const findingRef = adminDb.collection('findings').doc();
+      const fallbackFinding: Omit<Finding, 'id'> = {
+        scanId: scan.id ?? scanDoc.id,
+        brandId: scan.brandId,
+        userId: scan.userId,
+        source,
+        actorId,
+        severity: 'medium',
+        title: 'Unanalysed result — review manually',
+        description: 'LLM analysis failed for this item. Raw data is preserved for manual review.',
+        llmAnalysis: 'LLM analysis failed for this item. Raw data is preserved for manual review.',
+        url: extractUrl(item),
+        rawData: item,
+        createdAt: FieldValue.serverTimestamp() as unknown as import('firebase-admin/firestore').Timestamp,
+      };
+      await findingRef.set(fallbackFinding);
+      newFindingCount++;
+    }
+  }
+
+  console.log(
+    `[webhook] Actor ${actorId} (run ${runId}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items`,
+  );
+
+  await markActorRunComplete(scanDoc, scan, runId, 'succeeded', newFindingCount);
+}
+
+/**
+ * Run a single dataset item through the LLM for classification.
+ */
+async function analyseItem({
+  brand,
+  source,
+  actorId,
+  item,
+}: {
+  brand: BrandProfile;
+  source: Finding['source'];
+  actorId: string;
+  item: Record<string, unknown>;
+}): Promise<{ severity: Finding['severity']; title: string; llmAnalysis: string; isFalsePositive: boolean }> {
+  void actorId;
+  const prompt = buildAnalysisPrompt({
+    brandName: brand.name,
+    keywords: brand.keywords,
+    officialDomains: brand.officialDomains,
+    source,
+    rawData: item,
+  });
+
+  const raw = await chatCompletion([
+    { role: 'system', content: SYSTEM_PROMPT },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseAnalysisOutput(raw);
+  if (!parsed) {
+    throw new Error(`Failed to parse LLM output: ${raw.slice(0, 200)}`);
+  }
+
+  return parsed;
+}
+
+/**
+ * Use a Firestore transaction to atomically mark an actor run as complete,
+ * increment completedRunCount, update findingCount, and — if all runs are
+ * now done — set the overall scan status to 'completed' or 'failed'.
+ */
+async function markActorRunComplete(
+  scanDoc: FirebaseFirestore.QueryDocumentSnapshot,
+  scan: Scan,
+  runId: string,
+  runStatus: 'succeeded' | 'failed',
+  newFindingCount = 0,
+) {
+  const totalRunCount = scan.actorRunIds?.length ?? 1;
+
+  await adminDb.runTransaction(async (tx) => {
+    const freshSnap = await tx.get(scanDoc.ref);
+    const fresh = freshSnap.data() as Scan;
+
+    const updatedCompletedCount = (fresh.completedRunCount ?? 0) + 1;
+    const allDone = updatedCompletedCount >= totalRunCount;
+
+    const updates: Record<string, unknown> = {
+      [`actorRuns.${runId}.status`]: runStatus,
+      completedRunCount: FieldValue.increment(1),
+      findingCount: FieldValue.increment(newFindingCount),
+    };
+
+    if (allDone) {
+      // Determine overall scan outcome: completed if at least one actor succeeded
+      const actorRuns = fresh.actorRuns ?? {};
+      const anySucceeded =
+        runStatus === 'succeeded' ||
+        Object.values(actorRuns).some((r) => r.status === 'succeeded');
+
+      updates.status = anySucceeded ? 'completed' : 'failed';
+      updates.completedAt = FieldValue.serverTimestamp();
+
+      if (!anySucceeded) {
+        updates.errorMessage = 'All actor runs failed or were aborted';
+      }
+
+      console.log(`[webhook] Scan ${scanDoc.id} is complete — status: ${updates.status}`);
+    }
+
+    tx.update(scanDoc.ref, updates);
+  });
+}
+
+/**
+ * Best-effort extraction of a URL from a dataset item.
+ * Different actors use different field names for the source URL.
+ */
+function extractUrl(item: Record<string, unknown>): string | undefined {
+  const candidates = ['url', 'link', 'pageUrl', 'profileUrl', 'appUrl', 'storeUrl'];
+  for (const key of candidates) {
+    const val = item[key];
+    if (typeof val === 'string' && val.startsWith('http')) {
+      return val;
+    }
+  }
+  return undefined;
 }

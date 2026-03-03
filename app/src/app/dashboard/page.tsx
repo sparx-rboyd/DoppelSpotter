@@ -1,58 +1,50 @@
 'use client';
 
-import { AlertCircle, Plus } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { AlertCircle, Plus, Shield } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { FindingCard } from '@/components/finding-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/lib/firebase/auth-context';
 import type { Finding } from '@/lib/types';
 
-// Mock findings matching the landing page mockup — replaced with live data in a future task
-const MOCK_FINDINGS: Finding[] = [
-  {
-    id: 'mock-1',
-    scanId: 'mock-scan-1',
-    brandId: 'mock-brand-1',
-    userId: 'mock-user',
-    source: 'domain',
-    actorId: 'doppelspotter/whoisxml-brand-alert',
-    severity: 'high',
-    title: 'Lookalike Domain Registered',
-    description: 'yourbränd-support.com was registered 4 hours ago via Namecheap.',
-    llmAnalysis:
-      "This domain employs a homoglyph substitution ('ä' instead of 'a') and targets the \"support\" keyword. Combined with the recent registration date, there is a 98% probability this is being set up for a phishing campaign targeting your customers.",
-    url: 'https://example.com',
-    rawData: {},
-    createdAt: null as unknown as import('firebase-admin/firestore').Timestamp,
-  },
-  {
-    id: 'mock-2',
-    scanId: 'mock-scan-1',
-    brandId: 'mock-brand-1',
-    userId: 'mock-user',
-    source: 'instagram',
-    actorId: 'apify/instagram-search-scraper',
-    severity: 'medium',
-    title: 'Fake Social Account',
-    description: 'Instagram profile @official_yourbrand_deals using your logo.',
-    llmAnalysis:
-      'Account is scraping and reposting your official content while embedding a suspicious link tree in the bio. Intent is likely affiliate fraud or counterfeit diversion.',
-    rawData: {},
-    createdAt: null as unknown as import('firebase-admin/firestore').Timestamp,
-  },
-];
-
-const highCount = MOCK_FINDINGS.filter((f) => f.severity === 'high').length;
-
 export default function DashboardPage() {
+  const { getIdToken } = useAuth();
+  const [findings, setFindings] = useState<Finding[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    async function fetchFindings() {
+      setError('');
+      try {
+        const token = await getIdToken();
+        const res = await fetch('/api/findings', {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) throw new Error('Failed to load findings');
+        const json = await res.json();
+        setFindings(json.data ?? []);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchFindings();
+  }, [getIdToken]);
+
+  const highCount = findings.filter((f) => f.severity === 'high').length;
+
   return (
     <AuthGuard>
       <Navbar />
 
       <main className="pt-16 min-h-screen bg-gray-50/50">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
 
           {/* Page header */}
           <div className="flex items-center justify-between mb-8 gap-4">
@@ -74,7 +66,13 @@ export default function DashboardPage() {
             <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-4">
               <div>
                 <h2 className="text-base sm:text-lg font-semibold text-gray-900">Recent Threats Detected</h2>
-                <p className="text-xs sm:text-sm text-gray-500">Showing mock data — connect a brand profile to run live scans</p>
+                <p className="text-xs sm:text-sm text-gray-500">
+                  {loading
+                    ? 'Loading…'
+                    : findings.length > 0
+                      ? `${findings.length} finding${findings.length !== 1 ? 's' : ''} across all monitored brands`
+                      : 'No findings yet — run a scan to start monitoring'}
+                </p>
               </div>
               {highCount > 0 && (
                 <Badge variant="danger">
@@ -84,22 +82,52 @@ export default function DashboardPage() {
               )}
             </div>
 
+            {/* Loading state */}
+            {loading && (
+              <div className="flex justify-center py-16">
+                <div className="w-6 h-6 border-2 border-brand-600 border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
+
+            {/* Error state */}
+            {!loading && error && (
+              <div className="p-4 sm:p-6">
+                <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-4 py-3">
+                  {error}
+                </p>
+              </div>
+            )}
+
+            {/* Empty state */}
+            {!loading && !error && findings.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 gap-3">
+                <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center">
+                  <Shield className="w-5 h-5 text-gray-400" />
+                </div>
+                <p className="text-sm text-gray-500">No findings yet. Run a scan on a brand to see results here.</p>
+              </div>
+            )}
+
             {/* Findings list */}
-            <div className="p-4 sm:p-6 space-y-4">
-              {MOCK_FINDINGS.map((finding) => (
-                <FindingCard key={finding.id} finding={finding} />
-              ))}
-            </div>
+            {!loading && !error && findings.length > 0 && (
+              <div className="p-4 sm:p-6 space-y-4">
+                {findings.map((finding) => (
+                  <FindingCard key={finding.id} finding={finding} />
+                ))}
+              </div>
+            )}
           </div>
 
-          {/* Empty state hint */}
-          <div className="mt-6 bg-brand-50 border border-brand-100 rounded-xl p-5 text-sm text-brand-700">
-            <strong>Getting started:</strong> Add a brand profile to begin monitoring.
-            DoppelSpotter will scan social media, newly-registered domains, Google Search, and app stores for potential infringements.{' '}
-            <Link href="/brands/new" className="font-semibold underline hover:no-underline">
-              Add your first brand →
-            </Link>
-          </div>
+          {/* Getting started hint — shown when no findings exist */}
+          {!loading && findings.length === 0 && (
+            <div className="mt-6 bg-brand-50 border border-brand-100 rounded-xl p-5 text-sm text-brand-700">
+              <strong>Getting started:</strong> Add a brand profile to begin monitoring.
+              DoppelSpotter will scan social media, newly-registered domains, Google Search, and app stores for potential infringements.{' '}
+              <Link href="/brands/new" className="font-semibold underline hover:no-underline">
+                Add your first brand →
+              </Link>
+            </div>
+          )}
         </div>
       </main>
     </AuthGuard>

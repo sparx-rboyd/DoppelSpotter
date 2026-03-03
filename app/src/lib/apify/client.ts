@@ -23,8 +23,9 @@ export interface ActorRunResult {
 /**
  * Build the actor input payload for a given actor and brand profile.
  * Each actor expects a different input shape — map brand profile fields accordingly.
+ * Exported so the scan route can inspect inputs during start-up logging.
  */
-function buildActorInput(actorId: string, brand: BrandProfile): Record<string, unknown> {
+export function buildActorInput(actorId: string, brand: BrandProfile): Record<string, unknown> {
   const searchTerms = [brand.name, ...brand.keywords];
   const primaryQuery = searchTerms.join(' OR ');
 
@@ -64,8 +65,44 @@ function buildActorInput(actorId: string, brand: BrandProfile): Record<string, u
 }
 
 /**
+ * Start a single Apify actor run asynchronously (non-blocking).
+ * Attaches a webhook so Apify notifies the app when the run completes.
+ * The webhook URL must be publicly reachable (use ngrok for local dev).
+ */
+export async function startActorRun(
+  actor: ActorConfig,
+  brand: BrandProfile,
+  webhookUrl: string,
+): Promise<{ runId: string }> {
+  const client = getClient();
+  const input = buildActorInput(actor.actorId, brand);
+
+  const run = await client.actor(actor.actorId).start(input, {
+    webhooks: [
+      {
+        eventTypes: ['ACTOR.RUN.SUCCEEDED', 'ACTOR.RUN.FAILED', 'ACTOR.RUN.ABORTED'],
+        requestUrl: webhookUrl,
+        headersTemplate: `{"X-Apify-Webhook-Secret": "${process.env.APIFY_WEBHOOK_SECRET}"}`,
+      },
+    ],
+  });
+
+  return { runId: run.id };
+}
+
+/**
+ * Fetch all items from an Apify dataset.
+ * Used by the webhook handler after an actor run succeeds.
+ */
+export async function fetchDatasetItems(datasetId: string): Promise<Record<string, unknown>[]> {
+  const client = getClient();
+  const { items } = await client.dataset(datasetId).listItems();
+  return items as Record<string, unknown>[];
+}
+
+/**
  * Run a single Apify actor synchronously and return its dataset items.
- * For long-running actors, consider using startRun + webhook instead.
+ * Kept for testing/CLI use — the pipeline uses startActorRun() + webhooks instead.
  */
 export async function runActor(
   actor: ActorConfig,

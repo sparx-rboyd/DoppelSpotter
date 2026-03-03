@@ -40,6 +40,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     return errorResponse('Invalid JSON body');
   }
 
+  const updatedAt = new Date();
   const updates: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
   if (body.name) updates.name = body.name.trim();
   if (body.keywords) updates.keywords = body.keywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
@@ -47,7 +48,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   await adminDb.collection('brands').doc(brandId).update(updates);
 
-  return NextResponse.json({ data: { id: brandId, ...doc.data(), ...updates } });
+  // Substitute a real Date for the sentinel so the response is serialisable
+  return NextResponse.json({ data: { id: brandId, ...doc.data(), ...updates, updatedAt } });
 }
 
 // DELETE /api/brands/[brandId]

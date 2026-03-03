@@ -50,12 +50,28 @@ export interface Finding {
 
 export type ScanStatus = 'pending' | 'running' | 'completed' | 'failed';
 
+export type ActorRunStatus = 'pending' | 'running' | 'succeeded' | 'failed';
+
+export interface ActorRunInfo {
+  actorId: string;
+  source: FindingSource;
+  /** Apify run status for this individual actor */
+  status: ActorRunStatus;
+}
+
 export interface Scan {
   id: string;
   brandId: string;
   userId: string;
   status: ScanStatus;
+  /** The actor IDs requested for this scan */
   actorIds: string[];
+  /** Flat array of Apify run IDs — used for Firestore array-contains queries in the webhook handler */
+  actorRunIds?: string[];
+  /** Per-actor run details, keyed by Apify run ID */
+  actorRuns?: Record<string, ActorRunInfo>;
+  /** How many actor runs have completed (succeeded or failed) — used to detect scan completion */
+  completedRunCount?: number;
   findingCount: number;
   errorMessage?: string;
   startedAt: Timestamp;

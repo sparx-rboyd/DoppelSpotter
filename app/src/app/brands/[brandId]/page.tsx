@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Play, AlertCircle, Shield } from 'lucide-react';
+import { ArrowLeft, Play, AlertCircle, Shield, CheckCircle2, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
@@ -12,7 +12,9 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/lib/firebase/auth-context';
 import { formatDate } from '@/lib/utils';
-import type { BrandProfile, Finding } from '@/lib/types';
+import type { BrandProfile, Finding, Scan } from '@/lib/types';
+
+const POLL_INTERVAL_MS = 5_000;
 
 export default function BrandDetailPage() {
   const { brandId } = useParams<{ brandId: string }>();
@@ -22,10 +24,24 @@ export default function BrandDetailPage() {
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
+  const [activeScan, setActiveScan] = useState<Scan | null>(null);
+  const [scanComplete, setScanComplete] = useState(false);
   const [error, setError] = useState('');
 
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  // Fetch brand profile and initial findings
   useEffect(() => {
     async function fetchData() {
+      setError('');
+      setLoading(true);
       try {
         const token = await getIdToken();
         const [brandRes, findingsRes] = await Promise.all([
@@ -48,13 +64,33 @@ export default function BrandDetailPage() {
       }
     }
     fetchData();
+    return () => stopPolling();
   }, [brandId, getIdToken]);
+
+  async function refreshFindings() {
+    try {
+      const token = await getIdToken();
+      const res = await fetch(`/api/brands/${brandId}/findings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const json = await res.json();
+        setFindings(json.data ?? []);
+      }
+    } catch {
+      // Non-critical — findings will just not refresh
+    }
+  }
 
   async function triggerScan() {
     setScanning(true);
+    setError('');
+    setScanComplete(false);
+    setActiveScan(null);
+
     try {
       const token = await getIdToken();
-      await fetch('/api/scan', {
+      const res = await fetch('/api/scan', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -62,21 +98,59 @@ export default function BrandDetailPage() {
         },
         body: JSON.stringify({ brandId }),
       });
-      // TODO: poll for scan completion and refresh findings
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? 'Failed to start scan');
+      }
+
+      const json = await res.json();
+      const scanId: string = json.data.scanId;
+
+      // Begin polling for scan completion
+      pollRef.current = setInterval(async () => {
+        try {
+          const pollToken = await getIdToken();
+          const pollRes = await fetch(`/api/scan?scanId=${scanId}`, {
+            headers: { Authorization: `Bearer ${pollToken}` },
+          });
+          if (!pollRes.ok) return;
+
+          const pollJson = await pollRes.json();
+          const scan = pollJson.data as Scan;
+          setActiveScan(scan);
+
+          if (scan.status === 'completed') {
+            stopPolling();
+            setScanning(false);
+            setScanComplete(true);
+            await refreshFindings();
+          } else if (scan.status === 'failed') {
+            stopPolling();
+            setScanning(false);
+            setError(scan.errorMessage ?? 'Scan failed');
+            setActiveScan(null);
+          }
+        } catch {
+          // Transient poll failure — keep trying
+        }
+      }, POLL_INTERVAL_MS);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Scan failed');
-    } finally {
       setScanning(false);
+      setError(err instanceof Error ? err.message : 'Scan failed');
     }
   }
 
   const highCount = findings.filter((f) => f.severity === 'high').length;
+  const completedRuns = activeScan?.completedRunCount ?? 0;
+  const totalRuns = activeScan?.actorRunIds?.length ?? activeScan?.actorIds?.length ?? 0;
+  const progressPct = totalRuns > 0 ? Math.round((completedRuns / totalRuns) * 100) : 0;
 
   return (
     <AuthGuard>
       <Navbar />
       <main className="pt-16 min-h-screen bg-gray-50/50">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
 
           {/* Back link */}
           <div className="flex items-center gap-3 mb-8">
@@ -129,6 +203,47 @@ export default function BrandDetailPage() {
                 </Card>
               </div>
 
+              {/* Scan progress banner */}
+              {scanning && activeScan && (
+                <div className="mb-6 bg-brand-50 border border-brand-200 rounded-xl px-5 py-4">
+                  <div className="flex items-center justify-between gap-4 mb-3">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 text-brand-600 animate-spin" />
+                      <span className="text-sm font-medium text-brand-800">
+                        Scanning across {totalRuns} source{totalRuns !== 1 ? 's' : ''}…
+                      </span>
+                    </div>
+                    <span className="text-xs text-brand-600 tabular-nums">
+                      {completedRuns} / {totalRuns} completed
+                    </span>
+                  </div>
+                  <div className="h-1.5 bg-brand-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-brand-600 rounded-full transition-all duration-500"
+                      style={{ width: `${progressPct}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Scan in progress but no active scan data yet (just started) */}
+              {scanning && !activeScan && (
+                <div className="mb-6 bg-brand-50 border border-brand-200 rounded-xl px-5 py-4 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 text-brand-600 animate-spin" />
+                  <span className="text-sm font-medium text-brand-800">Starting scan…</span>
+                </div>
+              )}
+
+              {/* Scan complete banner */}
+              {scanComplete && !scanning && (
+                <div className="mb-6 bg-green-50 border border-green-200 rounded-xl px-5 py-4 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-green-600" />
+                  <span className="text-sm font-medium text-green-800">
+                    Scan complete — {findings.length} finding{findings.length !== 1 ? 's' : ''} detected
+                  </span>
+                </div>
+              )}
+
               {/* Findings panel */}
               <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-4">
@@ -144,7 +259,7 @@ export default function BrandDetailPage() {
                       </Badge>
                     )}
                   </div>
-                  <Button size="sm" onClick={triggerScan} loading={scanning}>
+                  <Button size="sm" onClick={triggerScan} loading={scanning} disabled={scanning}>
                     <Play className="w-4 h-4" />
                     Run scan
                   </Button>

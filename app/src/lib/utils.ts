@@ -11,14 +11,18 @@ export function cn(...classes: (string | undefined | null | false)[]): string {
  */
 export function formatDate(date: Date | { toDate(): Date } | null | undefined): string {
   if (!date) return '—';
-  const d = 'toDate' in date ? date.toDate() : date;
-  return new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(d);
+  try {
+    const d = 'toDate' in date ? date.toDate() : date;
+    return new Intl.DateTimeFormat('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(d);
+  } catch {
+    return '—';
+  }
 }
 
 /**
