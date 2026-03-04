@@ -13,9 +13,10 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^8.3.0",
     "apify-client": "^2.11.2",
-    "firebase": "^11.4.0",
-    "firebase-admin": "^13.2.0",
+    "bcryptjs": "^3.0.3",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^0.475.0",
     "next": "^15.2.1",
     "react": "^19.0.0",
@@ -23,6 +24,8 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.14",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",

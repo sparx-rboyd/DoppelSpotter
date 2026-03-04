@@ -37,6 +37,10 @@ AI-powered brand protection for SMEs. This repository is the submission for the 
 │       │   ├── dashboard/page.tsx            # Main findings view
 │       │   ├── brands/                       # Brand management pages
 │       │   └── api/                          # API routes
+│       │       ├── auth/signup/route.ts      # Register (bcrypt hash, set JWT cookie)
+│       │       ├── auth/login/route.ts       # Login (verify hash, set JWT cookie)
+│       │       ├── auth/logout/route.ts      # Clear JWT cookie
+│       │       ├── auth/me/route.ts          # Return current user from cookie
 │       │       ├── brands/route.ts           # Brand CRUD
 │       │       ├── brands/[brandId]/route.ts
 │       │       ├── brands/[brandId]/findings/route.ts
@@ -53,10 +57,10 @@ AI-powered brand protection for SMEs. This repository is the submission for the 
 │           ├── types.ts                      # Core data model types
 │           ├── utils.ts                      # cn(), formatDate(), etc.
 │           ├── api-utils.ts                  # requireAuth(), errorResponse()
-│           ├── firebase/
-│           │   ├── client.ts                 # Firebase client SDK init
-│           │   ├── admin.ts                  # Firebase Admin SDK (server-side)
-│           │   └── auth-context.tsx          # React auth context provider
+│           ├── firestore.ts                  # Firestore client (ADC, @google-cloud/firestore)
+│           ├── auth/
+│           │   ├── jwt.ts                    # signToken(), verifyToken(), cookie name
+│           │   └── auth-context.tsx          # React auth context provider (cookie-based)
 │           ├── apify/
 │           │   ├── actors.ts                 # Actor registry + CORE_ACTOR_IDS
 │           │   └── client.ts                 # Apify client: startActorRun(), fetchDatasetItems(), runActor()
@@ -65,7 +69,7 @@ AI-powered brand protection for SMEs. This repository is the submission for the 
 │               ├── prompts.ts                # System prompt + buildAnalysisPrompt()
 │               └── types.ts                  # AnalysisOutput + parseAnalysisOutput()
 └── docs/                  # Hackathon reference materials + infrastructure guides (not deployed)
-    ├── GCP_SETUP.md        # Step-by-step GCP/Firebase setup guide ← START HERE
+    ├── GCP_SETUP.md        # Step-by-step GCP setup guide ← START HERE
     ├── CHALLENGE_BRIEF.md
     ├── CHALLENGE_FAQ.md
     └── TOOLS_PROMO_ACCESS.md
@@ -97,8 +101,8 @@ See `PITCH.md` for the full actor suite including v2 stretch goals.
 | Frontend | Next.js 15 (App Router, TypeScript) |
 | Styling | Tailwind CSS v4 (brand palette matches landing page) |
 | Icons | Lucide React |
-| Auth | Firebase Auth (email/password) |
-| Database | Firestore |
+| Auth | Homegrown — bcrypt password hashing + JWT in httpOnly cookie |
+| Database | Firestore (via `@google-cloud/firestore`, ADC on Cloud Run) |
 | File storage | Cloud Storage (planned) |
 | Hosting | GCP Cloud Run |
 | CI/CD | Google Cloud Build (triggers on `app/**` push to `main`) |
@@ -160,13 +164,13 @@ npm run dev
 
 **CI/CD (automatic):**
 Any push to `main` that changes files under `app/**` triggers Cloud Build, which:
-1. Builds the Docker image from `app/Dockerfile` (Node 22, multi-stage)
-2. Pushes to Artifact Registry (`europe-west6-docker.pkg.dev`)
-3. Deploys to Cloud Run (`doppelspotter-app` service, `europe-west6`)
+1. Builds the Docker image from `app/Dockerfile` (Node 22, multi-stage, no build-time secrets)
+2. Pushes to Artifact Registry (`europe-west2-docker.pkg.dev`)
+3. Deploys to Cloud Run (`doppelspotter-app` service, `europe-west2`)
 
 The Cloud Build trigger uses an **included files filter of `app/**`**, so changes to `landing-page/`, `docs/`, `AGENTS.md`, etc. do NOT trigger a build.
 
-**GCP setup:** See `docs/GCP_SETUP.md` for complete step-by-step instructions including Firebase, Firestore, Artifact Registry, Cloud Build, and Secret Manager configuration.
+**GCP setup:** See `docs/GCP_SETUP.md` for complete step-by-step instructions covering Firestore, Artifact Registry, Cloud Build, and Cloud Run environment variable configuration.
 
 **Scan pipeline setup:** See `docs/PIPELINE_SETUP.md` for API key acquisition (Apify, OpenRouter, WhoisXML) and ngrok tunnel configuration for local webhook testing.
 
@@ -182,20 +186,20 @@ npm run deploy   # runs wrangler deploy from project root
 
 ## Environment Variables
 
-All required environment variables are documented in `app/.env.local.example`. Key variables:
+All required environment variables are documented in `app/.env.local.example`. All production env vars are set directly on the Cloud Run service via the Cloud Console — there is no Secret Manager dependency.
 
-| Variable | Where set | Purpose |
+| Variable | Required | Purpose |
 |---|---|---|
-| `NEXT_PUBLIC_FIREBASE_*` | `.env.local` / Secret Manager | Firebase client SDK config (public) |
-| `FIREBASE_SERVICE_ACCOUNT_KEY` | Secret Manager → Cloud Run | Firebase Admin SDK (server-side auth + Firestore) |
-| `APIFY_API_TOKEN` | Secret Manager → Cloud Run | Apify actor execution |
-| `APIFY_WEBHOOK_SECRET` | Secret Manager → Cloud Run | Validates Apify webhook callbacks |
-| `WHOISXML_API_KEY` | Secret Manager → Cloud Run | WhoisXML Brand Alert actor |
-| `OPENROUTER_API_KEY` | Secret Manager → Cloud Run | LLM analysis |
-| `OPENROUTER_MODEL` | `.env.local` / Cloud Run | LLM model selection (default: `anthropic/claude-3.5-haiku`) |
-| `APP_URL` | `.env.local` / Cloud Run | Public base URL — used to construct Apify webhook callback URLs (use ngrok for local dev) |
-
-In production, secrets are stored in **GCP Secret Manager** and injected into Cloud Run at deploy time by `cloudbuild.yaml`.
+| `GCP_PROJECT_ID` | Yes | Firestore project identification |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Local dev only | Path to service account key JSON (not needed on Cloud Run — ADC is used) |
+| `AUTH_JWT_SECRET` | Yes | Signs and verifies session JWTs |
+| `APIFY_API_TOKEN` | Yes | Apify actor execution |
+| `APIFY_WEBHOOK_SECRET` | Yes | Validates Apify webhook callbacks |
+| `WHOISXML_API_KEY` | Yes | WhoisXML Brand Alert actor |
+| `OPENROUTER_API_KEY` | Yes | LLM analysis |
+| `APP_URL` | Yes | Public base URL — used to construct Apify webhook callback URLs (use ngrok for local dev) |
+| `OPENROUTER_MODEL` | No | LLM model selection (default: `anthropic/claude-3.5-haiku`) |
+| `FIRESTORE_DATABASE_ID` | No | Firestore database name (default: `(default)`) |
 
 See `docs/PIPELINE_SETUP.md` for a step-by-step guide to obtaining API keys and configuring local webhook testing with ngrok.
 
@@ -204,13 +208,13 @@ See `docs/PIPELINE_SETUP.md` for a step-by-step guide to obtaining API keys and 
 ## Data Model (Firestore)
 
 ```
-users/{userId}                    ← Managed by Firebase Auth (no Firestore doc needed)
-brands/{brandId}                  ← BrandProfile: name, keywords, officialDomains
-scans/{scanId}                    ← Scan: brandId, status, actorIds, actorRunIds, actorRuns, completedRunCount, findingCount
-findings/{findingId}              ← Finding: source, severity, title, llmAnalysis, rawData
+users/{userId}                    ← UserRecord: email, passwordHash, createdAt
+brands/{brandId}                  ← BrandProfile: name, keywords, officialDomains, userId
+scans/{scanId}                    ← Scan: brandId, status, actorIds, actorRunIds, actorRuns, completedRunCount, findingCount, userId
+findings/{findingId}              ← Finding: source, severity, title, llmAnalysis, rawData, userId
 ```
 
-All documents include a `userId` field for security rule enforcement. Firestore security rules ensure users can only access their own data. See `docs/GCP_SETUP.md` for the rules snippet.
+All documents include a `userId` field for ownership enforcement. Access control is enforced server-side in the Next.js API routes — all Firestore access is via the server, never from the browser directly.
 
 ---
 

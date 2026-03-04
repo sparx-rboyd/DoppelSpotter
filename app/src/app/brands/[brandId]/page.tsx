@@ -10,7 +10,6 @@ import { FindingCard } from '@/components/finding-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { useAuth } from '@/lib/firebase/auth-context';
 import { formatDate } from '@/lib/utils';
 import type { BrandProfile, Finding, Scan } from '@/lib/types';
 
@@ -18,7 +17,6 @@ const POLL_INTERVAL_MS = 5_000;
 
 export default function BrandDetailPage() {
   const { brandId } = useParams<{ brandId: string }>();
-  const { getIdToken } = useAuth();
 
   const [brand, setBrand] = useState<BrandProfile | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
@@ -43,10 +41,9 @@ export default function BrandDetailPage() {
       setError('');
       setLoading(true);
       try {
-        const token = await getIdToken();
         const [brandRes, findingsRes] = await Promise.all([
-          fetch(`/api/brands/${brandId}`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`/api/brands/${brandId}/findings`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`/api/brands/${brandId}`, { credentials: 'same-origin' }),
+          fetch(`/api/brands/${brandId}/findings`, { credentials: 'same-origin' }),
         ]);
 
         if (!brandRes.ok) throw new Error('Brand not found');
@@ -65,14 +62,11 @@ export default function BrandDetailPage() {
     }
     fetchData();
     return () => stopPolling();
-  }, [brandId, getIdToken]);
+  }, [brandId]);
 
   async function refreshFindings() {
     try {
-      const token = await getIdToken();
-      const res = await fetch(`/api/brands/${brandId}/findings`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(`/api/brands/${brandId}/findings`, { credentials: 'same-origin' });
       if (res.ok) {
         const json = await res.json();
         setFindings(json.data ?? []);
@@ -89,13 +83,10 @@ export default function BrandDetailPage() {
     setActiveScan(null);
 
     try {
-      const token = await getIdToken();
       const res = await fetch('/api/scan', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ brandId }),
       });
 
@@ -110,10 +101,7 @@ export default function BrandDetailPage() {
       // Begin polling for scan completion
       pollRef.current = setInterval(async () => {
         try {
-          const pollToken = await getIdToken();
-          const pollRes = await fetch(`/api/scan?scanId=${scanId}`, {
-            headers: { Authorization: `Bearer ${pollToken}` },
-          });
+          const pollRes = await fetch(`/api/scan?scanId=${scanId}`, { credentials: 'same-origin' });
           if (!pollRes.ok) return;
 
           const pollJson = await pollRes.json();

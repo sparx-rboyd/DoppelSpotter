@@ -1,18 +1,18 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase/admin';
+import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from '@google-cloud/firestore';
 import type { BrandProfile } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
 
 // GET /api/brands/[brandId]
 export async function GET(request: NextRequest, { params }: Params) {
-  const { uid, error } = await requireAuth(request);
+  const { uid, error } = requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;
-  const doc = await adminDb.collection('brands').doc(brandId).get();
+  const doc = await db.collection('brands').doc(brandId).get();
 
   if (!doc.exists) return errorResponse('Brand not found', 404);
 
@@ -24,11 +24,11 @@ export async function GET(request: NextRequest, { params }: Params) {
 
 // PATCH /api/brands/[brandId]
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const { uid, error } = await requireAuth(request);
+  const { uid, error } = requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;
-  const doc = await adminDb.collection('brands').doc(brandId).get();
+  const doc = await db.collection('brands').doc(brandId).get();
 
   if (!doc.exists) return errorResponse('Brand not found', 404);
   if ((doc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
@@ -46,7 +46,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (body.keywords) updates.keywords = body.keywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
   if (body.officialDomains) updates.officialDomains = body.officialDomains.map((d) => d.trim().toLowerCase()).filter(Boolean);
 
-  await adminDb.collection('brands').doc(brandId).update(updates);
+  await db.collection('brands').doc(brandId).update(updates);
 
   // Substitute a real Date for the sentinel so the response is serialisable
   return NextResponse.json({ data: { id: brandId, ...doc.data(), ...updates, updatedAt } });
@@ -54,16 +54,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
 // DELETE /api/brands/[brandId]
 export async function DELETE(request: NextRequest, { params }: Params) {
-  const { uid, error } = await requireAuth(request);
+  const { uid, error } = requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;
-  const doc = await adminDb.collection('brands').doc(brandId).get();
+  const doc = await db.collection('brands').doc(brandId).get();
 
   if (!doc.exists) return errorResponse('Brand not found', 404);
   if ((doc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
 
-  await adminDb.collection('brands').doc(brandId).delete();
+  await db.collection('brands').doc(brandId).delete();
 
   return new NextResponse(null, { status: 204 });
 }

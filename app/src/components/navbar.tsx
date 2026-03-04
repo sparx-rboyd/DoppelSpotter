@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { ScanEye, LayoutDashboard, Shield, LogOut } from 'lucide-react';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useAuth } from '@/lib/auth/auth-context';
 import { cn } from '@/lib/utils';
 
 const navLinks = [

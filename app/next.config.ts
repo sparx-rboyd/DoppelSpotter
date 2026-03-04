@@ -4,7 +4,7 @@ import path from 'path';
 const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: path.join(__dirname),
-  serverExternalPackages: ['firebase-admin', 'apify-client'],
+  serverExternalPackages: ['@google-cloud/firestore', 'apify-client'],
 };
 
 export default nextConfig;

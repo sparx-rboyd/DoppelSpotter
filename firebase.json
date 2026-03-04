@@ -1,6 +1,0 @@
-{
-  "firestore": {
-    "database": "doppelspotter",
-    "indexes": "firestore.indexes.json"
-  }
-}

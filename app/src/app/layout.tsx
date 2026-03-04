@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
-import { AuthProvider } from '@/lib/firebase/auth-context';
+import { AuthProvider } from '@/lib/auth/auth-context';
 import './globals.css';
 
 const inter = Inter({

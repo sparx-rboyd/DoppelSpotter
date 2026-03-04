@@ -1,15 +1,15 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase/admin';
+import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from '@google-cloud/firestore';
 import type { BrandProfile, BrandProfileCreateInput } from '@/lib/types';
 
 // GET /api/brands — list all brands for the authenticated user
 export async function GET(request: NextRequest) {
-  const { uid, error } = await requireAuth(request);
+  const { uid, error } = requireAuth(request);
   if (error) return error;
 
-  const snapshot = await adminDb
+  const snapshot = await db
     .collection('brands')
     .where('userId', '==', uid)
     .orderBy('createdAt', 'desc')
@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
 
 // POST /api/brands — create a new brand profile
 export async function POST(request: NextRequest) {
-  const { uid, error } = await requireAuth(request);
+  const { uid, error } = requireAuth(request);
   if (error) return error;
 
   let body: BrandProfileCreateInput;
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     return errorResponse('Brand name is required');
   }
 
-  const docRef = adminDb.collection('brands').doc();
+  const docRef = db.collection('brands').doc();
   const now = FieldValue.serverTimestamp();
   const nowDate = new Date();
 

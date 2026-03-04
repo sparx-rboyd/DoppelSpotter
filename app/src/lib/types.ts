@@ -1,4 +1,13 @@
-import type { Timestamp } from 'firebase-admin/firestore';
+import type { Timestamp } from '@google-cloud/firestore';
+
+// ─── Users ──────────────────────────────────────────────────────────────────
+
+export interface UserRecord {
+  id: string;
+  email: string;
+  passwordHash: string;
+  createdAt: Timestamp;
+}
 
 // ─── Brand Profile ─────────────────────────────────────────────────────────
 

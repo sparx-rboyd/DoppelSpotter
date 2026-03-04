@@ -10,10 +10,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { useAuth } from '@/lib/firebase/auth-context';
 
 export default function NewBrandPage() {
-  const { getIdToken } = useAuth();
   const router = useRouter();
 
   const [name, setName] = useState('');
@@ -56,13 +54,10 @@ export default function NewBrandPage() {
     setError('');
 
     try {
-      const token = await getIdToken();
       const res = await fetch('/api/brands', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
         body: JSON.stringify({ name: name.trim(), keywords, officialDomains: domains }),
       });
 

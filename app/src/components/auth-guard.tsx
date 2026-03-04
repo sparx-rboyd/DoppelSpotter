@@ -2,7 +2,7 @@
 
 import { useEffect, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useAuth } from '@/lib/auth/auth-context';
 
 interface AuthGuardProps {
   children: ReactNode;

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase/admin';
-import { FieldValue } from 'firebase-admin/firestore';
+import { db } from '@/lib/firestore';
+import { FieldValue, type QueryDocumentSnapshot } from '@google-cloud/firestore';
 import { fetchDatasetItems } from '@/lib/apify/client';
 import { chatCompletion } from '@/lib/analysis/openrouter';
 import { SYSTEM_PROMPT, buildAnalysisPrompt } from '@/lib/analysis/prompts';
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
 
   // Look up the scan that owns this actor run using array-contains
   // (actorRunIds is a flat array of Apify run IDs stored on the scan document)
-  const snapshot = await adminDb
+  const snapshot = await db
     .collection('scans')
     .where('actorRunIds', 'array-contains', resource.id)
     .limit(1)
@@ -98,11 +98,11 @@ async function handleSucceededRun({
 }: {
   runId: string;
   datasetId: string;
-  scanDoc: FirebaseFirestore.QueryDocumentSnapshot;
+  scanDoc: QueryDocumentSnapshot;
   scan: Scan;
 }) {
   // Fetch the brand profile for context in the LLM prompt
-  const brandDoc = await adminDb.collection('brands').doc(scan.brandId).get();
+  const brandDoc = await db.collection('brands').doc(scan.brandId).get();
   if (!brandDoc.exists) {
     console.error(`[webhook] Brand ${scan.brandId} not found for scan ${scanDoc.id}`);
     await markActorRunComplete(scanDoc, scan, runId, 'failed');
@@ -145,7 +145,7 @@ async function handleSucceededRun({
     try {
       const analysisResult = await analyseItem({ brand, source, actorId, item });
       if (!analysisResult.isFalsePositive) {
-        const findingRef = adminDb.collection('findings').doc();
+        const findingRef = db.collection('findings').doc();
         const finding: Omit<Finding, 'id'> = {
           scanId: scan.id ?? scanDoc.id,
           brandId: scan.brandId,
@@ -158,7 +158,7 @@ async function handleSucceededRun({
           llmAnalysis: analysisResult.llmAnalysis,
           url: extractUrl(item),
           rawData: item,
-          createdAt: FieldValue.serverTimestamp() as unknown as import('firebase-admin/firestore').Timestamp,
+          createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
         };
         await findingRef.set(finding);
         newFindingCount++;
@@ -166,7 +166,7 @@ async function handleSucceededRun({
     } catch (err) {
       // On LLM failure, write a fallback finding so no data is silently lost
       console.error(`[webhook] LLM analysis failed for item in dataset ${datasetId}:`, err);
-      const findingRef = adminDb.collection('findings').doc();
+      const findingRef = db.collection('findings').doc();
       const fallbackFinding: Omit<Finding, 'id'> = {
         scanId: scan.id ?? scanDoc.id,
         brandId: scan.brandId,
@@ -179,7 +179,7 @@ async function handleSucceededRun({
         llmAnalysis: 'LLM analysis failed for this item. Raw data is preserved for manual review.',
         url: extractUrl(item),
         rawData: item,
-        createdAt: FieldValue.serverTimestamp() as unknown as import('firebase-admin/firestore').Timestamp,
+        createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
       };
       await findingRef.set(fallbackFinding);
       newFindingCount++;
@@ -235,7 +235,7 @@ async function analyseItem({
  * now done — set the overall scan status to 'completed' or 'failed'.
  */
 async function markActorRunComplete(
-  scanDoc: FirebaseFirestore.QueryDocumentSnapshot,
+  scanDoc: QueryDocumentSnapshot,
   scan: Scan,
   runId: string,
   runStatus: 'succeeded' | 'failed',
@@ -243,7 +243,7 @@ async function markActorRunComplete(
 ) {
   const totalRunCount = scan.actorRunIds?.length ?? 1;
 
-  await adminDb.runTransaction(async (tx) => {
+  await db.runTransaction(async (tx) => {
     const freshSnap = await tx.get(scanDoc.ref);
     const fresh = freshSnap.data() as Scan;
 

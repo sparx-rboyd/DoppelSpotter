@@ -3,7 +3,7 @@
 import { useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { ScanEye } from 'lucide-react';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useAuth } from '@/lib/auth/auth-context';
 
 type Mode = 'signin' | 'signup';
 
@@ -30,17 +30,7 @@ export default function LoginPage() {
       }
       router.replace('/dashboard');
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'An error occurred.';
-      // Firebase error messages are verbose — simplify common ones
-      if (message.includes('user-not-found') || message.includes('wrong-password') || message.includes('invalid-credential')) {
-        setError('Invalid email or password.');
-      } else if (message.includes('email-already-in-use')) {
-        setError('An account with this email already exists.');
-      } else if (message.includes('weak-password')) {
-        setError('Password must be at least 6 characters.');
-      } else {
-        setError(message);
-      }
+      setError(err instanceof Error ? err.message : 'An error occurred.');
     } finally {
       setLoading(false);
     }
@@ -99,7 +89,7 @@ export default function LoginPage() {
                 type="password"
                 autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
                 required
-                minLength={6}
+                minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"

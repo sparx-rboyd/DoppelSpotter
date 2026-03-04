@@ -8,11 +8,9 @@ import { Navbar } from '@/components/navbar';
 import { FindingCard } from '@/components/finding-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { useAuth } from '@/lib/firebase/auth-context';
 import type { Finding } from '@/lib/types';
 
 export default function DashboardPage() {
-  const { getIdToken } = useAuth();
   const [findings, setFindings] = useState<Finding[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -21,10 +19,7 @@ export default function DashboardPage() {
     async function fetchFindings() {
       setError('');
       try {
-        const token = await getIdToken();
-        const res = await fetch('/api/findings', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetch('/api/findings', { credentials: 'same-origin' });
         if (!res.ok) throw new Error('Failed to load findings');
         const json = await res.json();
         setFindings(json.data ?? []);
@@ -35,7 +30,7 @@ export default function DashboardPage() {
       }
     }
     fetchFindings();
-  }, [getIdToken]);
+  }, []);
 
   const highCount = findings.filter((f) => f.severity === 'high').length;
 

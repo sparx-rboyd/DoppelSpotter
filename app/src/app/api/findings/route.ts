@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase/admin';
+import { db } from '@/lib/firestore';
 import { requireAuth } from '@/lib/api-utils';
 import type { Finding } from '@/lib/types';
 
@@ -7,13 +7,13 @@ import type { Finding } from '@/lib/types';
 // Query params:
 //   limit  (optional, default 20, max 100)
 export async function GET(request: NextRequest) {
-  const { uid, error } = await requireAuth(request);
+  const { uid, error } = requireAuth(request);
   if (error) return error;
 
   const limitParam = request.nextUrl.searchParams.get('limit');
   const limit = Math.min(parseInt(limitParam ?? '20', 10) || 20, 100);
 
-  const snapshot = await adminDb
+  const snapshot = await db
     .collection('findings')
     .where('userId', '==', uid)
     .orderBy('createdAt', 'desc')

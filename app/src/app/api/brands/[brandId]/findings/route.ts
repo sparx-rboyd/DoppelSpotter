@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase/admin';
+import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import type { BrandProfile, Finding } from '@/lib/types';
 
@@ -7,17 +7,17 @@ type Params = { params: Promise<{ brandId: string }> };
 
 // GET /api/brands/[brandId]/findings
 export async function GET(request: NextRequest, { params }: Params) {
-  const { uid, error } = await requireAuth(request);
+  const { uid, error } = requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;
 
   // Verify brand ownership
-  const brandDoc = await adminDb.collection('brands').doc(brandId).get();
+  const brandDoc = await db.collection('brands').doc(brandId).get();
   if (!brandDoc.exists) return errorResponse('Brand not found', 404);
   if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
 
-  const snapshot = await adminDb
+  const snapshot = await db
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', uid)

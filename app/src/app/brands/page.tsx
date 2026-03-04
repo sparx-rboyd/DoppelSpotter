@@ -7,11 +7,9 @@ import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { useAuth } from '@/lib/firebase/auth-context';
 import type { BrandProfile } from '@/lib/types';
 
 export default function BrandsPage() {
-  const { getIdToken } = useAuth();
   const [brands, setBrands] = useState<BrandProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -21,10 +19,7 @@ export default function BrandsPage() {
       setError('');
       setLoading(true);
       try {
-        const token = await getIdToken();
-        const res = await fetch('/api/brands', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetch('/api/brands', { credentials: 'same-origin' });
         if (!res.ok) throw new Error('Failed to load brands');
         const json = await res.json();
         setBrands(json.data ?? []);
@@ -35,7 +30,7 @@ export default function BrandsPage() {
       }
     }
     fetchBrands();
-  }, [getIdToken]);
+  }, []);
 
   return (
     <AuthGuard>

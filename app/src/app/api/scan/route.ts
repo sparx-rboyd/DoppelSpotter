@@ -1,13 +1,13 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { adminDb } from '@/lib/firebase/admin';
+import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
-import { FieldValue } from 'firebase-admin/firestore';
+import { FieldValue } from '@google-cloud/firestore';
 import type { BrandProfile, Scan, ActorRunInfo } from '@/lib/types';
 
 // POST /api/scan — trigger a scan for a brand
 // Body: { brandId: string; actorIds?: string[] }
 export async function POST(request: NextRequest) {
-  const { uid, error } = await requireAuth(request);
+  const { uid, error } = requireAuth(request);
   if (error) return error;
 
   let body: { brandId: string; actorIds?: string[] };
@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
   if (!brandId) return errorResponse('brandId is required');
 
   // Verify brand ownership
-  const brandDoc = await adminDb.collection('brands').doc(brandId).get();
+  const brandDoc = await db.collection('brands').doc(brandId).get();
   if (!brandDoc.exists) return errorResponse('Brand not found', 404);
 
   const brand = brandDoc.data() as BrandProfile;
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
   const targetActorIds = actorIds ?? CORE_ACTOR_IDS;
 
   // Create a scan record with status 'pending' first so we have a scanId
-  const scanRef = adminDb.collection('scans').doc();
+  const scanRef = db.collection('scans').doc();
   const scan: Omit<Scan, 'id'> = {
     brandId,
     userId: uid,
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     actorRuns: {},
     completedRunCount: 0,
     findingCount: 0,
-    startedAt: FieldValue.serverTimestamp() as unknown as import('firebase-admin/firestore').Timestamp,
+    startedAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
   };
 
   await scanRef.set(scan);
@@ -108,13 +108,13 @@ export async function POST(request: NextRequest) {
 
 // GET /api/scan?scanId=xxx — poll scan status
 export async function GET(request: NextRequest) {
-  const { uid, error } = await requireAuth(request);
+  const { uid, error } = requireAuth(request);
   if (error) return error;
 
   const scanId = request.nextUrl.searchParams.get('scanId');
   if (!scanId) return errorResponse('scanId query param is required');
 
-  const scanDoc = await adminDb.collection('scans').doc(scanId).get();
+  const scanDoc = await db.collection('scans').doc(scanId).get();
   if (!scanDoc.exists) return errorResponse('Scan not found', 404);
 
   const scan = scanDoc.data() as Omit<Scan, 'id'>;

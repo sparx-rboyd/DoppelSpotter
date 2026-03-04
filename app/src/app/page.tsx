@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/lib/firebase/auth-context';
+import { useAuth } from '@/lib/auth/auth-context';
 
 export default function HomePage() {
   const { user, loading } = useAuth();
