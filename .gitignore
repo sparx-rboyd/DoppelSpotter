@@ -9,3 +9,4 @@ app/.env.local
 app/.env
 app/.next/
 app/.wrangler/
+app/.gcpkeys/
