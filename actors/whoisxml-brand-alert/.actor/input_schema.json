@@ -1,0 +1,37 @@
+{
+  "title": "WhoisXML Brand Alert Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "apiKey": {
+      "title": "WhoisXML API Key",
+      "type": "string",
+      "description": "Your WhoisXML Brand Alert API key. Get one at https://brand-alert.whoisxmlapi.com/api",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "brandKeywords": {
+      "title": "Brand Keywords",
+      "type": "array",
+      "description": "List of keywords to monitor. Domains containing any of these terms will be flagged.",
+      "editor": "stringList",
+      "example": ["acme", "acmecorp"]
+    },
+    "lookbackDays": {
+      "title": "Lookback Days",
+      "type": "integer",
+      "description": "Number of days back to check for newly-registered domains (1–14).",
+      "editor": "number",
+      "default": 1,
+      "minimum": 1,
+      "maximum": 14
+    },
+    "withTypos": {
+      "title": "Include Typo Variants",
+      "type": "boolean",
+      "description": "When enabled, the WhoisXML API also returns domains with common typos of your keywords (e.g. acne → acme).",
+      "default": false
+    }
+  },
+  "required": ["apiKey", "brandKeywords"]
+}

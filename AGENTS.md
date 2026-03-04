@@ -13,6 +13,11 @@ AI-powered brand protection for SMEs. This repository is the submission for the 
 ├── cloudbuild.yaml        # Cloud Build CI/CD pipeline (builds & deploys app/ to Cloud Run)
 ├── package.json           # Root-level scripts (deploy landing page)
 ├── wrangler.toml          # Cloudflare Workers config for landing page
+├── actors/                # Published Apify Actors (hackathon Path 3 submission)
+│   └── whoisxml-brand-alert/  # doppelspotter/whoisxml-brand-alert — domain monitoring actor
+│       ├── .actor/        # Apify metadata (actor.json, input_schema.json)
+│       ├── src/main.js    # Actor implementation (WhoisXML Brand Alert API wrapper)
+│       └── package.json
 ├── landing-page/          # Static pitch/project site (deployed to Cloudflare Pages)
 │   ├── index.html         # Single-page site (also contains app UI mockup)
 │   ├── logo.svg           # DoppelSpotter logo
@@ -99,6 +104,42 @@ See `PITCH.md` for the full actor suite including v2 stretch goals.
 | CI/CD | Google Cloud Build (triggers on `app/**` push to `main`) |
 | Pitch/landing page | Static HTML + Tailwind CSS, hosted on Cloudflare Pages |
 | Alerting | Email digests (planned) |
+
+---
+
+## Apify Actors
+
+### `doppelspotter/whoisxml-brand-alert`
+
+Published at: [console.apify.com/actors/doppelspotter/whoisxml-brand-alert](https://console.apify.com/actors/doppelspotter/whoisxml-brand-alert)
+
+Source: `actors/whoisxml-brand-alert/`
+
+Wraps the [WhoisXML Brand Alert API](https://brand-alert.whoisxmlapi.com/api) to detect newly-registered domains containing brand keywords — surfacing typosquatting, lookalike domains, and potential impersonation attempts across 7,596+ TLDs.
+
+**Input:**
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `apiKey` | string | ✅ | WhoisXML Brand Alert API key (BYOK) |
+| `brandKeywords` | string[] | ✅ | Keywords to monitor (e.g. `["acme", "acmecorp"]`) |
+| `lookbackDays` | integer | — | Days back to check (1–14, default 1) |
+| `withTypos` | boolean | — | Include typo variants (default false) |
+
+**Output dataset items:**
+| Field | Description |
+|---|---|
+| `domainName` | Newly-registered domain |
+| `tld` | Top-level domain (e.g. `.com`) |
+| `registeredAt` | ISO date of registration |
+| `keyword` | Brand keyword that matched |
+| `whoisUrl` | WHOIS lookup URL |
+| `source` | Always `whoisxml-brand-alert` |
+
+**To redeploy after changes:**
+```bash
+cd actors/whoisxml-brand-alert
+apify push
+```
 
 ---
 

@@ -8,7 +8,7 @@ export const SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpott
 
 Your task is to analyse a web scraping result and determine whether it represents a potential brand infringement.
 
-You must respond with a JSON object matching this exact schema:
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
 {
   "severity": "high" | "medium" | "low",
   "title": "Short, descriptive title of the finding (max 10 words)",

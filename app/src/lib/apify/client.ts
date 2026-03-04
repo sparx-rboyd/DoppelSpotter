@@ -47,7 +47,7 @@ export function buildActorInput(actorId: string, brand: BrandProfile): Record<st
       return { searchQuery: brand.name, country: 'us', limit: 20 };
 
     case 'dan.scraper/apple-app-store-search-scraper':
-      return { searchTerm: brand.name, country: 'us', limit: 20 };
+      return { queries: [brand.name], country: 'us', limit: 20 };
 
     case 'doppelspotter/whoisxml-brand-alert':
       return {

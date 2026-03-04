@@ -16,7 +16,9 @@ export interface AnalysisOutput {
  */
 export function parseAnalysisOutput(raw: string): AnalysisOutput | null {
   try {
-    const parsed = JSON.parse(raw);
+    // Strip markdown code fences if the LLM wraps the JSON in ```json ... ``` or ``` ... ```
+    const stripped = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    const parsed = JSON.parse(stripped);
 
     if (
       typeof parsed.severity !== 'string' ||
