@@ -81,7 +81,7 @@ async function main() {
     process.exit(1);
   }
 
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await bcrypt.hash(password!, 12);
   const userRef = db.collection('users').doc();
 
   await userRef.set({
