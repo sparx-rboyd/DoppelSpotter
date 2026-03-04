@@ -144,23 +144,25 @@ async function handleSucceededRun({
   for (const item of itemsToAnalyse) {
     try {
       const analysisResult = await analyseItem({ brand, source, actorId, item });
+      const findingRef = db.collection('findings').doc();
+      const finding: Omit<Finding, 'id'> = {
+        scanId: scan.id ?? scanDoc.id,
+        brandId: scan.brandId,
+        userId: scan.userId,
+        source,
+        actorId,
+        severity: analysisResult.severity,
+        title: analysisResult.title,
+        description: analysisResult.llmAnalysis,
+        llmAnalysis: analysisResult.llmAnalysis,
+        url: extractUrl(item),
+        rawData: item,
+        isFalsePositive: analysisResult.isFalsePositive,
+        rawLlmResponse: analysisResult.rawLlmResponse,
+        createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+      };
+      await findingRef.set(finding);
       if (!analysisResult.isFalsePositive) {
-        const findingRef = db.collection('findings').doc();
-        const finding: Omit<Finding, 'id'> = {
-          scanId: scan.id ?? scanDoc.id,
-          brandId: scan.brandId,
-          userId: scan.userId,
-          source,
-          actorId,
-          severity: analysisResult.severity,
-          title: analysisResult.title,
-          description: analysisResult.llmAnalysis,
-          llmAnalysis: analysisResult.llmAnalysis,
-          url: extractUrl(item),
-          rawData: item,
-          createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
-        };
-        await findingRef.set(finding);
         newFindingCount++;
       }
     } catch (err) {
@@ -179,6 +181,7 @@ async function handleSucceededRun({
         llmAnalysis: 'LLM analysis failed for this item. Raw data is preserved for manual review.',
         url: extractUrl(item),
         rawData: item,
+        isFalsePositive: false,
         createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
       };
       await findingRef.set(fallbackFinding);
@@ -195,6 +198,7 @@ async function handleSucceededRun({
 
 /**
  * Run a single dataset item through the LLM for classification.
+ * Returns parsed fields plus the raw LLM response string for storage / debugging.
  */
 async function analyseItem({
   brand,
@@ -206,7 +210,7 @@ async function analyseItem({
   source: Finding['source'];
   actorId: string;
   item: Record<string, unknown>;
-}): Promise<{ severity: Finding['severity']; title: string; llmAnalysis: string; isFalsePositive: boolean }> {
+}): Promise<{ severity: Finding['severity']; title: string; llmAnalysis: string; isFalsePositive: boolean; rawLlmResponse: string }> {
   void actorId;
   const prompt = buildAnalysisPrompt({
     brandName: brand.name,
@@ -226,7 +230,7 @@ async function analyseItem({
     throw new Error(`Failed to parse LLM output: ${raw.slice(0, 200)}`);
   }
 
-  return parsed;
+  return { ...parsed, rawLlmResponse: raw };
 }
 
 /**

@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import {
   Globe,
   Instagram,
@@ -8,6 +11,10 @@ import {
   BookMarked,
   Bot,
   ExternalLink,
+  ChevronDown,
+  ChevronRight,
+  Code2,
+  MessageSquare,
 } from 'lucide-react';
 import { type Finding, type FindingSource } from '@/lib/types';
 import { SeverityBadge } from './severity-badge';
@@ -84,59 +91,132 @@ const sourceConfig: Record<
   },
 };
 
+function ExpandableSection({
+  icon: Icon,
+  label,
+  children,
+}: {
+  icon: React.ElementType;
+  label: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="border border-gray-200 rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 transition text-left"
+      >
+        {open ? (
+          <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+        ) : (
+          <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
+        )}
+        <Icon className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
+        <span className="text-xs font-medium text-gray-600">{label}</span>
+      </button>
+      {open && (
+        <pre className="p-3 text-xs text-gray-700 bg-white overflow-x-auto whitespace-pre-wrap break-words font-mono leading-relaxed max-h-80 overflow-y-auto border-t border-gray-200">
+          {children}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 export function FindingCard({ finding, className }: FindingCardProps) {
   const src = sourceConfig[finding.source] ?? sourceConfig.unknown;
   const Icon = src.icon;
+  const isFalsePositive = finding.isFalsePositive === true;
 
   return (
     <div
       className={cn(
-        'bg-white p-4 sm:p-5 rounded-xl border border-gray-200 shadow-sm',
-        'flex items-start gap-3 sm:gap-5',
-        'hover:border-brand-300 transition cursor-pointer',
+        'bg-white p-4 sm:p-5 rounded-xl border shadow-sm',
+        isFalsePositive
+          ? 'border-gray-200 opacity-75'
+          : 'border-gray-200 hover:border-brand-300 transition cursor-pointer',
         className,
       )}
     >
       {/* Source icon */}
-      <div className={cn('p-2 sm:p-3 rounded-lg flex-shrink-0', src.bgClass, src.textClass)}>
-        <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 min-w-0">
-        {/* Title row */}
-        <div className="flex flex-wrap items-center gap-2 mb-1">
-          <h4 className="font-semibold text-gray-900 text-sm sm:text-base">
-            {finding.title}
-          </h4>
-          <SeverityBadge severity={finding.severity} />
-          <span className="text-xs text-gray-400 font-mono hidden sm:inline">
-            via {finding.actorId}
-          </span>
+      <div className="flex items-start gap-3 sm:gap-5">
+        <div
+          className={cn(
+            'p-2 sm:p-3 rounded-lg flex-shrink-0',
+            isFalsePositive ? 'bg-gray-100 text-gray-400' : cn(src.bgClass, src.textClass),
+          )}
+        >
+          <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
         </div>
 
-        {/* Description */}
-        <p className="text-xs sm:text-sm text-gray-500 mb-2">
-          {finding.description}
-          {finding.url && (
-            <a
-              href={finding.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="ml-1 inline-flex items-center gap-0.5 text-brand-600 hover:underline"
-              onClick={(e) => e.stopPropagation()}
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          {/* Title row */}
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <h4
+              className={cn(
+                'font-semibold text-sm sm:text-base',
+                isFalsePositive ? 'text-gray-500' : 'text-gray-900',
+              )}
             >
-              <ExternalLink className="w-3 h-3" />
-            </a>
-          )}
-        </p>
+              {finding.title}
+            </h4>
+            {isFalsePositive ? (
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+                Non-hit
+              </span>
+            ) : (
+              <SeverityBadge severity={finding.severity} />
+            )}
+            <span className="text-xs text-gray-400 font-mono hidden sm:inline">
+              via {finding.actorId}
+            </span>
+          </div>
 
-        {/* LLM analysis box */}
-        <div className="bg-gray-50 rounded-lg p-2 sm:p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
-          <Bot className="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0" />
-          <p>
-            <strong>LLM Analysis:</strong> {finding.llmAnalysis}
+          {/* Description */}
+          <p className="text-xs sm:text-sm text-gray-500 mb-2">
+            {finding.description}
+            {finding.url && (
+              <a
+                href={finding.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="ml-1 inline-flex items-center gap-0.5 text-brand-600 hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            )}
           </p>
+
+          {/* LLM analysis box */}
+          <div className="bg-gray-50 rounded-lg p-2 sm:p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2 mb-3">
+            <Bot className="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0" />
+            <p>
+              <strong>LLM Analysis:</strong> {finding.llmAnalysis}
+            </p>
+          </div>
+
+          {/* Debug expandables */}
+          <div className="space-y-1.5">
+            <ExpandableSection icon={MessageSquare} label="Raw LLM response">
+              {finding.rawLlmResponse
+                ? (() => {
+                    try {
+                      return JSON.stringify(JSON.parse(finding.rawLlmResponse), null, 2);
+                    } catch {
+                      return finding.rawLlmResponse;
+                    }
+                  })()
+                : '(not available — LLM analysis may have failed or this is a legacy finding)'}
+            </ExpandableSection>
+
+            <ExpandableSection icon={Code2} label="Raw actor data">
+              {JSON.stringify(finding.rawData, null, 2)}
+            </ExpandableSection>
+          </div>
         </div>
       </div>
     </div>

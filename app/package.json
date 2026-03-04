@@ -10,7 +10,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "type-check": "tsc --noEmit"
+    "type-check": "tsc --noEmit",
+    "add-user": "tsx scripts/add-user.ts"
   },
   "dependencies": {
     "@google-cloud/firestore": "^8.3.0",
@@ -30,9 +31,11 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "^15.2.1",
     "tailwindcss": "^4.0.14",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

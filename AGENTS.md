@@ -1,249 +1,149 @@
-# DoppelSpotter — Project Guide
+# DoppelSpotter — Architecture & Agent Notes
 
-AI-powered brand protection for SMEs. This repository is the submission for the **GenAI Zürich 2026 Hackathon, Apify Track**.
+This file provides a concise architectural overview for AI coding agents and contributors.
+Keep it up to date when making significant structural changes.
+
+---
+
+## Project Overview
+
+**DoppelSpotter** is an AI-powered brand protection web app for SMEs. It monitors the web for
+brand infringement (lookalike domains, fake social accounts, clone apps, trademark squatting)
+using Apify actors for scraping and an LLM for classification.
+
+**Stack:**
+- Frontend / API: Next.js 15 (App Router), TypeScript, Tailwind CSS
+- Database: Google Cloud Firestore
+- Scraping: Apify platform (hosted actors)
+- LLM: OpenRouter → `anthropic/claude-3.5-haiku` (default)
+- Hosting: Google Cloud Run (app) + Cloudflare Workers (landing page)
+- CI/CD: GCP Cloud Build
 
 ---
 
 ## Repository Structure
 
 ```
-.
-├── AGENTS.md              # This file — project overview for AI agents and developers
-├── PITCH.md               # Full written pitch: problem, solution, architecture, challenge alignment
-├── cloudbuild.yaml        # Cloud Build CI/CD pipeline (builds & deploys app/ to Cloud Run)
-├── package.json           # Root-level scripts (deploy landing page)
-├── wrangler.toml          # Cloudflare Workers config for landing page
-├── actors/                # Published Apify Actors (hackathon Path 3 submission)
-│   └── whoisxml-brand-alert/  # doppelspotter/whoisxml-brand-alert — domain monitoring actor
-│       ├── .actor/        # Apify metadata (actor.json, input_schema.json)
-│       ├── src/main.js    # Actor implementation (WhoisXML Brand Alert API wrapper)
-│       └── package.json
-├── landing-page/          # Static pitch/project site (deployed to Cloudflare Pages)
-│   ├── index.html         # Single-page site (also contains app UI mockup)
-│   ├── logo.svg           # DoppelSpotter logo
-│   └── favicon.svg        # Favicon
-├── app/                   # Next.js web application (deployed to GCP Cloud Run)
-│   ├── Dockerfile         # Multi-stage Node 22 build for Cloud Run
-│   ├── .env.local.example # Template for required environment variables
-│   ├── package.json       # App dependencies
-│   ├── next.config.ts     # Next.js config (standalone output)
-│   ├── postcss.config.mjs # Tailwind CSS v4 PostCSS config
-│   ├── public/            # Static assets (favicon.svg, logo.svg)
+/
+├── AGENTS.md                     # This file
+├── REVIEW.md                     # Ongoing scan quality review notes
+├── PITCH.md                      # Product pitch / spec
+├── cloudbuild.yaml               # GCP Cloud Build CI/CD pipeline
+├── wrangler.toml                 # Cloudflare Workers config (landing page)
+├── actors/
+│   └── whoisxml-brand-alert/     # Custom Apify Actor (published to Apify Store)
+├── landing-page/                 # Static marketing site
+├── app/                          # Next.js 15 application
 │   └── src/
-│       ├── app/           # Next.js App Router (pages + API routes)
-│       │   ├── layout.tsx
-│       │   ├── page.tsx                      # Root redirect
-│       │   ├── login/page.tsx                # Auth page
-│       │   ├── dashboard/page.tsx            # Main findings view
-│       │   ├── brands/                       # Brand management pages
-│       │   └── api/                          # API routes
-│       │       ├── auth/signup/route.ts      # Register (bcrypt hash, set JWT cookie)
-│       │       ├── auth/login/route.ts       # Login (verify hash, set JWT cookie)
-│       │       ├── auth/logout/route.ts      # Clear JWT cookie
-│       │       ├── auth/me/route.ts          # Return current user from cookie
-│       │       ├── brands/route.ts           # Brand CRUD
-│       │       ├── brands/[brandId]/route.ts
-│       │       ├── brands/[brandId]/findings/route.ts
-│       │       ├── findings/route.ts         # Cross-brand recent findings (dashboard)
-│       │       ├── scan/route.ts             # Trigger scans, poll status
-│       │       └── webhooks/apify/route.ts   # Apify webhook receiver + LLM analysis pipeline
-│       ├── components/    # React components
-│       │   ├── ui/        # Primitives: Button, Card, Badge, Input
-│       │   ├── auth-guard.tsx
-│       │   ├── navbar.tsx
-│       │   ├── finding-card.tsx
-│       │   └── severity-badge.tsx
-│       └── lib/           # Shared utilities and service clients
-│           ├── types.ts                      # Core data model types
-│           ├── utils.ts                      # cn(), formatDate(), etc.
-│           ├── api-utils.ts                  # requireAuth(), errorResponse()
-│           ├── firestore.ts                  # Firestore client (ADC, @google-cloud/firestore)
-│           ├── auth/
-│           │   ├── jwt.ts                    # signToken(), verifyToken(), cookie name
-│           │   └── auth-context.tsx          # React auth context provider (cookie-based)
+│       ├── app/                  # Pages + API routes (App Router)
+│       │   └── api/
+│       │       ├── auth/         # login, logout, me (signup disabled — use add-user CLI)
+│       │       ├── brands/       # CRUD + findings per brand
+│       │       ├── findings/     # Cross-brand findings query
+│       │       ├── scan/         # Trigger scan + poll status
+│       │       └── webhooks/apify/  # Apify webhook receiver → LLM pipeline
+│       └── lib/
 │           ├── apify/
-│           │   ├── actors.ts                 # Actor registry + CORE_ACTOR_IDS
-│           │   └── client.ts                 # Apify client: startActorRun(), fetchDatasetItems(), runActor()
+│           │   ├── actors.ts     # ACTOR_REGISTRY — all actor definitions + enable/disable
+│           │   └── client.ts     # Apify client: startActorRun, buildActorInput, fetchDatasetItems
 │           └── analysis/
-│               ├── openrouter.ts             # OpenRouter LLM client
-│               ├── prompts.ts                # System prompt + buildAnalysisPrompt()
-│               └── types.ts                  # AnalysisOutput + parseAnalysisOutput()
-└── docs/                  # Hackathon reference materials + infrastructure guides (not deployed)
-    ├── GCP_SETUP.md        # Step-by-step GCP setup guide ← START HERE
-    ├── CHALLENGE_BRIEF.md
-    ├── CHALLENGE_FAQ.md
-    └── TOOLS_PROMO_ACCESS.md
+│               ├── prompts.ts    # SYSTEM_PROMPT + buildAnalysisPrompt()
+│               ├── openrouter.ts # LLM client: chatCompletion()
+│               └── types.ts      # AnalysisOutput interface + parseAnalysisOutput()
+└── docs/
+    ├── GCP_SETUP.md
+    └── PIPELINE_SETUP.md
 ```
 
 ---
 
-## What DoppelSpotter Does
+## Actor Registry
 
-DoppelSpotter is an autonomous AI pipeline that monitors the web for potential brand infringements on behalf of SMEs. It uses a suite of Apify Actors to scrape live data across multiple surfaces, then routes every finding through an LLM (via OpenRouter) to classify intent, score severity, and generate plain-language summaries. Users receive a ranked digest of genuine threats — not a flood of raw keyword matches.
+All actors are defined in `app/src/lib/apify/actors.ts` → `ACTOR_REGISTRY`.
 
-**Monitoring surfaces (v1 core):**
-- Social media (Instagram, Twitter/X, Facebook)
-- Google Search results
-- Newly-registered domains (via `doppelspotter/whoisxml-brand-alert` — a published Apify Actor)
-- App stores (Google Play, Apple App Store)
-- EUIPO trademark register (optional, disabled by default)
+To enable or disable an actor, set its `enabledByDefault` flag. Actors with `enabledByDefault: true`
+are automatically included in every scan via `CORE_ACTOR_IDS`.
 
-See `PITCH.md` for the full actor suite including v2 stretch goals.
+**Current state (as of scan quality review):** Only `apify/google-search-scraper` is enabled.
+See `REVIEW.md` for full actor table and rationale.
 
 ---
 
-## Tech Stack
+## Scan Pipeline Flow
 
-| Layer | Technology |
-|---|---|
-| AI analysis | LLM via OpenRouter (classification, severity scoring, summarisation) |
-| Web scraping & orchestration | Apify Actors + scheduled runs + webhooks |
-| Frontend | Next.js 15 (App Router, TypeScript) |
-| Styling | Tailwind CSS v4 (brand palette matches landing page) |
-| Icons | Lucide React |
-| Auth | Homegrown — bcrypt password hashing + JWT in httpOnly cookie |
-| Database | Firestore (via `@google-cloud/firestore`, ADC on Cloud Run) |
-| File storage | Cloud Storage (planned) |
-| Hosting | GCP Cloud Run |
-| CI/CD | Google Cloud Build (triggers on `app/**` push to `main`) |
-| Pitch/landing page | Static HTML + Tailwind CSS, hosted on Cloudflare Pages |
-| Alerting | Email digests (planned) |
+```
+POST /api/scan
+  └─ reads CORE_ACTOR_IDS (or actorIds from request body)
+  └─ calls startActorRun() for each actor → registers Apify webhook
+       └─ stores runId → scan document in Firestore
 
----
-
-## Apify Actors
-
-### `doppelspotter/whoisxml-brand-alert`
-
-Published at: [console.apify.com/actors/doppelspotter/whoisxml-brand-alert](https://console.apify.com/actors/doppelspotter/whoisxml-brand-alert)
-
-Source: `actors/whoisxml-brand-alert/`
-
-Wraps the [WhoisXML Brand Alert API](https://brand-alert.whoisxmlapi.com/api) to detect newly-registered domains containing brand keywords — surfacing typosquatting, lookalike domains, and potential impersonation attempts across 7,596+ TLDs.
-
-**Input:**
-| Field | Type | Required | Description |
-|---|---|---|---|
-| `apiKey` | string | ✅ | WhoisXML Brand Alert API key (BYOK) |
-| `brandKeywords` | string[] | ✅ | Keywords to monitor (e.g. `["acme", "acmecorp"]`) |
-| `lookbackDays` | integer | — | Days back to check (1–14, default 1) |
-| `withTypos` | boolean | — | Include typo variants (default false) |
-
-**Output dataset items:**
-| Field | Description |
-|---|---|
-| `domainName` | Newly-registered domain |
-| `tld` | Top-level domain (e.g. `.com`) |
-| `registeredAt` | ISO date of registration |
-| `keyword` | Brand keyword that matched |
-| `whoisUrl` | WHOIS lookup URL |
-| `source` | Always `whoisxml-brand-alert` |
-
-**To redeploy after changes:**
-```bash
-cd actors/whoisxml-brand-alert
-apify push
+Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
+  └─ validates X-Apify-Webhook-Secret header
+  └─ fetches up to 50 items from Apify dataset
+  └─ for each item: calls LLM → writes Finding to Firestore (all items, including false positives)
+       └─ isFalsePositive: true findings are stored but excluded from default API responses
+  └─ marks actor run complete; if all runs done → marks scan complete
 ```
 
 ---
 
-## Deployment
+## LLM Analysis
 
-### App (Web Application)
+- **File:** `app/src/lib/analysis/`
+- **When:** Once per dataset item, sequentially, inside the webhook handler
+- **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
+- **Prompts:** `SYSTEM_PROMPT` and `buildAnalysisPrompt()` in `prompts.ts`
+- **Output:** structured JSON `{ severity, title, llmAnalysis, isFalsePositive }`
+- **Raw LLM response** string is stored on every finding as `rawLlmResponse` for debugging
+- **False positives** are written to Firestore with `isFalsePositive: true`; filtered from default API responses; visible in the brand page "Non-hits" section
 
-The `app/` directory is a Next.js 15 application deployed to **GCP Cloud Run** via **Cloud Build**.
-
-**Local development:**
-```bash
-cd app
-cp .env.local.example .env.local   # Fill in your values — see docs/GCP_SETUP.md
-npm install
-npm run dev
-# → http://localhost:3000
-```
-
-**CI/CD (automatic):**
-Any push to `main` that changes files under `app/**` triggers Cloud Build, which:
-1. Builds the Docker image from `app/Dockerfile` (Node 22, multi-stage, no build-time secrets)
-2. Pushes to Artifact Registry (`europe-west2-docker.pkg.dev`)
-3. Deploys to Cloud Run (`doppelspotter-app` service, `europe-west2`)
-
-The Cloud Build trigger uses an **included files filter of `app/**`**, so changes to `landing-page/`, `docs/`, `AGENTS.md`, etc. do NOT trigger a build.
-
-**GCP setup:** See `docs/GCP_SETUP.md` for complete step-by-step instructions covering Firestore, Artifact Registry, Cloud Build, and Cloud Run environment variable configuration.
-
-**Scan pipeline setup:** See `docs/PIPELINE_SETUP.md` for API key acquisition (Apify, OpenRouter, WhoisXML) and ngrok tunnel configuration for local webhook testing.
-
-### Landing Page
-
-The `landing-page/` directory is deployed as a static site to **Cloudflare Pages** at `pitch.doppelspotter.com`.
-
-```bash
-npm run deploy   # runs wrangler deploy from project root
-```
+See `REVIEW.md` for full prompt text and LLM pipeline details.
 
 ---
 
 ## Environment Variables
 
-All required environment variables are documented in `app/.env.local.example`. All production env vars are set directly on the Cloud Run service via the Cloud Console — there is no Secret Manager dependency.
-
-| Variable | Required | Purpose |
-|---|---|---|
-| `GCP_PROJECT_ID` | Yes | Firestore project identification |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Local dev only | Path to service account key JSON (not needed on Cloud Run — ADC is used) |
-| `AUTH_JWT_SECRET` | Yes | Signs and verifies session JWTs |
-| `APIFY_API_TOKEN` | Yes | Apify actor execution |
-| `APIFY_WEBHOOK_SECRET` | Yes | Validates Apify webhook callbacks |
-| `WHOISXML_API_KEY` | Yes | WhoisXML Brand Alert actor |
-| `OPENROUTER_API_KEY` | Yes | LLM analysis |
-| `APP_URL` | Yes | Public base URL — used to construct Apify webhook callback URLs (use ngrok for local dev) |
-| `OPENROUTER_MODEL` | No | LLM model selection (default: `anthropic/claude-3.5-haiku`) |
-| `FIRESTORE_DATABASE_ID` | No | Firestore database name (default: `(default)`) |
-
-See `docs/PIPELINE_SETUP.md` for a step-by-step guide to obtaining API keys and configuring local webhook testing with ngrok.
-
----
-
-## Data Model (Firestore)
-
-```
-users/{userId}                    ← UserRecord: email, passwordHash, createdAt
-brands/{brandId}                  ← BrandProfile: name, keywords, officialDomains, userId
-scans/{scanId}                    ← Scan: brandId, status, actorIds, actorRunIds, actorRuns, completedRunCount, findingCount, userId
-findings/{findingId}              ← Finding: source, severity, title, llmAnalysis, rawData, userId
-```
-
-All documents include a `userId` field for ownership enforcement. Access control is enforced server-side in the Next.js API routes — all Firestore access is via the server, never from the browser directly.
-
----
-
-## Hackathon Context
-
-- **Event:** GenAI Zürich 2026 — [genaizurich.devpost.com](https://genaizurich.devpost.com)
-- **Track:** Apify (Industry-agnostic)
-- **Challenge paths addressed:** Path 1 (AI Agent) + Path 3 (Build an Apify Actor)
-- **Online build phase:** 2–18 March 2026
-- **On-site phase:** 1–2 April 2026, Volkshaus Zürich
-
-**Submission requirements (online phase, due 18 March 12:00):**
-- Prototype (this repo, public)
-- Optional: 1-min demo video, team photo
-- Via Devpost
-
-**Submission requirements (final, due 2 April 13:00):**
-- Final prototype (this repo)
-- Project landing page (`pitch.doppelspotter.com`)
-- Slides + video + team photo
-- Via Devpost
-
----
-
-## Key Sponsor Credits
-
-| Sponsor | Credit |
+| Variable | Purpose |
 |---|---|
-| **Apify** | $100 free platform credits — promo code `GENAIHACKER` at [console.apify.com/billing/subscription](https://console.apify.com/billing/subscription) |
-| **OpenRouter** | LLM access via Apify's OpenRouter Actor proxy |
-| **Lovable** | 100 credits (code sent via email 2 March) |
-| **Hugging Face** | 1 month free PRO — join [huggingface.co/genai-zurich](https://huggingface.co/genai-zurich) |
+| `APIFY_API_TOKEN` | Apify platform token |
+| `APIFY_WEBHOOK_SECRET` | Shared secret for webhook validation |
+| `WHOISXML_API_KEY` | WhoisXML Brand Alert API key (custom actor) |
+| `OPENROUTER_API_KEY` | OpenRouter API key |
+| `OPENROUTER_MODEL` | LLM model override (default: `anthropic/claude-3.5-haiku`) |
+| `AUTH_JWT_SECRET` | JWT signing secret (7-day tokens) |
+| `GCP_PROJECT_ID` | Google Cloud project ID |
+| `FIRESTORE_DATABASE_ID` | Firestore DB (default: `(default)`) |
+| `APP_URL` | Public base URL — used to construct webhook callback URLs |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Local dev only: path to GCP service account JSON |
+
+---
+
+## Firestore Collections
+
+| Collection | Key Fields |
+|---|---|
+| `users` | id, email, passwordHash, createdAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], createdAt, updatedAt |
+| `scans` | id, brandId, userId, status, actorIds[], actorRuns{}, completedRunCount, findingCount, startedAt, completedAt |
+| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, rawLlmResponse?, createdAt |
+
+---
+
+## User Management
+
+Signup via the web UI and API is **disabled** during development. Use the CLI to create accounts:
+
+```bash
+# Run from the app/ directory
+npm run add-user -- --email user@example.com --password secret123
+```
+
+Script: `app/scripts/add-user.ts`. Reads `.env.local` automatically (same file used by `next dev`).
+
+---
+
+## Key Docs
+
+- [`docs/GCP_SETUP.md`](docs/GCP_SETUP.md) — GCP / Firestore / Cloud Run setup
+- [`docs/PIPELINE_SETUP.md`](docs/PIPELINE_SETUP.md) — Apify, OpenRouter, ngrok, env vars
+- [`REVIEW.md`](REVIEW.md) — Ongoing scan quality review: actor details and LLM prompts

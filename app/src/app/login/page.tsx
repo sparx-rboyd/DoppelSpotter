@@ -5,13 +5,10 @@ import { useRouter } from 'next/navigation';
 import { ScanEye } from 'lucide-react';
 import { useAuth } from '@/lib/auth/auth-context';
 
-type Mode = 'signin' | 'signup';
-
 export default function LoginPage() {
-  const { signIn, signUp } = useAuth();
+  const { signIn } = useAuth();
   const router = useRouter();
 
-  const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -23,11 +20,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      if (mode === 'signin') {
-        await signIn(email, password);
-      } else {
-        await signUp(email, password);
-      }
+      await signIn(email, password);
       router.replace('/dashboard');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred.');
@@ -47,23 +40,9 @@ export default function LoginPage() {
 
         {/* Card */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-8">
-          <h1 className="text-xl font-bold text-gray-900 mb-1">
-            {mode === 'signin' ? 'Sign in to your account' : 'Create your account'}
-          </h1>
-          <p className="text-sm text-gray-500 mb-6">
-            {mode === 'signin'
-              ? "Don't have an account? "
-              : 'Already have an account? '}
-            <button
-              type="button"
-              onClick={() => { setMode(mode === 'signin' ? 'signup' : 'signin'); setError(''); }}
-              className="text-brand-600 hover:underline font-medium"
-            >
-              {mode === 'signin' ? 'Sign up' : 'Sign in'}
-            </button>
-          </p>
+          <h1 className="text-xl font-bold text-gray-900 mb-1">Sign in to your account</h1>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4 mt-6">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
                 Email address
@@ -87,7 +66,7 @@ export default function LoginPage() {
               <input
                 id="password"
                 type="password"
-                autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                autoComplete="current-password"
                 required
                 minLength={8}
                 value={password}
@@ -111,7 +90,7 @@ export default function LoginPage() {
               {loading ? (
                 <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : null}
-              {mode === 'signin' ? 'Sign in' : 'Create account'}
+              Sign in
             </button>
           </form>
         </div>

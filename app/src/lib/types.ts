@@ -52,6 +52,10 @@ export interface Finding {
   llmAnalysis: string;
   url?: string;
   rawData: Record<string, unknown>;
+  /** Set to true for LLM-classified false positives (not real threats). */
+  isFalsePositive?: boolean;
+  /** The raw JSON string returned by the LLM before parsing. */
+  rawLlmResponse?: string;
   createdAt: Timestamp;
 }
 

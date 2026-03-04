@@ -11,6 +11,9 @@ export interface ActorConfig {
 /**
  * Registry of all Apify actors used by DoppelSpotter.
  * v1 core actors are enabled by default; v2 stretch actors are opt-in.
+ *
+ * NOTE: Only the Google Search Scraper is currently enabled while we review
+ * and tune scan quality. Re-enable others by setting enabledByDefault: true.
  */
 export const ACTOR_REGISTRY: ActorConfig[] = [
   // ─── v1 Core ──────────────────────────────────────────────────────────────
@@ -18,7 +21,7 @@ export const ACTOR_REGISTRY: ActorConfig[] = [
     actorId: 'doppelspotter/whoisxml-brand-alert',
     source: 'domain',
     displayName: 'Newly-Registered Domains',
-    enabledByDefault: true,
+    enabledByDefault: false, // Temporarily disabled during scan quality review
   },
   {
     actorId: 'apify/google-search-scraper',
@@ -30,31 +33,31 @@ export const ACTOR_REGISTRY: ActorConfig[] = [
     actorId: 'apify/instagram-search-scraper',
     source: 'instagram',
     displayName: 'Instagram',
-    enabledByDefault: true,
+    enabledByDefault: false, // Temporarily disabled during scan quality review
   },
   {
     actorId: 'data-slayer/twitter-search',
     source: 'twitter',
     displayName: 'Twitter / X',
-    enabledByDefault: true,
+    enabledByDefault: false, // Temporarily disabled during scan quality review
   },
   {
     actorId: 'apify/facebook-search-scraper',
     source: 'facebook',
     displayName: 'Facebook',
-    enabledByDefault: true,
+    enabledByDefault: false, // Temporarily disabled during scan quality review
   },
   {
     actorId: 'apilab/google-play-scraper',
     source: 'google-play',
     displayName: 'Google Play',
-    enabledByDefault: true,
+    enabledByDefault: false, // Temporarily disabled during scan quality review
   },
   {
     actorId: 'dan.scraper/apple-app-store-search-scraper',
     source: 'app-store',
     displayName: 'Apple App Store',
-    enabledByDefault: true,
+    enabledByDefault: false, // Temporarily disabled during scan quality review
   },
   {
     actorId: 'ryanclinton/euipo-trademark-search',

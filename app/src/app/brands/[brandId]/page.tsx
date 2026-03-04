@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Play, AlertCircle, Shield, CheckCircle2, Loader2 } from 'lucide-react';
+import { ArrowLeft, Play, AlertCircle, Shield, CheckCircle2, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
@@ -20,6 +20,8 @@ export default function BrandDetailPage() {
 
   const [brand, setBrand] = useState<BrandProfile | null>(null);
   const [findings, setFindings] = useState<Finding[]>([]);
+  const [nonHits, setNonHits] = useState<Finding[]>([]);
+  const [showNonHits, setShowNonHits] = useState(false);
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [activeScan, setActiveScan] = useState<Scan | null>(null);
@@ -35,15 +37,16 @@ export default function BrandDetailPage() {
     }
   }
 
-  // Fetch brand profile and initial findings
+  // Fetch brand profile, findings, and non-hits
   useEffect(() => {
     async function fetchData() {
       setError('');
       setLoading(true);
       try {
-        const [brandRes, findingsRes] = await Promise.all([
+        const [brandRes, findingsRes, nonHitsRes] = await Promise.all([
           fetch(`/api/brands/${brandId}`, { credentials: 'same-origin' }),
           fetch(`/api/brands/${brandId}/findings`, { credentials: 'same-origin' }),
+          fetch(`/api/brands/${brandId}/findings?nonHitsOnly=true`, { credentials: 'same-origin' }),
         ]);
 
         if (!brandRes.ok) throw new Error('Brand not found');
@@ -53,6 +56,11 @@ export default function BrandDetailPage() {
         if (findingsRes.ok) {
           const findingsJson = await findingsRes.json();
           setFindings(findingsJson.data ?? []);
+        }
+
+        if (nonHitsRes.ok) {
+          const nonHitsJson = await nonHitsRes.json();
+          setNonHits(nonHitsJson.data ?? []);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
@@ -66,10 +74,17 @@ export default function BrandDetailPage() {
 
   async function refreshFindings() {
     try {
-      const res = await fetch(`/api/brands/${brandId}/findings`, { credentials: 'same-origin' });
-      if (res.ok) {
-        const json = await res.json();
+      const [findingsRes, nonHitsRes] = await Promise.all([
+        fetch(`/api/brands/${brandId}/findings`, { credentials: 'same-origin' }),
+        fetch(`/api/brands/${brandId}/findings?nonHitsOnly=true`, { credentials: 'same-origin' }),
+      ]);
+      if (findingsRes.ok) {
+        const json = await findingsRes.json();
         setFindings(json.data ?? []);
+      }
+      if (nonHitsRes.ok) {
+        const json = await nonHitsRes.json();
+        setNonHits(json.data ?? []);
       }
     } catch {
       // Non-critical — findings will just not refresh
@@ -228,6 +243,7 @@ export default function BrandDetailPage() {
                   <CheckCircle2 className="w-4 h-4 text-green-600" />
                   <span className="text-sm font-medium text-green-800">
                     Scan complete — {findings.length} finding{findings.length !== 1 ? 's' : ''} detected
+                    {nonHits.length > 0 && `, ${nonHits.length} non-hit${nonHits.length !== 1 ? 's' : ''} filtered`}
                   </span>
                 </div>
               )}
@@ -269,6 +285,50 @@ export default function BrandDetailPage() {
                     </div>
                   )}
                 </div>
+              </div>
+
+              {/* Non-hits / false positives (collapsible) */}
+              <div className="mt-4 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowNonHits((v) => !v)}
+                  className="w-full px-5 py-4 flex items-center justify-between gap-4 hover:bg-gray-50 transition text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    {showNonHits ? (
+                      <ChevronDown className="w-4 h-4 text-gray-400" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4 text-gray-400" />
+                    )}
+                    <div>
+                      <h2 className="text-base font-semibold text-gray-500">
+                        Non-hits
+                        {nonHits.length > 0 && (
+                          <span className="ml-2 text-xs font-normal text-gray-400">({nonHits.length})</span>
+                        )}
+                      </h2>
+                      <p className="text-xs text-gray-400">
+                        Results the LLM classified as false positives
+                      </p>
+                    </div>
+                  </div>
+                </button>
+
+                {showNonHits && (
+                  <div className="border-t border-gray-100 p-4 sm:p-6">
+                    {nonHits.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-8 gap-2">
+                        <p className="text-sm text-gray-400">No non-hits recorded yet.</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {nonHits.map((finding) => (
+                          <FindingCard key={finding.id} finding={finding} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </>
           )}

@@ -17,7 +17,6 @@ interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
-  signUp: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -53,21 +52,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser({ userId: data.userId, email: data.email });
   }
 
-  async function signUp(email: string, password: string) {
-    const res = await fetch('/api/auth/signup', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'same-origin',
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.error ?? 'Sign up failed');
-    }
-    const data = await res.json();
-    setUser({ userId: data.userId, email: data.email });
-  }
-
   async function signOut() {
     await fetch('/api/auth/logout', {
       method: 'POST',
@@ -77,7 +61,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
       {children}
     </AuthContext.Provider>
   );
