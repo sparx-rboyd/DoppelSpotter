@@ -72,7 +72,7 @@ images:
 
 substitutions:
   _SERVICE: doppelspotter-app
-  _REGION: europe-west6
+  _REGION: europe-west2
   _REPO: doppelspotter
 
 # Read build-time Firebase public config from Secret Manager
