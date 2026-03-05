@@ -23,13 +23,17 @@ export async function clearBrandActiveScanIfMatches(
   brandRef: DocumentReference,
   scanId: string,
   tx?: Transaction,
+  brand?: BrandProfile,
 ) {
   if (tx) {
-    const brandSnap = await tx.get(brandRef);
-    if (!brandSnap.exists) return;
+    const loadedBrand = brand ?? await (async () => {
+      const brandSnap = await tx.get(brandRef);
+      if (!brandSnap.exists) return null;
+      return brandSnap.data() as BrandProfile;
+    })();
+    if (!loadedBrand) return;
 
-    const brand = brandSnap.data() as BrandProfile;
-    if (brand.activeScanId === scanId) {
+    if (loadedBrand.activeScanId === scanId) {
       tx.update(brandRef, { activeScanId: FieldValue.delete() });
     }
     return;

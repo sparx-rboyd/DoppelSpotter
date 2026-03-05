@@ -56,7 +56,7 @@ primaryQuery = searchTerms.join(' OR ')
 
 | Actor | Input |
 |---|---|
-| `apify/google-search-scraper` | `{ queries: primaryQuery, maxPagesPerQuery: 3, resultsPerPage: 10 }` |
+| `apify/google-search-scraper` | `{ queries: primaryQuery, maxPagesPerQuery: Math.ceil(googleResultsLimit / 10) }` |
 | `apify/instagram-search-scraper` | `{ searchQueries: searchTerms, maxResults: 20 }` |
 | `data-slayer/twitter-search` | `{ searchTerms: searchTerms, maxTweets: 50 }` |
 | `apify/facebook-search-scraper` | `{ queries: searchTerms, maxResults: 20 }` |
@@ -86,8 +86,8 @@ push one dataset item per result — so 30 results → 30 items. It doesn't work
 
 Instead, the actor pushes **one dataset item per _page_ of Google results**. Each item
 is a single large JSON object that contains _all_ the results from that page bundled
-together inside an `organicResults` array. So with our current settings
-(`maxPagesPerQuery: 3`, ~10 results per page) we get:
+together inside an `organicResults` array. So if a brand is configured for 30 Google
+results (`googleResultsLimit: 30` → `maxPagesPerQuery: 3`, ~10 results per page) we get:
 
 ```
 Dataset item 1  →  SERP page 1  →  organicResults[0..9]  (results #1–10)
@@ -95,14 +95,15 @@ Dataset item 2  →  SERP page 2  →  organicResults[0..9]  (results #11–20)
 Dataset item 3  →  SERP page 3  →  organicResults[0..9]  (results #21–30)
 ```
 
-Three items total, not thirty.
+Three items total, not thirty. Brands configured for 10, 20, 40, etc. follow the same
+pattern: one dataset item per SERP page.
 
-This matters because the webhook handler calls AI analysis once per dataset item. So AI
-analysis receives the _entire first page of Google results_ as a single blob of JSON and
-must produce a single `Finding` from it. It's being asked to synthesise up to 10
-organic results, any paid ads, related queries, and People Also Ask boxes all in one
-go — rather than evaluating each link individually. See [AI analysis implications](#ai-analysis-implications)
-for why this is likely hurting quality.
+This matters because the webhook handler first receives page-level SERP blobs, then has to
+normalize them into per-URL result candidates before AI analysis can happen efficiently.
+The current pipeline now flattens only `organicResults`, dedupes repeated URLs within the run,
+keeps `relatedQueries` and `peopleAlsoAsk` as run-level context, and then classifies the
+deduped candidates in bounded chunks. See [AI analysis implications](#ai-analysis-implications)
+for the current shape of that pipeline.
 
 ### How we call it
 
@@ -111,15 +112,15 @@ Defined in `app/src/lib/apify/client.ts` → `buildActorInput()`:
 ```typescript
 // searchTerms = [brand.name, ...brand.keywords]
 // primaryQuery = searchTerms.join(' OR ')
+// googleResultsLimit is a per-brand setting: 10, 20, ... 100
 
-{ queries: primaryQuery, maxPagesPerQuery: 3, resultsPerPage: 10 }
+{ queries: primaryQuery, maxPagesPerQuery: Math.ceil(googleResultsLimit / 10) }
 ```
 
-**Example** — brand `Acme` with keywords `acme, acme-corp`:
+**Example** — brand `Acme` with keywords `acme, acme-corp` and `googleResultsLimit: 30`:
 ```
 queries: "Acme OR acme OR acme-corp"
 maxPagesPerQuery: 3
-resultsPerPage: 10   ← effectively ignored by Google (see note below)
 ```
 
 This produces **3 dataset items** (one per SERP page), each containing up to 10
@@ -130,8 +131,8 @@ organic results — ~30 organic results total per scan.
 | Parameter | Type | Our value | Description |
 |---|---|---|---|
 | `queries` | string | `"brand OR kw1 OR kw2"` | Newline-separated search terms or Google URLs. We pass a single `OR`-joined string. |
-| `maxPagesPerQuery` | integer | `3` | Number of SERP pages to scrape per query. Each page ≈ 10 organic results. |
-| `resultsPerPage` | integer | `10` | ⚠️ **Ignored by Google** — Google now hard-caps pages at 10 results. Use `maxPagesPerQuery` to get more results. |
+| `maxPagesPerQuery` | integer | `Math.ceil(googleResultsLimit / 10)` | Number of SERP pages to scrape per query. Each page ≈ 10 organic results. |
+| `resultsPerPage` | integer | _(not sent)_ | Google hard-caps SERPs at ~10 results, so we derive page count from the brand's `googleResultsLimit` instead. |
 | `countryCode` | string | _(unset — defaults to US)_ | Google domain / country for the search. |
 | `languageCode` | string | _(unset)_ | UI language (affects results on international queries). |
 | `mobileResults` | boolean | _(unset — defaults to false)_ | Desktop results returned by default. |
@@ -206,49 +207,44 @@ Each dataset item (one per SERP page scraped) has this structure:
 | `organicResults[].title` | Page title — often reveals intent |
 | `organicResults[].description` | Snippet — key context for AI analysis |
 | `organicResults[].emphasizedKeywords` | Keywords Google bolded — shows what matched our query |
-| `paidResults[]` | Competitors bidding on our brand name via Google Ads |
+| `paidResults[]` | Present in the raw actor data, but currently excluded from AI analysis to keep prompts compact |
 | `relatedQueries[]` | Titles like "acme corp fake" or "acme scam" are useful brand health signals |
 | `peopleAlsoAsk[]` | Can surface questions like "Is Acme Corp legitimate?" |
 
 ### AI analysis implications
 
-The Google Search actor uses `analysisMode: 'batch'`. All 3 SERP pages are combined into
-a **single AI analysis call** via `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPrompt()`.
+The Google Search actor still uses `analysisMode: 'batch'`, but the webhook no longer sends one
+huge raw SERP blob to the model. Instead it:
 
-- AI analysis sees all organic and paid results across all pages simultaneously and returns
-  **one assessed item per individual URL** — so up to ~30 organic results + paid results,
-  each evaluated independently.
-- One Firestore `Finding` is written per assessed result.
-- The full set of raw SERP pages is stored as `{ pages: [...], pageCount: N }` on every
-  Finding's `rawData` so the complete dataset is always available for debugging.
-- `relatedQueries` from all pages are reviewed by AI analysis; suspicious terms are returned
-  as `suggestedSearches` to trigger depth-1 follow-up scans.
-- Both `organicResults` and `paidResults` are assessed — paid results surface competitors
-  bidding on the brand name.
+- normalizes raw SERP pages into compact **organic-only** result candidates
+- dedupes repeated URLs within the run before AI analysis
+- classifies those candidates in **small chunks**, using stable `resultId`s instead of free-form URL matching
+- writes / upserts **one Firestore Finding per normalized URL per scan**
+- stores a compact normalized debug payload on each finding (`kind: 'google-normalized'`) with merged sightings and SERP context
+- runs a **separate** suggestion pass over deduped `relatedQueries` and `peopleAlsoAsk` to produce optional `suggestedSearches`
 
 ### Observations / tuning notes
 
-- [ ] **`resultsPerPage` is a no-op** — Google ignores it and always returns ~10 per page.
-      We should remove it from the input to avoid confusion.
+- [x] **`resultsPerPage` is a no-op** — Google ignores it and always returns ~10 per page.
+      We now omit it from the actor input and drive result count via `maxPagesPerQuery`.
 - [ ] **Single `OR` query vs multiple targeted queries** — currently we pass one broad
       `"BrandName OR kw1 OR kw2"` query. This surfaces general mentions but may miss
       impersonation patterns. Consider additional queries like `"BrandName fake"`,
       `"BrandName scam"`, or `site:` restricted searches.
 - [ ] **No country/language set** — defaults to US (`google.com`). For European brands
       this may miss results on `.co.uk`, `.de` etc. Consider parameterising `countryCode`.
-- [x] **One finding per page → now one finding per run → now one finding per result** — the
-      Google Search actor now uses `analysisMode: 'batch'`. All SERP pages are combined into
-      a single AI analysis call via `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPrompt()`. AI
-      analysis returns an `items` array with one assessment per individual organic/paid result
-      across all pages. One Firestore Finding is written per assessed result. The full set of
-      raw SERP pages is stored as `{ pages: [...], pageCount: N }` on every Finding's `rawData`
-      field so the complete raw dataset is always accessible for debugging.
-- [x] **`relatedQueries` are valuable signals** — `BATCH_SYSTEM_PROMPT` now explicitly
-      instructs AI analysis to review `relatedQueries` across all pages and include suspicious
-      terms as `suggestedSearches` for deep-search follow-up.
-- [x] **Paid results (`paidResults`)** — `BATCH_SYSTEM_PROMPT` now explicitly asks AI analysis
-      to assess both `organicResults` and `paidResults`, surfacing competitors bidding on
-      the brand name as individual findings.
+- [x] **One finding per URL per scan** — Google results are now normalized and deduped by
+      canonical URL before AI analysis. Repeated appearances across SERP pages, chunks, or
+      depth-1 deep-search runs merge into the same finding for that scan.
+- [x] **Chunked Google classification** — Google result candidates are classified in bounded
+      chunks rather than one giant prompt, which avoids context-limit failures at higher
+      `googleResultsLimit` values.
+- [x] **`relatedQueries` + `peopleAlsoAsk` drive follow-up suggestioning** — Google now uses a
+      separate suggestion pass over deduped SERP signals to produce `suggestedSearches` without
+      coupling that logic to per-result classification.
+- [x] **Paid results (`paidResults`) are excluded from AI analysis** — the raw actor still returns
+      them, but they are intentionally left out of the normalized prompt payload to keep Google
+      analysis focused and bounded.
 
 ---
 
@@ -257,6 +253,7 @@ a **single AI analysis call** via `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPro
 ### Overview
 
 AI analysis is invoked **after** each Apify actor run completes, once per dataset item.
+It classifies each raw scraping result as a genuine finding or a false positive,
 It classifies each raw scraping result as a genuine finding or a false positive,
 assigns a severity, and writes a short human-readable summary.
 
@@ -271,18 +268,23 @@ Apify calls POST /api/webhooks/apify on SUCCEEDED / FAILED / ABORTED
   └─ fetches all ignored URLs for the brand (isIgnored == true) → passed to AI analysis prompts
   └─ checks actor's analysisMode ('per-item' | 'batch')
        ├─ 'per-item': for each item → analyseItem() → AI analysis call → write Finding
-       └─ 'batch':    all items combined → analyseItemBatch() → one AI analysis call → write one Finding per assessed result
+       └─ 'batch' (Google):
+            ├─ normalize SERP pages into deduped organic result candidates
+            ├─ classify candidates in chunks → one AI analysis call per chunk
+            ├─ upsert one Finding per normalized URL per scan
+            └─ run a separate suggestion pass on relatedQueries + peopleAlsoAsk
   └─ marks actor run complete; once all runs done → marks scan complete
 ```
 
 ### When is AI analysis triggered?
 
-- Triggered inside `analyseItem()` or `analyseItemBatch()` in `app/src/app/api/webhooks/apify/route.ts`
+- Triggered inside `analyseItem()`, `analyseGoogleChunk()`, and `analyseGoogleSuggestions()` in `app/src/app/api/webhooks/apify/route.ts`
 - Only on `ACTOR.RUN.SUCCEEDED` events (failed/aborted runs skip analysis)
 - Items are capped at 50 per run (`MAX_ITEMS_PER_RUN`)
 - For `per-item` actors: one sequential AI analysis call per item (avoids OpenRouter rate limits)
-- For `batch` actors (e.g. Google Search): one AI analysis call for all items combined → one Finding per individual result assessed
-- Ignored URLs for the brand are fetched from Firestore at webhook time and injected into both `buildAnalysisPrompt()` and `buildBatchAnalysisPrompt()` — AI analysis is instructed to mark any matching URL as `isFalsePositive: true`
+- For Google batch mode: raw SERP pages are normalized into compact organic-result candidates, deduped by URL, classified in chunks, and upserted one-finding-per-URL-per-scan
+- A separate Google suggestion pass inspects deduped `relatedQueries` and `peopleAlsoAsk` signals to produce optional `suggestedSearches` for depth-0 runs
+- Ignored URLs for the brand are fetched from Firestore at webhook time and injected into both `buildAnalysisPrompt()` and `buildGoogleChunkAnalysisPrompt()` — AI analysis is instructed to mark any matching URL as `isFalsePositive: true`
 
 ### AI Analysis Provider & Model
 
@@ -307,6 +309,7 @@ Used for actors whose `analysisMode` is `'per-item'`. Returns a single `Analysis
 You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
 
 Your task is to analyse a web scraping result and determine whether it represents a potential brand infringement.
+Use British English spelling and phrasing in all human-readable output fields.
 
 You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
 {
@@ -324,49 +327,45 @@ Severity guidelines:
 Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).
 ```
 
-### System Prompt (batch mode)
+### System Prompt (Google chunk classification)
 
-**Defined in:** `app/src/lib/analysis/prompts.ts` → `BATCH_SYSTEM_PROMPT`
+**Defined in:** `app/src/lib/analysis/prompts.ts` → `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT`
 
-Used for the Google Search actor (`analysisMode: 'batch'`). Returns a `BatchAnalysisOutput` — an array of per-result assessments plus optional `suggestedSearches`.
+Used for the Google Search actor (`analysisMode: 'batch'`) after normalization. Returns a `GoogleChunkAnalysisOutput` keyed by `resultId`.
 
 ```
 You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
 
-You will receive one or more Google Search results pages (SERP data) for a brand. Your task is to extract every
-individual organic result and paid result from all pages and assess each one separately for brand infringement.
+You will receive a compact list of Google organic search result candidates for a brand, plus supporting SERP context
+such as related queries and People Also Ask questions.
+
+Use British English spelling and phrasing in all human-readable output fields.
 
 You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
 {
   "items": [
     {
-      "url": "the exact URL of this result",
-      "title": "the page title of this result",
+      "resultId": "the exact resultId from the input candidate",
+      "title": "Short, descriptive title of the finding (max 10 words)",
       "severity": "high" | "medium" | "low",
       "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
       "isFalsePositive": boolean
     }
-  ],
-  "suggestedSearches": ["query 1", "query 2"]
+  ]
 }
 
 Rules for "items":
-- Include every organic result (from organicResults[]) and every paid result (from paidResults[]) across all pages.
-- Do NOT include the SERP page itself — assess individual result URLs only.
-- Each item must have all five fields: url, title, severity, analysis, isFalsePositive.
+- Include exactly one item for every input result candidate and reuse the exact same resultId.
+- Assess only the provided result candidates.
+- Do NOT turn related queries or People Also Ask questions into findings.
 - Each "analysis" must be fully standalone — do NOT reference other items in the list.
-
-[... severity guidelines identical to per-item prompt ...]
-
-The "suggestedSearches" field is OPTIONAL. Only include it when you spot suspicious related search terms
-(from "relatedQueries" sections) that warrant a dedicated follow-up search. Criteria:
-- The query implies impersonation, fraud, or brand misuse (e.g. "fake [brand]", "[brand] scam")
-- The query involves a lookalike name NOT covered in the results above
-- You genuinely need more data before you can assess whether a threat exists
-
-Do NOT suggest follow-up searches for clearly legitimate queries, queries already investigated,
-or more than 3 in total. Omit "suggestedSearches" entirely if none are warranted.
 ```
+
+### System Prompt (Google suggestion pass)
+
+**Defined in:** `app/src/lib/analysis/prompts.ts` → `GOOGLE_SUGGESTION_SYSTEM_PROMPT`
+
+Runs separately from Google result classification. Returns a `GoogleSuggestionOutput` with up to 3 follow-up queries derived from `relatedQueries` and `peopleAlsoAsk`.
 
 ### User Prompt Template (per-item mode)
 
@@ -387,15 +386,15 @@ Monitoring surface: <source>
 Raw scraping result to analyse:
 <JSON.stringify(rawData, null, 2)>
 
-Analyse this result and return your assessment as JSON. Do not include "suggestedSearches" — this is a single-item analysis.
+Analyse this result and return your assessment as JSON. Use British English in any human-readable text you generate. Do not include "suggestedSearches" — this is a single-item analysis.
 ```
 
 The `source` field is the actor's `FindingSource` tag (e.g. `google`, `domain`, `instagram`).
 The `rawData` is the full unmodified item from the Apify dataset.
 
-### User Prompt Template (batch mode)
+### User Prompt Template (Google chunk classification)
 
-**Defined in:** `app/src/lib/analysis/prompts.ts` → `buildBatchAnalysisPrompt()`
+**Defined in:** `app/src/lib/analysis/prompts.ts` → `buildGoogleChunkAnalysisPrompt()`
 
 ```
 Brand being protected: "<brand.name>"
@@ -406,16 +405,39 @@ Official domains: <officialDomains>
 [Previously reviewed and dismissed URLs: ... (only if set)]
 Monitoring surface: <source>
 
-<deep search instruction — either "include up to 3 suggestedSearches" or "do NOT include suggestedSearches">
+Supporting SERP context:
+- Source queries: ...
+- Related queries: ...
+- People Also Ask: ...
 
-The following N SERP page(s) are from the same Google Search actor run. Assess every individual organic and
-paid result across all pages. Return one item in the "items" array per result URL.
+Assess every result candidate below and return one item in the "items" array per resultId.
+Use British English in any human-readable text you generate.
 
-Raw SERP data (N pages):
-<JSON.stringify(rawItems, null, 2)>
+Result candidates (N):
+<JSON.stringify(compactCandidates, null, 2)>
 ```
 
-`canSuggestSearches` is `true` for depth-0 runs and `false` for depth-1 (deep follow-up) runs.
+### User Prompt Template (Google suggestion pass)
+
+**Defined in:** `app/src/lib/analysis/prompts.ts` → `buildGoogleSuggestionPrompt()`
+
+```
+Brand being protected: "<brand.name>"
+Brand keywords: <keywords>
+Official domains: <officialDomains>
+[Watch words: ... (only if set)]
+[Safe words: ... (only if set)]
+Monitoring surface: <source>
+
+Current source queries:
+- ...
+
+Related queries:
+- ...
+
+People Also Ask:
+- ...
+```
 
 ### Watch Words & Safe Words
 
@@ -427,7 +449,7 @@ brand create/edit form and stored in Firestore.
 | `watchWords` | "concerning terms the brand owner does NOT want associated with their brand — note any presence or implied association and use its discretion on severity impact" |
 | `safeWords` | "terms the brand owner is comfortable being associated with — treat results containing these with reduced caution unless there are strong warning signs elsewhere" |
 
-Both are passed to **both** `buildAnalysisPrompt()` and `buildBatchAnalysisPrompt()` and are omitted from the prompt when not set.
+Both are passed to `buildAnalysisPrompt()`, `buildGoogleChunkAnalysisPrompt()`, and `buildGoogleSuggestionPrompt()` and are omitted from the prompt when not set.
 
 ### Expected AI Analysis Output Schema
 
@@ -440,20 +462,21 @@ interface AnalysisOutput {
   title: string;          // max 10 words
   llmAnalysis: string;    // 2–4 sentence plain-language explanation
   isFalsePositive: boolean;
-  suggestedSearches?: string[];  // batch mode only — ignored for per-item
 }
 
-// Batch mode — one assessed result per organic/paid search result
-interface PerPageFinding {
-  url: string;
+interface GoogleChunkAnalysisItem {
+  resultId: string;
   title: string;
   severity: 'high' | 'medium' | 'low';
   analysis: string;       // 2–3 sentence standalone explanation
   isFalsePositive: boolean;
 }
 
-interface BatchAnalysisOutput {
-  items: PerPageFinding[];
+interface GoogleChunkAnalysisOutput {
+  items: GoogleChunkAnalysisItem[];
+}
+
+interface GoogleSuggestionOutput {
   suggestedSearches?: string[];  // up to MAX_SUGGESTED_SEARCHES (3) queries
 }
 ```
@@ -464,25 +487,30 @@ interface BatchAnalysisOutput {
 1. Strips markdown code fences (in case the model wraps JSON in ` ```json ``` `)
 2. `JSON.parse()`s the result
 3. Validates all four required fields (`severity`, `title`, `llmAnalysis`, `isFalsePositive`) are present and correctly typed
-4. Validates optional `suggestedSearches` — filters to non-empty strings, caps at `MAX_SUGGESTED_SEARCHES` (3)
-5. Returns `null` on any failure
+4. Returns `null` on any failure
 
-**`parseBatchAnalysisOutput()`** in `app/src/lib/analysis/types.ts` (batch mode):
+**`parseGoogleChunkAnalysisOutput()`** in `app/src/lib/analysis/types.ts` (Google chunk mode):
 1. Same code-fence stripping
 2. `JSON.parse()`s the result
-3. Validates `items` is a non-empty array; filters out any items missing required fields
-4. Validates optional `suggestedSearches` — same filtering as above
+3. Validates `items` is a non-empty array and each `resultId` matches one of the provided input candidates
+4. Drops duplicate / invalid resultIds so only known candidates are accepted
 5. Returns `null` if `items` is empty or entirely invalid after filtering
+
+**`parseGoogleSuggestionOutput()`** in `app/src/lib/analysis/types.ts` (Google suggestion mode):
+1. Same code-fence stripping
+2. `JSON.parse()`s the result
+3. Filters `suggestedSearches` to unique non-empty strings
+4. Caps the final set at `MAX_SUGGESTED_SEARCHES` (3)
 
 ### Fallback Behaviour
 
-If the AI analysis call or parse fails for an item, a fallback `Finding` is still written to Firestore:
+If the AI analysis call or parse fails for an item / Google chunk result, a fallback `Finding` is still written (or upserted) to Firestore:
 
 ```
 severity:    'medium'
 title:       'Unanalysed result — review manually'
 description: 'AI analysis failed for this item. Raw data is preserved for manual review.'
-rawData:     (full item preserved)
+rawData:     per-item actors keep the original item; Google keeps the compact normalized debug payload
 ```
 
 ### False Positive Filtering
@@ -508,4 +536,4 @@ _(To be filled in as the review progresses.)_
 - [ ] Are the search queries (using `OR`) producing relevant results for brand monitoring?
 - [ ] How well does AI analysis classify Google Search results vs. other sources?
 - [ ] Is the false positive rate too high / too low?
-- [ ] Are `maxPagesPerQuery: 3, resultsPerPage: 10` (30 results total) the right limits?
+- [ ] Is the per-brand `googleResultsLimit` range of 10-100 results the right trade-off?

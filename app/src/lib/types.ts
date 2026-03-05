@@ -17,6 +17,10 @@ export interface BrandProfile {
   name: string;
   keywords: string[];
   officialDomains: string[];
+  /** Number of Google search results to include per scan, in increments of 10. */
+  googleResultsLimit?: number;
+  /** Whether AI analysis may trigger Google deep-search follow-up runs for this brand. */
+  allowAiDeepSearches?: boolean;
   /** Internal pointer to the currently active scan for this brand, if any. */
   activeScanId?: string;
   /** Terms AI analysis should flag if found associated with the brand in search results. */
@@ -97,9 +101,9 @@ export interface ActorRunInfo {
   source: FindingSource;
   /** Apify run status for this individual actor */
   status: ActorRunStatus;
-  /** Total items in the dataset — set once the dataset has been fetched */
+  /** Total analysable items for this run (dataset items for per-item actors, deduped result candidates for Google). */
   itemCount?: number;
-  /** Number of items that have completed AI analysis so far */
+  /** Number of items that have completed AI analysis so far. */
   analysedCount?: number;
   /**
    * 0 = initial scan run; 1 = AI-requested deep follow-up.
@@ -108,6 +112,10 @@ export interface ActorRunInfo {
   searchDepth?: number;
   /** The literal query string used for this run — set on deep follow-up runs */
   searchQuery?: string;
+  /** Set once a depth-0 Google run has reserved its deep-search suggestions. */
+  deepSearchSuggestionsProcessed?: boolean;
+  /** The follow-up queries reserved for this run, if any. */
+  suggestedSearches?: string[];
 }
 
 export interface Scan {

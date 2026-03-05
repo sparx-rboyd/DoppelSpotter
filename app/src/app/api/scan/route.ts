@@ -215,17 +215,27 @@ export async function DELETE(request: NextRequest) {
       if (!freshScanDoc.exists) throw new HttpError('Scan not found', 404);
 
       const freshScan = scanFromSnapshot(freshScanDoc);
+      const brandRef = db.collection('brands').doc(freshScan.brandId);
+      const brandDoc = await tx.get(brandRef);
       if (freshScan.userId !== uid) throw new HttpError('Forbidden', 403);
       if (!isScanInProgress(freshScan.status)) {
         throw new HttpError('Scan is not in progress', 409);
       }
 
       runIds = freshScan.actorRunIds ?? [];
+      const brand = brandDoc.exists ? (brandDoc.data() as BrandProfile) : null;
+
+      await clearBrandActiveScanIfMatches(
+        brandRef,
+        scanId,
+        tx,
+        brand ?? undefined,
+      );
+
       tx.update(scanDoc.ref, {
         status: 'cancelled',
         completedAt: FieldValue.serverTimestamp(),
       });
-      await clearBrandActiveScanIfMatches(db.collection('brands').doc(freshScan.brandId), scanId, tx);
     });
   } catch (err) {
     if (err instanceof HttpError) {

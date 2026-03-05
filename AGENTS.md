@@ -77,6 +77,7 @@ POST /api/scan
  └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ reads CORE_ACTOR_IDS (or actorIds from request body)
+ └─ derives Google Search `maxPagesPerQuery` from `brands.googleResultsLimit` (10-100, step 10; default 10)
  └─ calls startActorRun() for each actor → registers Apify webhook
  └─ stores runId → scan document in Firestore
 
@@ -108,12 +109,20 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ validates X-Apify-Webhook-Secret header
  └─ fetches up to 50 items from Apify dataset
  └─ per-item mode: one AI analysis call per dataset item → one Finding per item
- └─ batch mode (Google Search): one AI analysis call for all SERP pages combined
-      └─ AI analysis returns per-result assessments (one per organic/paid result across all pages)
-      └─ one Finding written per individual search result
+ └─ batch mode (Google Search): normalize SERP pages into compact organic-result candidates
+      └─ excludes ads from AI analysis; keeps `relatedQueries` + `peopleAlsoAsk` as run-level context
+      └─ dedupes repeated URLs within the run before analysis
+      └─ chunked AI classification: one call per bounded candidate chunk
+      └─ each chunk may return grounded `suggestedSearches` based on its suspicious results + SERP context
+      └─ webhook combines, dedupes, and ranks chunk suggestions
+      └─ aggregate suggestion fallback reviews SERP intent signals + notable candidate outcomes when chunk suggestions are weak or absent
+      └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
       └─ isFalsePositive: true findings are stored but excluded from default API responses
- └─ (batch mode, depth 0 only) if AI analysis returns suggestedSearches → triggers deep-search runs
+ └─ (batch mode, depth 0 only) if ranked chunk/fallback suggestions are present and the brand allows deep search → triggers deep-search runs
+      └─ suggestions are reserved on the originating run so duplicate callbacks do not fan out extra searches
       └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
+      └─ each deep-search Google run uses at least 3 SERP pages, even when the initial scan is configured for fewer
+      └─ detailed debug logging records normalization, chunk outcomes, suggestion ranking, reservations, and deep-search launches
       └─ deep-search runs complete via the same webhook, depth 1 — no further recursion
  └─ marks actor run complete; if all runs done → marks scan complete and clears `brands.activeScanId`
 ```
@@ -125,11 +134,11 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **File:** `app/src/lib/analysis/`
 - **When:** After each Apify actor run completes, inside the webhook handler
 - **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
-- **Prompts:** `SYSTEM_PROMPT` + `buildAnalysisPrompt()` for per-item mode; `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPrompt()` for batch mode; all in `prompts.ts`
+- **Prompts:** `SYSTEM_PROMPT` + `buildAnalysisPrompt()` for per-item mode; `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification and grounded deep-search suggestioning; `GOOGLE_SUGGESTION_SYSTEM_PROMPT` + `buildGoogleSuggestionPrompt()` for aggregate Google deep-search fallback suggestioning
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
 - **Per-item output:** structured JSON `{ severity, title, llmAnalysis, isFalsePositive }`
-- **Batch output:** structured JSON `{ items: [{ url, title, severity, analysis, isFalsePositive }], suggestedSearches? }`
+- **Google chunk output:** structured JSON `{ items: [{ resultId, title, severity, analysis, isFalsePositive }], suggestedSearches? }`
 - **Raw AI response** string is stored on every finding as `rawLlmResponse` for debugging
 - **False positives** are written to Firestore with `isFalsePositive: true`; filtered from default API responses; visible in the brand page "Non-hits" section
 
@@ -140,26 +149,35 @@ Each actor in the registry declares how its dataset items should be sent to AI a
 | Mode | Behaviour |
 |---|---|
 | `'per-item'` (default) | One AI analysis call per dataset item → one Finding per item |
-| `'batch'` | All items combined into one AI analysis call → one consolidated Finding per run |
+| `'batch'` | Run-level normalization/chunking before AI analysis → one Finding per normalized URL |
 
 `'batch'` is used for actors whose items are pages/slices of the same query (e.g. Google Search
-SERP pages), so AI analysis sees the full result set rather than analysing each slice in isolation.
-The combined `rawData` is stored as `{ pages: [...], pageCount: N }`.
+SERP pages), so the webhook can normalize and dedupe repeated URLs before AI analysis. Google
+findings now store a compact normalized debug payload (`kind: 'google-normalized'`) with
+candidate metadata, merged sightings, and SERP context instead of the full page blobs.
 
 See `REVIEW.md` for full prompt text and AI analysis pipeline details.
 
 ### Deep search (`suggestedSearches`)
 
-When the Google Search actor runs at depth 0 (initial scan), AI analysis may include a
-`suggestedSearches` array in its response — up to 3 queries it wants to investigate further
-based on suspicious `relatedQueries` in the SERP data.
+When the Google Search actor runs at depth 0 (initial scan), each chunked Google classification
+call may return a `suggestedSearches` array — up to 3 grounded follow-up queries based on the
+suspicious result candidates in that chunk plus its supporting `relatedQueries` / `peopleAlsoAsk`
+signals. The webhook combines, dedupes, and ranks those chunk-level suggestions, then runs an
+aggregate suggestion fallback over the run-level SERP intent signals plus the most notable
+candidate outcomes when it needs extra coverage. This is only enabled when the brand's
+`allowAiDeepSearches` setting is true.
 
 The webhook handler calls `startDeepSearchRun()` for each suggested query, registers the new
 Apify run IDs on the scan document, and processes results via the same webhook pipeline at
 depth 1. Deep-search runs never produce further follow-ups (hard loop guard: `searchDepth === 0`
-check before triggering). `markActorRunComplete` always reads `actorRunIds.length` from a
-fresh Firestore snapshot inside its transaction, so dynamically-added runs are counted correctly
-for scan completion.
+check before triggering). Suggested queries are reserved on the originating run before any new
+Apify runs are started, so duplicate webhook callbacks do not fan out duplicate deep-search runs.
+`markActorRunComplete` always reads `actorRunIds.length` from a fresh Firestore snapshot inside
+its transaction, so dynamically-added runs are counted correctly for scan completion. Deep-search
+runs are skipped entirely when `allowAiDeepSearches` is false for the brand. When enabled, each
+deep-search Google run uses at least 3 SERP pages so low initial result limits do not starve
+follow-up coverage.
 
 `ActorRunInfo` carries `searchDepth` (0 or 1) and `searchQuery` (the literal query string for
 depth-1 runs). The brand page progress indicator shows a "Deep search" badge and surfaces the
@@ -207,7 +225,7 @@ Users can manually dismiss (ignore) any non-false-positive finding at the indivi
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **activeScanId?**, watchWords[]?, safeWords[]?, createdAt, updatedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **googleResultsLimit?**, **allowAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{}, completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount** (denormalized — written by webhook, updated on ignore/un-ignore), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, rawLlmResponse?, createdAt |
 

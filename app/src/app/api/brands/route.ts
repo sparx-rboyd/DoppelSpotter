@@ -2,6 +2,12 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
+import {
+  DEFAULT_ALLOW_AI_DEEP_SEARCHES,
+  DEFAULT_GOOGLE_RESULTS_LIMIT,
+  isValidAllowAiDeepSearches,
+  isValidGoogleResultsLimit,
+} from '@/lib/brands';
 import type { BrandProfile, BrandProfileCreateInput, BrandSummary } from '@/lib/types';
 
 // GET /api/brands — list all brands for the authenticated user
@@ -43,10 +49,26 @@ export async function POST(request: NextRequest) {
     return errorResponse('Invalid JSON body');
   }
 
-  const { name, keywords = [], officialDomains = [], watchWords = [], safeWords = [] } = body;
+  const {
+    name,
+    keywords = [],
+    officialDomains = [],
+    watchWords = [],
+    safeWords = [],
+    googleResultsLimit = DEFAULT_GOOGLE_RESULTS_LIMIT,
+    allowAiDeepSearches = DEFAULT_ALLOW_AI_DEEP_SEARCHES,
+  } = body;
 
   if (!name || typeof name !== 'string' || name.trim().length === 0) {
     return errorResponse('Brand name is required');
+  }
+
+  if (!isValidGoogleResultsLimit(googleResultsLimit)) {
+    return errorResponse('googleResultsLimit must be a whole number from 10 to 100 in increments of 10');
+  }
+
+  if (!isValidAllowAiDeepSearches(allowAiDeepSearches)) {
+    return errorResponse('allowAiDeepSearches must be a boolean');
   }
 
   const docRef = db.collection('brands').doc();
@@ -58,6 +80,8 @@ export async function POST(request: NextRequest) {
     name: name.trim(),
     keywords: keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean),
     officialDomains: officialDomains.map((d) => String(d).trim().toLowerCase()).filter(Boolean),
+    googleResultsLimit,
+    allowAiDeepSearches,
     watchWords: (watchWords as string[]).map((w) => String(w).trim().toLowerCase()).filter(Boolean),
     safeWords: (safeWords as string[]).map((w) => String(w).trim().toLowerCase()).filter(Boolean),
     createdAt: now,

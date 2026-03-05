@@ -8,20 +8,58 @@ export interface AnalysisOutput {
   title: string;
   llmAnalysis: string;
   isFalsePositive: boolean;
-  /**
-   * Optional list of search queries AI analysis wants to investigate further.
-   * Only returned by batch-mode analysis (e.g. Google Search) at depth 0.
-   * Capped at MAX_SUGGESTED_SEARCHES before acting on them.
-   */
-  suggestedSearches?: string[];
 }
 
 /**
- * One assessed search result item returned by AI analysis in batch mode.
- * Each item corresponds to a single organic (or paid) result from the SERP.
+ * A single Google result appearance captured from a SERP page.
  */
-export interface PerPageFinding {
+export interface GoogleSearchSighting {
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  page: number;
+  position?: number;
+  title: string;
+  displayedUrl?: string;
+  description?: string;
+  emphasizedKeywords?: string[];
+}
+
+/**
+ * A deduplicated Google result candidate, keyed by normalized URL.
+ * Repeated appearances on different pages are merged into one candidate before
+ * AI analysis so the same URL is only classified once per run.
+ */
+export interface GoogleSearchCandidate {
+  resultId: string;
   url: string;
+  normalizedUrl: string;
+  title: string;
+  displayedUrl?: string;
+  description?: string;
+  emphasizedKeywords?: string[];
+  pageNumbers: number[];
+  positions: number[];
+  sightings: GoogleSearchSighting[];
+}
+
+/**
+ * Run-level Google SERP context shared across chunked AI analysis calls.
+ * These signals help with classification and deep-search suggestioning, but
+ * they are not findings in their own right.
+ */
+export interface GoogleRunContext {
+  sourceQueries: string[];
+  relatedQueries: string[];
+  peopleAlsoAsk: string[];
+}
+
+/**
+ * One assessed Google result returned by chunked AI analysis.
+ * resultId must match one of the provided input candidates exactly.
+ */
+export interface GoogleChunkAnalysisItem {
+  resultId: string;
   title: string;
   severity: Severity;
   analysis: string;
@@ -29,13 +67,43 @@ export interface PerPageFinding {
 }
 
 /**
- * The structured JSON output expected from AI analysis for batch-mode analysis
- * (e.g. Google Search). Instead of one consolidated finding, AI analysis returns
- * an assessment for each individual search result.
+ * The structured JSON output expected from chunked Google result analysis.
  */
-export interface BatchAnalysisOutput {
-  items: PerPageFinding[];
+export interface GoogleChunkAnalysisOutput {
+  items: GoogleChunkAnalysisItem[];
   suggestedSearches?: string[];
+}
+
+/**
+ * The structured JSON output expected from the aggregate Google suggestion pass.
+ */
+export interface GoogleSuggestionOutput {
+  suggestedSearches?: string[];
+}
+
+/**
+ * Compact stored debug payload for Google findings.
+ */
+export interface GoogleStoredFindingRawData extends Record<string, unknown> {
+  kind: 'google-normalized';
+  version: 1;
+  normalizedUrl: string;
+  result: {
+    rawUrl: string;
+    normalizedUrl: string;
+    title: string;
+    displayedUrl?: string;
+    description?: string;
+    emphasizedKeywords?: string[];
+  };
+  sightings: GoogleSearchSighting[];
+  context: GoogleRunContext;
+  analysis: {
+    source: 'llm' | 'fallback';
+    runId: string;
+    searchDepth: number;
+    searchQuery?: string;
+  };
 }
 
 /** Maximum follow-up queries AI analysis may request per batch run */
@@ -47,8 +115,7 @@ export const MAX_SUGGESTED_SEARCHES = 3;
  */
 export function parseAnalysisOutput(raw: string): AnalysisOutput | null {
   try {
-    // Strip markdown code fences if AI analysis wraps the JSON in ```json ... ``` or ``` ... ```
-    const stripped = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    const stripped = stripJsonFences(raw);
     const parsed = JSON.parse(stripped);
 
     if (
@@ -61,22 +128,11 @@ export function parseAnalysisOutput(raw: string): AnalysisOutput | null {
       return null;
     }
 
-    // Validate optional suggestedSearches — must be an array of non-empty strings if present
-    let suggestedSearches: string[] | undefined;
-    if (Array.isArray(parsed.suggestedSearches)) {
-      const filtered = parsed.suggestedSearches
-        .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
-        .map((s: string) => s.trim())
-        .slice(0, MAX_SUGGESTED_SEARCHES);
-      suggestedSearches = filtered.length > 0 ? filtered : undefined;
-    }
-
     return {
       severity: parsed.severity as Severity,
       title: parsed.title,
       llmAnalysis: parsed.llmAnalysis,
       isFalsePositive: parsed.isFalsePositive,
-      suggestedSearches,
     };
   } catch {
     return null;
@@ -84,13 +140,17 @@ export function parseAnalysisOutput(raw: string): AnalysisOutput | null {
 }
 
 /**
- * Parse and validate the raw JSON string returned by AI analysis in batch mode.
- * Expects an object with an "items" array of per-result assessments.
+ * Parse and validate the raw JSON string returned by chunked Google analysis.
+ * Expects an object with an "items" array of per-result assessments whose
+ * resultIds exactly match the provided candidate IDs.
  * Returns null if parsing fails or the output is malformed.
  */
-export function parseBatchAnalysisOutput(raw: string): BatchAnalysisOutput | null {
+export function parseGoogleChunkAnalysisOutput(
+  raw: string,
+  validResultIds: Set<string>,
+): GoogleChunkAnalysisOutput | null {
   try {
-    const stripped = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    const stripped = stripJsonFences(raw);
     const parsed = JSON.parse(stripped);
 
     if (!Array.isArray(parsed.items) || parsed.items.length === 0) {
@@ -98,41 +158,81 @@ export function parseBatchAnalysisOutput(raw: string): BatchAnalysisOutput | nul
     }
 
     const validSeverities = ['high', 'medium', 'low'];
-    const items: PerPageFinding[] = parsed.items
+    const seenResultIds = new Set<string>();
+    const items: GoogleChunkAnalysisItem[] = parsed.items
       .filter(
         (item: unknown): item is Record<string, unknown> =>
           typeof item === 'object' && item !== null,
       )
       .filter(
         (item: Record<string, unknown>) =>
-          typeof item.url === 'string' &&
+          typeof item.resultId === 'string' &&
+          validResultIds.has((item.resultId as string).trim()) &&
+          !seenResultIds.has((item.resultId as string).trim()) &&
           typeof item.title === 'string' &&
           typeof item.severity === 'string' &&
           validSeverities.includes(item.severity as string) &&
           typeof item.analysis === 'string' &&
           typeof item.isFalsePositive === 'boolean',
       )
-      .map((item: Record<string, unknown>) => ({
-        url: (item.url as string).trim(),
-        title: (item.title as string).trim(),
-        severity: item.severity as Severity,
-        analysis: (item.analysis as string).trim(),
-        isFalsePositive: item.isFalsePositive as boolean,
-      }));
+      .map((item: Record<string, unknown>) => {
+        const resultId = (item.resultId as string).trim();
+        seenResultIds.add(resultId);
+        return {
+          resultId,
+          title: (item.title as string).trim(),
+          severity: item.severity as Severity,
+          analysis: (item.analysis as string).trim(),
+          isFalsePositive: item.isFalsePositive as boolean,
+        };
+      });
 
     if (items.length === 0) return null;
 
-    let suggestedSearches: string[] | undefined;
-    if (Array.isArray(parsed.suggestedSearches)) {
-      suggestedSearches = (parsed.suggestedSearches as unknown[])
-        .filter((s): s is string => typeof s === 'string' && s.trim().length > 0)
-        .map((s) => s.trim())
-        .slice(0, MAX_SUGGESTED_SEARCHES);
-      if (suggestedSearches.length === 0) suggestedSearches = undefined;
-    }
-
-    return { items, suggestedSearches };
+    return {
+      items,
+      suggestedSearches: normalizeSuggestedSearches(parsed.suggestedSearches),
+    };
   } catch {
     return null;
   }
+}
+
+/**
+ * Parse and validate the raw JSON string returned by the aggregate Google
+ * suggestion pass. Invalid or empty results collapse to an empty suggestion set.
+ */
+export function parseGoogleSuggestionOutput(raw: string): GoogleSuggestionOutput | null {
+  try {
+    const stripped = stripJsonFences(raw);
+    const parsed = JSON.parse(stripped);
+
+    return {
+      suggestedSearches: normalizeSuggestedSearches(parsed.suggestedSearches),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function stripJsonFences(raw: string): string {
+  return raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+}
+
+function normalizeSuggestedSearches(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const seen = new Set<string>();
+  const suggestedSearches = value
+    .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
+    .map((s) => s.trim())
+    .filter((s) => {
+      const key = s.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, MAX_SUGGESTED_SEARCHES);
+
+  return suggestedSearches.length > 0 ? suggestedSearches : undefined;
 }

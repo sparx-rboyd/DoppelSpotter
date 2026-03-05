@@ -320,7 +320,7 @@ export function FindingCard({ finding, className, onIgnoreToggle }: FindingCardP
 
               <ExpandableSection
                 icon={Code2}
-                label="Raw actor data"
+                label="Stored debug data"
                 onOpen={ensureDebugFinding}
                 loading={debugLoading}
                 error={debugError}

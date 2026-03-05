@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { InfoTooltip } from '@/components/ui/tooltip';
 import { cn, formatScanDate } from '@/lib/utils';
-import type { BrandProfile, FindingSummary, Scan, ScanSummary } from '@/lib/types';
+import type { ActorRunInfo, BrandProfile, FindingSummary, Scan, ScanSummary } from '@/lib/types';
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -193,6 +193,8 @@ export default function BrandDetailPage() {
   const [clearing, setClearing] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const progressScanKeyRef = useRef<string | null>(null);
+  const [displayedScanProgressPct, setDisplayedScanProgressPct] = useState(0);
 
   function stopPolling() {
     if (pollRef.current) {
@@ -811,8 +813,6 @@ export default function BrandDetailPage() {
     allRuns[0];
 
   const runStatus = activeRun?.status;
-  const analysedCount = activeRun?.analysedCount ?? 0;
-  const itemCount = activeRun?.itemCount ?? 0;
   const isDeepSearchActive = inFlightRuns.some((r) => (r.searchDepth ?? 0) > 0);
   const deepSearchCount = inFlightRuns.filter((r) => (r.searchDepth ?? 0) > 0).length;
 
@@ -846,25 +846,57 @@ export default function BrandDetailPage() {
     }
   }
 
-  function getScanProgressPct(): number {
-    if (!activeRun) return 0;
-
-    if (isDeepSearchActive) {
-      if (runStatus === 'fetching_dataset') return 72;
-      if (runStatus === 'analysing') {
-        if (itemCount === 0) return 76;
-        return Math.round(76 + 22 * (analysedCount / itemCount));
+  function getRunProgressFraction(run: ActorRunInfo): number {
+    switch (run.status) {
+      case 'succeeded':
+      case 'failed':
+        return 1;
+      case 'analysing': {
+        const total = run.itemCount ?? 0;
+        if (total <= 0) return 0.58;
+        const ratio = Math.max(0, Math.min(1, (run.analysedCount ?? 0) / total));
+        return 0.58 + 0.32 * ratio;
       }
-      return 70;
+      case 'fetching_dataset':
+        return 0.34;
+      case 'running':
+      case 'pending':
+      default:
+        return 0.12;
+    }
+  }
+
+  function getRawOverallScanProgressPct(): number {
+    if (!scanning) return 0;
+    if (!activeScan) return 8;
+    if (allRuns.length === 0) return 10;
+
+    const totalFraction =
+      allRuns.reduce((sum, run) => sum + getRunProgressFraction(run), 0) / allRuns.length;
+
+    // Leave visible headroom so late-discovered deep-search runs do not imply the
+    // scan is effectively complete before the backend has finished all work.
+    return Math.round(8 + 86 * totalFraction);
+  }
+
+  const progressScanKey = activeScanId ?? activeScan?.id ?? null;
+  const rawOverallScanProgressPct = getRawOverallScanProgressPct();
+
+  useEffect(() => {
+    if (!progressScanKey) {
+      progressScanKeyRef.current = null;
+      setDisplayedScanProgressPct(0);
+      return;
     }
 
-    if (runStatus === 'fetching_dataset') return 35;
-    if (runStatus === 'analysing') {
-      if (itemCount === 0) return 40;
-      return Math.round(40 + 25 * (analysedCount / itemCount));
+    if (progressScanKeyRef.current !== progressScanKey) {
+      progressScanKeyRef.current = progressScanKey;
+      setDisplayedScanProgressPct(rawOverallScanProgressPct);
+      return;
     }
-    return 10;
-  }
+
+    setDisplayedScanProgressPct((prev) => Math.max(prev, rawOverallScanProgressPct));
+  }, [progressScanKey, rawOverallScanProgressPct]);
 
   // ---------------------------------------------------------------------------
   // Derived display values
@@ -1061,7 +1093,7 @@ export default function BrandDetailPage() {
                   <div className="h-1.5 bg-brand-100 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-brand-600 rounded-full transition-all duration-500"
-                      style={{ width: `${getScanProgressPct()}%` }}
+                      style={{ width: `${displayedScanProgressPct}%` }}
                     />
                   </div>
                 </div>
