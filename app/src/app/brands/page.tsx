@@ -83,7 +83,7 @@ export default function BrandsPage() {
           )}
 
           {!loading && brands.length > 0 && (
-            <div className="space-y-3">
+            <div className="flex flex-col gap-4">
               {brands.map((brand) => (
                 <Link key={brand.id} href={`/brands/${brand.id}`}>
                   <Card className="hover:border-brand-300 transition cursor-pointer">

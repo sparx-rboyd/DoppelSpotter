@@ -3,6 +3,7 @@ import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
 import type { BrandProfile, Scan, ActorRunInfo } from '@/lib/types';
+import { abortActorRun } from '@/lib/apify/client';
 
 // POST /api/scan — trigger a scan for a brand
 // Body: { brandId: string; actorIds?: string[] }
@@ -121,6 +122,45 @@ export async function GET(request: NextRequest) {
   if (scan.userId !== uid) return errorResponse('Forbidden', 403);
 
   return NextResponse.json({ data: { id: scanDoc.id, ...scan } });
+}
+
+// DELETE /api/scan?scanId=xxx — cancel an in-progress scan
+export async function DELETE(request: NextRequest) {
+  const { uid, error } = requireAuth(request);
+  if (error) return error;
+
+  const scanId = request.nextUrl.searchParams.get('scanId');
+  if (!scanId) return errorResponse('scanId query param is required');
+
+  const scanDoc = await db.collection('scans').doc(scanId).get();
+  if (!scanDoc.exists) return errorResponse('Scan not found', 404);
+
+  const scan = scanDoc.data() as Scan;
+  if (scan.userId !== uid) return errorResponse('Forbidden', 403);
+
+  if (scan.status !== 'pending' && scan.status !== 'running') {
+    return errorResponse('Scan is not in progress', 409);
+  }
+
+  // Mark the scan cancelled first so any in-flight webhook callbacks are ignored
+  await scanDoc.ref.update({
+    status: 'cancelled',
+    completedAt: FieldValue.serverTimestamp(),
+  });
+
+  // Best-effort abort every Apify run — silently ignore errors for runs that have
+  // already finished (Apify simply ignores abort calls on terminal runs)
+  const runIds = scan.actorRunIds ?? [];
+  const abortResults = await Promise.allSettled(runIds.map((runId) => abortActorRun(runId)));
+  abortResults.forEach((result, i) => {
+    if (result.status === 'rejected') {
+      console.warn(`[scan] Failed to abort run ${runIds[i]}:`, result.reason);
+    }
+  });
+
+  console.log(`[scan] Scan ${scanId} cancelled by user ${uid}; aborted ${runIds.length} run(s)`);
+
+  return NextResponse.json({ data: { scanId, status: 'cancelled' } });
 }
 
 /**

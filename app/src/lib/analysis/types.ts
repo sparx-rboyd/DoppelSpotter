@@ -1,7 +1,7 @@
 import type { Severity } from '@/lib/types';
 
 /**
- * The structured JSON output expected from the LLM for each finding.
+ * The structured JSON output expected from AI analysis for each finding.
  */
 export interface AnalysisOutput {
   severity: Severity;
@@ -9,7 +9,7 @@ export interface AnalysisOutput {
   llmAnalysis: string;
   isFalsePositive: boolean;
   /**
-   * Optional list of search queries the LLM wants to investigate further.
+   * Optional list of search queries AI analysis wants to investigate further.
    * Only returned by batch-mode analysis (e.g. Google Search) at depth 0.
    * Capped at MAX_SUGGESTED_SEARCHES before acting on them.
    */
@@ -17,7 +17,7 @@ export interface AnalysisOutput {
 }
 
 /**
- * One assessed search result item returned by the LLM in batch mode.
+ * One assessed search result item returned by AI analysis in batch mode.
  * Each item corresponds to a single organic (or paid) result from the SERP.
  */
 export interface PerPageFinding {
@@ -29,8 +29,8 @@ export interface PerPageFinding {
 }
 
 /**
- * The structured JSON output expected from the LLM for batch-mode analysis
- * (e.g. Google Search). Instead of one consolidated finding, the LLM returns
+ * The structured JSON output expected from AI analysis for batch-mode analysis
+ * (e.g. Google Search). Instead of one consolidated finding, AI analysis returns
  * an assessment for each individual search result.
  */
 export interface BatchAnalysisOutput {
@@ -38,16 +38,16 @@ export interface BatchAnalysisOutput {
   suggestedSearches?: string[];
 }
 
-/** Maximum follow-up queries the LLM may request per batch run */
+/** Maximum follow-up queries AI analysis may request per batch run */
 export const MAX_SUGGESTED_SEARCHES = 3;
 
 /**
- * Parse and validate the raw JSON string returned by the LLM.
+ * Parse and validate the raw JSON string returned by AI analysis.
  * Returns null if parsing fails or the output is malformed.
  */
 export function parseAnalysisOutput(raw: string): AnalysisOutput | null {
   try {
-    // Strip markdown code fences if the LLM wraps the JSON in ```json ... ``` or ``` ... ```
+    // Strip markdown code fences if AI analysis wraps the JSON in ```json ... ``` or ``` ... ```
     const stripped = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
     const parsed = JSON.parse(stripped);
 
@@ -84,7 +84,7 @@ export function parseAnalysisOutput(raw: string): AnalysisOutput | null {
 }
 
 /**
- * Parse and validate the raw JSON string returned by the LLM in batch mode.
+ * Parse and validate the raw JSON string returned by AI analysis in batch mode.
  * Expects an object with an "items" array of per-result assessments.
  * Returns null if parsing fails or the output is malformed.
  */

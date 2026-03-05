@@ -1,5 +1,5 @@
 /**
- * OpenRouter client for LLM analysis.
+ * OpenRouter client for AI analysis.
  * OpenRouter provides a unified API compatible with the OpenAI SDK format.
  * Reference: https://openrouter.ai/docs
  */
@@ -50,6 +50,7 @@ export async function chatCompletion(messages: ChatMessage[]): Promise<string> {
       messages,
       response_format: { type: 'json_object' },
       temperature: 0.2,
+      max_tokens: 16384,
     }),
   });
 

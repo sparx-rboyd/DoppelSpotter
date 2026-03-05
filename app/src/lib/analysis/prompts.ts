@@ -2,7 +2,7 @@ import type { FindingSource } from '@/lib/types';
 
 /**
  * System prompt for brand infringement classification.
- * Used for per-item analysis mode — the LLM returns a single AnalysisOutput object.
+ * Used for per-item analysis mode — AI analysis returns a single AnalysisOutput object.
  */
 export const SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
 
@@ -25,7 +25,7 @@ Set isFalsePositive: true if the result is clearly legitimate use of the brand n
 
 /**
  * System prompt for batch (Google Search) analysis mode.
- * The LLM assesses every individual organic and paid search result separately
+ * AI analysis assesses every individual organic and paid search result separately
  * and returns a BatchAnalysisOutput — an array of per-result items.
  */
 export const BATCH_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
@@ -50,6 +50,7 @@ Rules for "items":
 - Include every organic result (from organicResults[]) and every paid result (from paidResults[]) across all pages.
 - Do NOT include the SERP page itself — assess individual result URLs only.
 - Each item must have all five fields: url, title, severity, analysis, isFalsePositive.
+- Each "analysis" must be a fully standalone description — do NOT reference or compare to any other item in the list (e.g. avoid phrases like "this is another X", "similar to the above", "like the previous result"). A reader should be able to understand each analysis without seeing any other result.
 
 Severity guidelines:
 - "high": Clear impersonation, phishing, counterfeit, or direct brand misuse posing immediate risk to customers or the brand
@@ -73,19 +74,24 @@ export function buildAnalysisPrompt(params: {
   keywords: string[];
   officialDomains: string[];
   watchWords?: string[];
+  ignoredUrls?: string[];
   source: FindingSource;
   rawData: Record<string, unknown>;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, source, rawData } = params;
+  const { brandName, keywords, officialDomains, watchWords, ignoredUrls, source, rawData } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — note any presence or implied association in your analysis): ${watchWords.join(', ')}`
     : null;
 
+  const ignoredUrlsLine = ignoredUrls && ignoredUrls.length > 0
+    ? `Previously reviewed and dismissed URLs (the user has already acknowledged these — set isFalsePositive: true if the result URL matches any of these exactly):\n${ignoredUrls.map((u) => `  - ${u}`).join('\n')}`
+    : null;
+
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${ignoredUrlsLine ? `${ignoredUrlsLine}\n` : ''}Monitoring surface: ${source}
 
 Raw scraping result to analyse:
 ${JSON.stringify(rawData, null, 2)}
@@ -96,25 +102,30 @@ Analyse this result and return your assessment as JSON. Do not include "suggeste
 /**
  * Build the user prompt for a batch of items from the same actor run.
  * Used when an actor's analysisMode is 'batch' — all SERP pages are combined into
- * a single LLM call. The LLM returns one assessment per individual search result.
+ * a single AI analysis call. AI analysis returns one assessment per individual search result.
  *
  * When canSuggestSearches is false (depth-1 follow-up runs), the prompt explicitly
- * tells the LLM not to include suggestedSearches so no further recursion occurs.
+ * instructs AI analysis not to include suggestedSearches so no further recursion occurs.
  */
 export function buildBatchAnalysisPrompt(params: {
   brandName: string;
   keywords: string[];
   officialDomains: string[];
   watchWords?: string[];
+  ignoredUrls?: string[];
   source: FindingSource;
   rawItems: Record<string, unknown>[];
-  /** Pass true for depth-0 runs so the LLM knows it may suggest follow-up searches. */
+  /** Pass true for depth-0 runs so AI analysis knows it may suggest follow-up searches. */
   canSuggestSearches?: boolean;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, source, rawItems, canSuggestSearches } = params;
+  const { brandName, keywords, officialDomains, watchWords, ignoredUrls, source, rawItems, canSuggestSearches } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that result): ${watchWords.join(', ')}`
+    : null;
+
+  const ignoredUrlsLine = ignoredUrls && ignoredUrls.length > 0
+    ? `Previously reviewed and dismissed URLs (the user has already acknowledged these — set isFalsePositive: true for any result whose URL exactly matches one of these):\n${ignoredUrls.map((u) => `  - ${u}`).join('\n')}`
     : null;
 
   const deepSearchInstruction = canSuggestSearches
@@ -124,7 +135,7 @@ export function buildBatchAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${ignoredUrlsLine ? `${ignoredUrlsLine}\n` : ''}Monitoring surface: ${source}
 
 ${deepSearchInstruction}
 

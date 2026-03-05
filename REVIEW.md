@@ -1,7 +1,7 @@
 # DoppelSpotter — Scan Quality Review
 
 This document captures our ongoing review of the scan pipeline: how actors work,
-what data they produce, how the LLM processes it, and any observations / tuning decisions.
+what data they produce, how AI analysis processes it, and any observations / tuning decisions.
 
 ---
 
@@ -97,11 +97,11 @@ Dataset item 3  →  SERP page 3  →  organicResults[0..9]  (results #21–30)
 
 Three items total, not thirty.
 
-This matters because the webhook handler calls the LLM once per dataset item. So the
-LLM receives the _entire first page of Google results_ as a single blob of JSON and
+This matters because the webhook handler calls AI analysis once per dataset item. So AI
+analysis receives the _entire first page of Google results_ as a single blob of JSON and
 must produce a single `Finding` from it. It's being asked to synthesise up to 10
 organic results, any paid ads, related queries, and People Also Ask boxes all in one
-go — rather than evaluating each link individually. See [LLM implications](#llm-implications)
+go — rather than evaluating each link individually. See [AI analysis implications](#ai-analysis-implications)
 for why this is likely hurting quality.
 
 ### How we call it
@@ -204,25 +204,25 @@ Each dataset item (one per SERP page scraped) has this structure:
 |---|---|
 | `organicResults[].url` | The actual URL of each result — primary signal for impersonation detection |
 | `organicResults[].title` | Page title — often reveals intent |
-| `organicResults[].description` | Snippet — key context for the LLM |
+| `organicResults[].description` | Snippet — key context for AI analysis |
 | `organicResults[].emphasizedKeywords` | Keywords Google bolded — shows what matched our query |
 | `paidResults[]` | Competitors bidding on our brand name via Google Ads |
 | `relatedQueries[]` | Titles like "acme corp fake" or "acme scam" are useful brand health signals |
 | `peopleAlsoAsk[]` | Can surface questions like "Is Acme Corp legitimate?" |
 
-### LLM implications
+### AI analysis implications
 
-**The LLM receives one full SERP page as `rawData`.** This means:
+**AI analysis receives one full SERP page as `rawData`.** This means:
 
-- A single LLM call sees up to 10 organic results, related queries, PAA, and paid
+- A single AI analysis call sees up to 10 organic results, related queries, PAA, and paid
   ads simultaneously — it's classifying the entire page, not individual results.
-- The `rawData` payload sent to the LLM is large. For 3 pages, we make 3 LLM calls.
-- The LLM prompt's `source` field is set to `"google"` for all calls from this actor.
-- The LLM is asked to return one `Finding` per page — it must synthesise across
+- The `rawData` payload sent to AI analysis is large. For 3 pages, we make 3 AI analysis calls.
+- The AI analysis prompt's `source` field is set to `"google"` for all calls from this actor.
+- AI analysis is asked to return one `Finding` per page — it must synthesise across
   all results on the page and identify the most significant concern (if any).
 
 This is a potential quality issue: if page 1 contains 9 benign results and 1 suspicious
-one, the LLM may or may not flag it. Consider whether the actor should be restructured
+one, AI analysis may or may not flag it. Consider whether the actor should be restructured
 to push **one item per organic result** instead of one item per page.
 
 ### Observations / tuning notes
@@ -237,25 +237,25 @@ to push **one item per organic result** instead of one item per page.
       this may miss results on `.co.uk`, `.de` etc. Consider parameterising `countryCode`.
 - [x] **One finding per page → now one finding per run → now one finding per result** — the
       Google Search actor now uses `analysisMode: 'batch'`. All SERP pages are combined into
-      a single LLM call via `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPrompt()`. The LLM
-      returns an `items` array with one assessment per individual organic/paid result across
-      all pages. One Firestore Finding is written per assessed result. The full set of raw
-      SERP pages is stored as `{ pages: [...], pageCount: N }` on every Finding's `rawData`
+      a single AI analysis call via `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPrompt()`. AI
+      analysis returns an `items` array with one assessment per individual organic/paid result
+      across all pages. One Firestore Finding is written per assessed result. The full set of
+      raw SERP pages is stored as `{ pages: [...], pageCount: N }` on every Finding's `rawData`
       field so the complete raw dataset is always accessible for debugging.
 - [x] **`relatedQueries` are valuable signals** — `BATCH_SYSTEM_PROMPT` now explicitly
-      instructs the LLM to review `relatedQueries` across all pages and include suspicious
+      instructs AI analysis to review `relatedQueries` across all pages and include suspicious
       terms as `suggestedSearches` for deep-search follow-up.
-- [x] **Paid results (`paidResults`)** — `BATCH_SYSTEM_PROMPT` now explicitly asks the LLM
+- [x] **Paid results (`paidResults`)** — `BATCH_SYSTEM_PROMPT` now explicitly asks AI analysis
       to assess both `organicResults` and `paidResults`, surfacing competitors bidding on
       the brand name as individual findings.
 
 ---
 
-## LLM Analysis Pipeline
+## AI Analysis Pipeline
 
 ### Overview
 
-The LLM is invoked **after** each Apify actor run completes, once per dataset item.
+AI analysis is invoked **after** each Apify actor run completes, once per dataset item.
 It classifies each raw scraping result as a genuine finding or a false positive,
 assigns a severity, and writes a short human-readable summary.
 
@@ -268,20 +268,20 @@ Apify calls POST /api/webhooks/apify on SUCCEEDED / FAILED / ABORTED
   └─ validates X-Apify-Webhook-Secret header
   └─ fetches up to 50 items from the Apify dataset (MAX_ITEMS_PER_RUN = 50)
   └─ checks actor's analysisMode ('per-item' | 'batch')
-       ├─ 'per-item': for each item → analyseItem() → LLM call → write Finding
-       └─ 'batch':    all items combined → analyseItemBatch() → one LLM call → write one consolidated Finding
+       ├─ 'per-item': for each item → analyseItem() → AI analysis call → write Finding
+       └─ 'batch':    all items combined → analyseItemBatch() → one AI analysis call → write one consolidated Finding
   └─ marks actor run complete; once all runs done → marks scan complete
 ```
 
-### When is the LLM triggered?
+### When is AI analysis triggered?
 
 - Triggered inside `analyseItem()` or `analyseItemBatch()` in `app/src/app/api/webhooks/apify/route.ts`
 - Only on `ACTOR.RUN.SUCCEEDED` events (failed/aborted runs skip analysis)
 - Items are capped at 50 per run (`MAX_ITEMS_PER_RUN`)
-- For `per-item` actors: one sequential LLM call per item (avoids OpenRouter rate limits)
-- For `batch` actors (e.g. Google Search): one LLM call for all items combined → one Finding
+- For `per-item` actors: one sequential AI analysis call per item (avoids OpenRouter rate limits)
+- For `batch` actors (e.g. Google Search): one AI analysis call for all items combined → one Finding
 
-### LLM Provider & Model
+### AI Analysis Provider & Model
 
 | Setting | Value |
 |---|---|
@@ -338,7 +338,7 @@ Analyse this result and return your assessment as JSON.
 The `source` field is the actor's `FindingSource` tag (e.g. `google`, `domain`, `instagram`).
 The `rawData` is the full unmodified item from the Apify dataset.
 
-### Expected LLM Output Schema
+### Expected AI Analysis Output Schema
 
 **Defined in:** `app/src/lib/analysis/types.ts` → `AnalysisOutput`
 
@@ -361,18 +361,18 @@ interface AnalysisOutput {
 
 ### Fallback Behaviour
 
-If the LLM call or parse fails for an item, a fallback `Finding` is still written to Firestore:
+If the AI analysis call or parse fails for an item, a fallback `Finding` is still written to Firestore:
 
 ```
 severity:    'medium'
 title:       'Unanalysed result — review manually'
-description: 'LLM analysis failed for this item. Raw data is preserved for manual review.'
+description: 'AI analysis failed for this item. Raw data is preserved for manual review.'
 rawData:     (full item preserved)
 ```
 
 ### False Positive Filtering
 
-If the LLM returns `isFalsePositive: true`, the item is **not** written to Firestore as a Finding.
+If AI analysis returns `isFalsePositive: true`, the item is **not** written to Firestore as a Finding.
 The scan's `findingCount` is only incremented for non-false-positive results.
 
 ---
@@ -383,6 +383,6 @@ _(To be filled in as the review progresses.)_
 
 - [ ] What does the raw output from `apify/google-search-scraper` actually look like?
 - [ ] Are the search queries (using `OR`) producing relevant results for brand monitoring?
-- [ ] How well does the LLM classify Google Search results vs. other sources?
+- [ ] How well does AI analysis classify Google Search results vs. other sources?
 - [ ] Is the false positive rate too high / too low?
 - [ ] Are `maxPagesPerQuery: 3, resultsPerPage: 10` (30 results total) the right limits?

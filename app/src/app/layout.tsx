@@ -24,7 +24,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={inter.variable}>
-      <body className="font-sans text-gray-800 antialiased bg-white">
+      <body className="font-sans text-gray-800 antialiased bg-white" suppressHydrationWarning>
         <AuthProvider>{children}</AuthProvider>
       </body>
     </html>

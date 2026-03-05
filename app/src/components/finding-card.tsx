@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   Globe,
   Instagram,
@@ -15,6 +16,9 @@ import {
   ChevronRight,
   Code2,
   MessageSquare,
+  EyeOff,
+  Eye,
+  Loader2,
 } from 'lucide-react';
 import { type Finding, type FindingSource } from '@/lib/types';
 import { SeverityBadge } from './severity-badge';
@@ -23,6 +27,12 @@ import { cn } from '@/lib/utils';
 interface FindingCardProps {
   finding: Finding;
   className?: string;
+  /**
+   * Called when the user toggles the ignored state.
+   * Receives the full finding (so the parent has access to the URL for URL-scoped updates)
+   * and the new desired ignored state. Should return a promise that resolves on success.
+   */
+  onIgnoreToggle?: (finding: Finding, isIgnored: boolean) => Promise<void>;
 }
 
 const sourceConfig: Record<
@@ -125,18 +135,36 @@ function ExpandableSection({
   );
 }
 
-export function FindingCard({ finding, className }: FindingCardProps) {
+export function FindingCard({ finding, className, onIgnoreToggle }: FindingCardProps) {
   const src = sourceConfig[finding.source] ?? sourceConfig.unknown;
   const Icon = src.icon;
   const isFalsePositive = finding.isFalsePositive === true;
+  const isIgnored = finding.isIgnored === true;
+  const muted = isFalsePositive || isIgnored;
+
+  const searchParams = useSearchParams();
+  const showDebug = searchParams.get('debug') === 'true';
+
+  const [ignoring, setIgnoring] = useState(false);
+
+  async function handleIgnoreToggle(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!onIgnoreToggle || ignoring) return;
+    setIgnoring(true);
+    try {
+      await onIgnoreToggle(finding, !isIgnored);
+    } finally {
+      setIgnoring(false);
+    }
+  }
 
   return (
     <div
       className={cn(
         'bg-white p-4 sm:p-5 rounded-xl border shadow-sm',
-        isFalsePositive
+        muted
           ? 'border-gray-200 opacity-75'
-          : 'border-gray-200 hover:border-brand-300 transition cursor-pointer',
+          : 'border-gray-200 hover:border-brand-300 transition',
         className,
       )}
     >
@@ -145,7 +173,7 @@ export function FindingCard({ finding, className }: FindingCardProps) {
         <div
           className={cn(
             'p-2 sm:p-3 rounded-lg flex-shrink-0',
-            isFalsePositive ? 'bg-gray-100 text-gray-400' : cn(src.bgClass, src.textClass),
+            muted ? 'bg-gray-100 text-gray-400' : cn(src.bgClass, src.textClass),
           )}
         >
           <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
@@ -158,65 +186,89 @@ export function FindingCard({ finding, className }: FindingCardProps) {
             <h4
               className={cn(
                 'font-semibold text-sm sm:text-base',
-                isFalsePositive ? 'text-gray-500' : 'text-gray-900',
+                muted ? 'text-gray-500' : 'text-gray-900',
               )}
             >
               {finding.title}
             </h4>
-            {isFalsePositive ? (
+            {isIgnored ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+                <EyeOff className="w-3 h-3" />
+                Ignored
+              </span>
+            ) : isFalsePositive ? (
               <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
                 Non-hit
               </span>
             ) : (
               <SeverityBadge severity={finding.severity} />
             )}
-            <span className="text-xs text-gray-400 font-mono hidden sm:inline">
-              via {finding.actorId}
-            </span>
-          </div>
-
-          {/* Description */}
-          <p className="text-xs sm:text-sm text-gray-500 mb-2">
-            {finding.description}
             {finding.url && (
               <a
                 href={finding.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="ml-1 inline-flex items-center gap-0.5 text-brand-600 hover:underline"
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-brand-50 text-brand-600 hover:bg-brand-100 transition"
                 onClick={(e) => e.stopPropagation()}
               >
                 <ExternalLink className="w-3 h-3" />
+                Visit
               </a>
             )}
-          </p>
+            {/* Ignore / un-ignore button — shown for real findings and non-hits alike */}
+            {onIgnoreToggle && (
+              <button
+                type="button"
+                onClick={handleIgnoreToggle}
+                disabled={ignoring}
+                className={cn(
+                  'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition',
+                  isIgnored
+                    ? 'bg-brand-50 text-brand-600 hover:bg-brand-100'
+                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200',
+                )}
+              >
+                {ignoring ? (
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                ) : isIgnored ? (
+                  <Eye className="w-3 h-3" />
+                ) : (
+                  <EyeOff className="w-3 h-3" />
+                )}
+                {isIgnored ? 'Un-ignore' : 'Ignore'}
+              </button>
+            )}
+          </div>
 
-          {/* LLM analysis box */}
+          {/* AI analysis box */}
           <div className="bg-gray-50 rounded-lg p-2 sm:p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2 mb-3">
             <Bot className="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0" />
             <p>
-              <strong>LLM Analysis:</strong> {finding.llmAnalysis}
+              <strong>AI analysis:</strong>{' '}
+              {finding.llmAnalysis}
             </p>
           </div>
 
-          {/* Debug expandables */}
-          <div className="space-y-1.5">
-            <ExpandableSection icon={MessageSquare} label="Raw LLM response">
-              {finding.rawLlmResponse
-                ? (() => {
-                    try {
-                      return JSON.stringify(JSON.parse(finding.rawLlmResponse), null, 2);
-                    } catch {
-                      return finding.rawLlmResponse;
-                    }
-                  })()
-                : '(not available — LLM analysis may have failed or this is a legacy finding)'}
-            </ExpandableSection>
+          {/* Debug expandables — visible only when ?debug=true */}
+          {showDebug && (
+            <div className="space-y-1.5">
+              <ExpandableSection icon={MessageSquare} label="Raw AI response">
+                {finding.rawLlmResponse
+                  ? (() => {
+                      try {
+                        return JSON.stringify(JSON.parse(finding.rawLlmResponse), null, 2);
+                      } catch {
+                        return finding.rawLlmResponse;
+                      }
+                    })()
+                  : '(not available — AI analysis may have failed or this is a legacy finding)'}
+              </ExpandableSection>
 
-            <ExpandableSection icon={Code2} label="Raw actor data">
-              {JSON.stringify(finding.rawData, null, 2)}
-            </ExpandableSection>
-          </div>
+              <ExpandableSection icon={Code2} label="Raw actor data">
+                {JSON.stringify(finding.rawData, null, 2)}
+              </ExpandableSection>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -9,7 +9,7 @@ import { parseAnalysisOutput, parseBatchAnalysisOutput, MAX_SUGGESTED_SEARCHES }
 import type { PerPageFinding } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo } from '@/lib/types';
 
-/** Maximum items to analyse per actor run — caps LLM cost and latency */
+/** Maximum items to analyse per actor run — caps AI analysis cost and latency */
 const MAX_ITEMS_PER_RUN = 50;
 
 /**
@@ -73,6 +73,12 @@ export async function POST(request: NextRequest) {
   const scanDoc = snapshot.docs[0];
   const scan = scanDoc.data() as Scan;
 
+  // If the scan was cancelled while this run was in flight, acknowledge and skip
+  if (scan.status === 'cancelled') {
+    console.log(`[webhook] Ignoring callback for run ${resource.id} — scan ${scanDoc.id} is cancelled`);
+    return NextResponse.json({ received: true });
+  }
+
   // Derive the public webhook URL from APP_URL so deep-search runs can call back here
   const webhookUrl = `${(process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')}/api/webhooks/apify`;
 
@@ -93,7 +99,7 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * Handle a succeeded actor run: fetch dataset items, run LLM analysis on each,
+ * Handle a succeeded actor run: fetch dataset items, run AI analysis on each,
  * write findings to Firestore, then mark the actor run as complete.
  */
 async function handleSucceededRun({
@@ -124,6 +130,19 @@ async function handleSucceededRun({
   const actorId = actorRunInfo?.actorId ?? 'unknown';
   const searchDepth = actorRunInfo?.searchDepth ?? 0;
 
+  // Fetch all URLs that the user has previously ignored for this brand so that
+  // AI analysis can skip them rather than re-reporting them on every scan.
+  const ignoredSnap = await db
+    .collection('findings')
+    .where('brandId', '==', scan.brandId)
+    .where('userId', '==', scan.userId)
+    .where('isIgnored', '==', true)
+    .select('url')
+    .get();
+  const ignoredUrls = ignoredSnap.docs
+    .map((d) => (d.data() as { url?: string }).url)
+    .filter((u): u is string => typeof u === 'string' && u.length > 0);
+
   // Phase 1 → Phase 2: signal that we are now retrieving the Apify dataset
   await scanDoc.ref.update({ [`actorRuns.${runId}.status`]: 'fetching_dataset' });
 
@@ -143,7 +162,7 @@ async function handleSucceededRun({
     return;
   }
 
-  // Cap items to control LLM cost
+  // Cap items to control AI analysis cost
   const itemsToAnalyse = items.slice(0, MAX_ITEMS_PER_RUN);
   if (items.length > MAX_ITEMS_PER_RUN) {
     console.warn(
@@ -151,7 +170,7 @@ async function handleSucceededRun({
     );
   }
 
-  // Phase 2 → Phase 3: signal that LLM analysis is starting, and record total item count
+  // Phase 2 → Phase 3: signal that AI analysis is starting, and record total item count
   await scanDoc.ref.update({
     [`actorRuns.${runId}.status`]: 'analysing',
     [`actorRuns.${runId}.itemCount`]: itemsToAnalyse.length,
@@ -164,7 +183,7 @@ async function handleSucceededRun({
   let newFindingCount = 0;
 
   if (analysisMode === 'batch') {
-    // Send all SERP pages to the LLM in one call → one Finding per individual search result
+    // Send all SERP pages to AI analysis in one call → one Finding per individual search result
     const { findingCount, suggestedSearches } = await analyseAndWriteBatch({
       scanDoc,
       scan,
@@ -175,10 +194,11 @@ async function handleSucceededRun({
       runId,
       items: itemsToAnalyse,
       searchDepth,
+      ignoredUrls,
     });
     newFindingCount = findingCount;
 
-    // Trigger deep follow-up searches if the LLM requested them and this is a depth-0 run
+    // Trigger deep follow-up searches if AI analysis requested them and this is a depth-0 run
     if (suggestedSearches && suggestedSearches.length > 0 && searchDepth === 0) {
       await triggerDeepSearches({
         scanDoc,
@@ -193,7 +213,7 @@ async function handleSucceededRun({
     // Analyse each item sequentially to avoid rate-limiting OpenRouter
     for (const item of itemsToAnalyse) {
       try {
-        const analysisResult = await analyseItem({ brand, source, actorId, item });
+        const analysisResult = await analyseItem({ brand, source, actorId, item, ignoredUrls });
         const findingRef = db.collection('findings').doc();
         const finding: Omit<Finding, 'id'> = {
           scanId: scan.id ?? scanDoc.id,
@@ -208,6 +228,12 @@ async function handleSucceededRun({
           url: extractUrl(item),
           rawData: item,
           isFalsePositive: analysisResult.isFalsePositive,
+          // Auto-ignore AI-classified false positives so their URLs are excluded
+          // from future scans. Users can un-ignore them if needed.
+          ...(analysisResult.isFalsePositive && {
+            isIgnored: true,
+            ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+          }),
           rawLlmResponse: analysisResult.rawLlmResponse,
           createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
         };
@@ -216,8 +242,8 @@ async function handleSucceededRun({
           newFindingCount++;
         }
       } catch (err) {
-        // On LLM failure, write a fallback finding so no data is silently lost
-        console.error(`[webhook] LLM analysis failed for item in dataset ${datasetId}:`, err);
+        // On AI analysis failure, write a fallback finding so no data is silently lost
+        console.error(`[webhook] AI analysis failed for item in dataset ${datasetId}:`, err);
         const findingRef = db.collection('findings').doc();
         const fallbackFinding: Omit<Finding, 'id'> = {
           scanId: scan.id ?? scanDoc.id,
@@ -227,8 +253,8 @@ async function handleSucceededRun({
           actorId,
           severity: 'medium',
           title: 'Unanalysed result — review manually',
-          description: 'LLM analysis failed for this item. Raw data is preserved for manual review.',
-          llmAnalysis: 'LLM analysis failed for this item. Raw data is preserved for manual review.',
+          description: 'AI analysis failed for this item. Raw data is preserved for manual review.',
+          llmAnalysis: 'AI analysis failed for this item. Raw data is preserved for manual review.',
           url: extractUrl(item),
           rawData: item,
           isFalsePositive: false,
@@ -253,8 +279,8 @@ async function handleSucceededRun({
 }
 
 /**
- * Batch mode: send all SERP pages to the LLM in one call, then write one Finding
- * per individual search result the LLM assessed. Returns the count of non-false-positive
+ * Batch mode: send all SERP pages to AI analysis in one call, then write one Finding
+ * per individual search result assessed. Returns the count of non-false-positive
  * findings and any suggested follow-up search queries.
  */
 async function analyseAndWriteBatch({
@@ -267,6 +293,7 @@ async function analyseAndWriteBatch({
   runId,
   items,
   searchDepth,
+  ignoredUrls,
 }: {
   scanDoc: QueryDocumentSnapshot;
   scan: Scan;
@@ -277,6 +304,7 @@ async function analyseAndWriteBatch({
   runId: string;
   items: Record<string, unknown>[];
   searchDepth: number;
+  ignoredUrls?: string[];
 }): Promise<{ findingCount: number; suggestedSearches?: string[] }> {
   let findingCount = 0;
   let suggestedSearches: string[] | undefined;
@@ -292,6 +320,7 @@ async function analyseAndWriteBatch({
       actorId,
       items,
       canSuggestSearches: searchDepth === 0,
+      ignoredUrls,
     });
 
     suggestedSearches = analysisResult.suggestedSearches;
@@ -312,6 +341,12 @@ async function analyseAndWriteBatch({
         url: pageItem.url || undefined,
         rawData: sharedRawData,
         isFalsePositive: pageItem.isFalsePositive,
+        // Auto-ignore AI-classified false positives so their URLs are excluded
+        // from future scans. Users can un-ignore them if needed.
+        ...(pageItem.isFalsePositive && {
+          isIgnored: true,
+          ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+        }),
         rawLlmResponse: analysisResult.rawLlmResponse,
         createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
       };
@@ -322,7 +357,7 @@ async function analyseAndWriteBatch({
     const counts = await Promise.all(writeOps);
     findingCount = counts.reduce<number>((sum, c) => sum + c, 0);
   } catch (err) {
-    console.error(`[webhook] Batch LLM analysis failed for dataset ${datasetId}:`, err);
+    console.error(`[webhook] Batch AI analysis failed for dataset ${datasetId}:`, err);
     const findingRef = db.collection('findings').doc();
     const fallbackFinding: Omit<Finding, 'id'> = {
       scanId: scan.id ?? scanDoc.id,
@@ -332,8 +367,8 @@ async function analyseAndWriteBatch({
       actorId,
       severity: 'medium',
       title: 'Unanalysed result — review manually',
-      description: 'LLM analysis failed for this batch. Raw data is preserved for manual review.',
-      llmAnalysis: 'LLM analysis failed for this batch. Raw data is preserved for manual review.',
+      description: 'AI analysis failed for this batch. Raw data is preserved for manual review.',
+      llmAnalysis: 'AI analysis failed for this batch. Raw data is preserved for manual review.',
       url: extractUrl(items[0] ?? {}),
       rawData: sharedRawData,
       isFalsePositive: false,
@@ -343,7 +378,7 @@ async function analyseAndWriteBatch({
     findingCount++;
   }
 
-  // Mark all SERP pages as analysed at once (batch mode resolves in one LLM call)
+  // Mark all SERP pages as analysed at once (batch mode resolves in one AI analysis call)
   await scanDoc.ref.update({
     [`actorRuns.${runId}.analysedCount`]: items.length,
   });
@@ -352,7 +387,7 @@ async function analyseAndWriteBatch({
 }
 
 /**
- * Start follow-up Google Search actor runs for each query suggested by the LLM.
+ * Start follow-up Google Search actor runs for each query suggested by AI analysis.
  * Caps total deep searches at MAX_SUGGESTED_SEARCHES (enforced by the parser already,
  * but guarded here too). Adds the new runs to the scan document atomically so that
  * markActorRunComplete can correctly detect overall scan completion.
@@ -416,19 +451,21 @@ async function triggerDeepSearches({
 }
 
 /**
- * Run a single dataset item through the LLM for classification.
- * Returns parsed fields plus the raw LLM response string for storage / debugging.
+ * Run a single dataset item through AI analysis for classification.
+ * Returns parsed fields plus the raw AI response string for storage / debugging.
  */
 async function analyseItem({
   brand,
   source,
   actorId,
   item,
+  ignoredUrls,
 }: {
   brand: BrandProfile;
   source: Finding['source'];
   actorId: string;
   item: Record<string, unknown>;
+  ignoredUrls?: string[];
 }): Promise<{ severity: Finding['severity']; title: string; llmAnalysis: string; isFalsePositive: boolean; rawLlmResponse: string }> {
   void actorId;
   const prompt = buildAnalysisPrompt({
@@ -436,6 +473,7 @@ async function analyseItem({
     keywords: brand.keywords,
     officialDomains: brand.officialDomains,
     watchWords: brand.watchWords,
+    ignoredUrls,
     source,
     rawData: item,
   });
@@ -447,16 +485,16 @@ async function analyseItem({
 
   const parsed = parseAnalysisOutput(raw);
   if (!parsed) {
-    throw new Error(`Failed to parse LLM output: ${raw.slice(0, 200)}`);
+    throw new Error(`Failed to parse AI analysis output: ${raw.slice(0, 200)}`);
   }
 
   return { ...parsed, rawLlmResponse: raw };
 }
 
 /**
- * Run all SERP pages from an actor run through the LLM in one batch call.
+ * Run all SERP pages from an actor run through AI analysis in one batch call.
  * Returns a per-result assessment for every individual organic/paid search result,
- * plus the raw LLM response string and any suggested follow-up searches.
+ * plus the raw AI response string and any suggested follow-up searches.
  */
 async function analyseItemBatch({
   brand,
@@ -464,12 +502,14 @@ async function analyseItemBatch({
   actorId,
   items,
   canSuggestSearches,
+  ignoredUrls,
 }: {
   brand: BrandProfile;
   source: Finding['source'];
   actorId: string;
   items: Record<string, unknown>[];
   canSuggestSearches?: boolean;
+  ignoredUrls?: string[];
 }): Promise<{ perPageFindings: PerPageFinding[]; rawLlmResponse: string; suggestedSearches?: string[] }> {
   void actorId;
   const prompt = buildBatchAnalysisPrompt({
@@ -477,6 +517,7 @@ async function analyseItemBatch({
     keywords: brand.keywords,
     officialDomains: brand.officialDomains,
     watchWords: brand.watchWords,
+    ignoredUrls,
     source,
     rawItems: items,
     canSuggestSearches,
@@ -489,7 +530,7 @@ async function analyseItemBatch({
 
   const parsed = parseBatchAnalysisOutput(raw);
   if (!parsed) {
-    throw new Error(`Failed to parse batch LLM output: ${raw.slice(0, 200)}`);
+    throw new Error(`Failed to parse batch AI analysis output: ${raw.slice(0, 200)}`);
   }
 
   return {
@@ -516,6 +557,13 @@ async function markActorRunComplete(
   await db.runTransaction(async (tx) => {
     const freshSnap = await tx.get(scanDoc.ref);
     const fresh = freshSnap.data() as Scan;
+
+    // If the scan was cancelled (e.g. user cancelled while this run was being processed),
+    // do not overwrite the cancelled status or increment completion counters.
+    if (fresh.status === 'cancelled') {
+      console.log(`[webhook] markActorRunComplete: scan ${scanDoc.id} is cancelled — skipping`);
+      return;
+    }
 
     // Read the current total from the fresh snapshot so any deep-search runs
     // added after the scan started are included in the completion check.

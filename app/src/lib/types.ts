@@ -17,7 +17,7 @@ export interface BrandProfile {
   name: string;
   keywords: string[];
   officialDomains: string[];
-  /** Terms the LLM should flag if found associated with the brand in search results. */
+  /** Terms AI analysis should flag if found associated with the brand in search results. */
   watchWords?: string[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
@@ -54,16 +54,20 @@ export interface Finding {
   llmAnalysis: string;
   url?: string;
   rawData: Record<string, unknown>;
-  /** Set to true for LLM-classified false positives (not real threats). */
+  /** Set to true for AI-classified false positives (not real threats). */
   isFalsePositive?: boolean;
-  /** The raw JSON string returned by the LLM before parsing. */
+  /** Set to true when the user manually dismisses this finding. */
+  isIgnored?: boolean;
+  /** Timestamp when the finding was ignored by the user. */
+  ignoredAt?: Timestamp;
+  /** The raw JSON string returned by AI analysis before parsing. */
   rawLlmResponse?: string;
   createdAt: Timestamp;
 }
 
 // ─── Scans ─────────────────────────────────────────────────────────────────
 
-export type ScanStatus = 'pending' | 'running' | 'completed' | 'failed';
+export type ScanStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
 
 export type ActorRunStatus =
   | 'pending'
@@ -80,10 +84,10 @@ export interface ActorRunInfo {
   status: ActorRunStatus;
   /** Total items in the dataset — set once the dataset has been fetched */
   itemCount?: number;
-  /** Number of items that have completed LLM analysis so far */
+  /** Number of items that have completed AI analysis so far */
   analysedCount?: number;
   /**
-   * 0 = initial scan run; 1 = LLM-requested deep follow-up.
+   * 0 = initial scan run; 1 = AI-requested deep follow-up.
    * Deep searches are never spawned from depth > 0 (loop guard).
    */
   searchDepth?: number;
@@ -110,7 +114,22 @@ export interface Scan {
   completedAt?: Timestamp;
 }
 
-// ─── LLM Analysis ──────────────────────────────────────────────────────────
+// ─── Scan Summary ──────────────────────────────────────────────────────────
+
+/** Lightweight scan shape returned by the scans list endpoint, with pre-computed severity counts. */
+export interface ScanSummary {
+  id: string;
+  status: ScanStatus;
+  startedAt: Timestamp;
+  completedAt?: Timestamp;
+  highCount: number;
+  mediumCount: number;
+  lowCount: number;
+  nonHitCount: number;
+  ignoredCount: number;
+}
+
+// ─── AI Analysis ───────────────────────────────────────────────────────────
 
 export interface AnalysisResult {
   severity: Severity;

@@ -18,7 +18,7 @@ DoppelSpotter is a web app that continuously monitors the web for potential infr
 
 1. **Set up your brand profile** — enter your brand/product name(s), related keywords, and official domain(s)
 2. **A suite of Apify actors scans the web** — social media platforms, Google search results, newly-registered domains, app stores, and trademark registers are monitored on a scheduled basis
-3. **AI analyses every finding** — an LLM classifies each result by severity and likelihood of genuine infringement, filtering out false positives (e.g. a news article mentioning your brand vs. a fake account impersonating it)
+3. **AI analyses every finding** — AI analysis classifies each result by severity and likelihood of genuine infringement, filtering out false positives (e.g. a news article mentioning your brand vs. a fake account impersonating it)
 4. **You receive a digest** — a daily or weekly summary of findings, ranked by severity, with plain-language explanations of each potential infringement
 
 ## Why This Matters
@@ -42,7 +42,7 @@ This is the gap a rules-based system cannot fill: understanding *context* at sca
 
 | Layer | Technology |
 |---|---|
-| **AI analysis** | LLM via OpenRouter (classification, severity scoring, summarisation) |
+| **AI analysis** | AI analysis via OpenRouter (classification, severity scoring, summarisation) |
 | **Orchestration** | Apify scheduling + webhooks |
 | **Frontend** | Web app |
 | **Alerting** | Email digests (daily/weekly) |

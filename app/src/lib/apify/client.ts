@@ -32,7 +32,7 @@ export function buildActorInput(actorId: string, brand: BrandProfile): Record<st
   // Actor-specific input mappings
   switch (actorId) {
     case 'apify/google-search-scraper':
-      return { queries: primaryQuery, maxPagesPerQuery: 3, resultsPerPage: 10 };
+      return { queries: primaryQuery, maxPagesPerQuery: 1, resultsPerPage: 10 };
 
     case 'apify/instagram-search-scraper':
       return { searchQueries: searchTerms, maxResults: 20 };
@@ -92,7 +92,7 @@ export async function startActorRun(
 
 /**
  * Start a Google Search actor run for a specific deep-search query.
- * Used by the webhook handler when the LLM requests follow-up searches.
+ * Used by the webhook handler when AI analysis requests follow-up searches.
  * The actor input mirrors the core scan input but uses a custom query string.
  */
 export async function startDeepSearchRun(
@@ -115,6 +115,15 @@ export async function startDeepSearchRun(
   );
 
   return { runId: run.id };
+}
+
+/**
+ * Abort an in-flight Apify actor run.
+ * Resolves silently if the run has already finished (Apify ignores the call).
+ */
+export async function abortActorRun(runId: string): Promise<void> {
+  const client = getClient();
+  await client.run(runId).abort();
 }
 
 /**

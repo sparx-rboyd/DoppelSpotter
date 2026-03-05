@@ -6,7 +6,7 @@ import type { Finding } from '@/lib/types';
 // GET /api/findings — latest findings across all of the authenticated user's brands
 // Query params:
 //   limit        (optional, default 20, max 100)
-//   nonHitsOnly  (optional) — when "true", returns only LLM false-positives; otherwise returns only real findings
+//   nonHitsOnly  (optional) — when "true", returns only AI-classified false-positives; otherwise returns only real findings
 export async function GET(request: NextRequest) {
   const { uid, error } = requireAuth(request);
   if (error) return error;

@@ -92,7 +92,7 @@ export default function NewBrandPage() {
     <AuthGuard>
       <Navbar />
       <main className="pt-16 min-h-screen bg-gray-50/50">
-        <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <div className="flex items-center gap-3 mb-8">
             <Link href="/brands" className="text-gray-500 hover:text-gray-900 transition">
               <ArrowLeft className="w-5 h-5" />
@@ -151,7 +151,7 @@ export default function NewBrandPage() {
                       ))}
                     </div>
                   )}
-                  <p className="text-xs text-gray-500">Variations of your brand name, common misspellings, product names, etc.</p>
+                  <p className="text-xs text-gray-500">The words associated with your brand that you want to protect and monitor (e.g. your trademarks). Scans will search for these keywords.</p>
                 </div>
 
                 {/* Official domains */}
@@ -186,7 +186,7 @@ export default function NewBrandPage() {
                       ))}
                     </div>
                   )}
-                  <p className="text-xs text-gray-500">Your legitimate domains — used to filter out your own properties from results.</p>
+                  <p className="text-xs text-gray-500">Domains that you own, so that the AI analysis knows not to flag them.</p>
                 </div>
 
                 {/* Watch words */}
@@ -221,7 +221,7 @@ export default function NewBrandPage() {
                       ))}
                     </div>
                   )}
-                  <p className="text-xs text-gray-500">Terms you don&apos;t want associated with your brand — the LLM will flag results where these appear.</p>
+                  <p className="text-xs text-gray-500">Words that you don&apos;t want to be associated with your brand. Scans won&apos;t search for these words, but if they appear in scan results the AI analysis will treat the results with more caution.</p>
                 </div>
               </CardContent>
             </Card>

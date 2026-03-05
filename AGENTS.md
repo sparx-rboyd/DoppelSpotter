@@ -9,13 +9,13 @@ Keep it up to date when making significant structural changes.
 
 **DoppelSpotter** is an AI-powered brand protection web app for SMEs. It monitors the web for
 brand infringement (lookalike domains, fake social accounts, clone apps, trademark squatting)
-using Apify actors for scraping and an LLM for classification.
+using Apify actors for scraping and AI analysis for classification.
 
 **Stack:**
 - Frontend / API: Next.js 15 (App Router), TypeScript, Tailwind CSS
 - Database: Google Cloud Firestore
 - Scraping: Apify platform (hosted actors)
-- LLM: OpenRouter → `anthropic/claude-3.5-haiku` (default)
+- AI analysis: OpenRouter → `anthropic/claude-3.5-haiku` (default)
 - Hosting: Google Cloud Run (app) + Cloudflare Workers (landing page)
 - CI/CD: GCP Cloud Build
 
@@ -38,17 +38,17 @@ using Apify actors for scraping and an LLM for classification.
 │       ├── app/                  # Pages + API routes (App Router)
 │       │   └── api/
 │       │       ├── auth/         # login, logout, me (signup disabled — use add-user CLI)
-│       │       ├── brands/       # CRUD + findings per brand
+│       │       ├── brands/       # CRUD + findings + scans per brand
 │       │       ├── findings/     # Cross-brand findings query
 │       │       ├── scan/         # Trigger scan + poll status
-│       │       └── webhooks/apify/  # Apify webhook receiver → LLM pipeline
+│       │       └── webhooks/apify/  # Apify webhook receiver → AI analysis pipeline
 │       └── lib/
 │           ├── apify/
 │           │   ├── actors.ts     # ACTOR_REGISTRY — all actor definitions + enable/disable
 │           │   └── client.ts     # Apify client: startActorRun, buildActorInput, fetchDatasetItems
 │           └── analysis/
 │               ├── prompts.ts    # SYSTEM_PROMPT + buildAnalysisPrompt()
-│               ├── openrouter.ts # LLM client: chatCompletion()
+│               ├── openrouter.ts # AI analysis client: chatCompletion()
 │               └── types.ts      # AnalysisOutput interface + parseAnalysisOutput()
 └── docs/
     ├── GCP_SETUP.md
@@ -73,19 +73,37 @@ See `REVIEW.md` for full actor table and rationale.
 
 ```
 POST /api/scan
-  └─ reads CORE_ACTOR_IDS (or actorIds from request body)
-  └─ calls startActorRun() for each actor → registers Apify webhook
-       └─ stores runId → scan document in Firestore
+ └─ reads CORE_ACTOR_IDS (or actorIds from request body)
+ └─ calls startActorRun() for each actor → registers Apify webhook
+ └─ stores runId → scan document in Firestore
+
+DELETE /api/scan?scanId=xxx
+ └─ verifies ownership; returns 409 if scan is not pending/running
+ └─ marks scan status → 'cancelled' in Firestore immediately
+ └─ best-effort calls abortActorRun() for every actorRunId (silently ignores already-terminal runs)
+ └─ webhook handler skips callbacks for cancelled scans; markActorRunComplete is a no-op if scan is cancelled
+
+GET /api/brands/[brandId]/scans
+ └─ returns all terminal scans (completed|cancelled|failed) ordered newest-first
+ └─ computes per-scan severity counts (high/medium/low/nonHit) from findings in memory
+ └─ returns ScanSummary[] — lightweight shape used by the brand page to render per-scan result sets
+
+DELETE /api/brands/[brandId]/scans/[scanId]
+ └─ verifies ownership; returns 409 if scan is pending/running
+ └─ batch-deletes all findings for the scan, then deletes the scan doc
+
+GET /api/brands/[brandId]/findings?scanId=xxx
+ └─ optional scanId param filters findings to a single scan (used for lazy loading in the UI)
 
 Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ validates X-Apify-Webhook-Secret header
  └─ fetches up to 50 items from Apify dataset
- └─ per-item mode: one LLM call per dataset item → one Finding per item
- └─ batch mode (Google Search): one LLM call for all SERP pages combined
-      └─ LLM returns per-result assessments (one per organic/paid result across all pages)
+ └─ per-item mode: one AI analysis call per dataset item → one Finding per item
+ └─ batch mode (Google Search): one AI analysis call for all SERP pages combined
+      └─ AI analysis returns per-result assessments (one per organic/paid result across all pages)
       └─ one Finding written per individual search result
       └─ isFalsePositive: true findings are stored but excluded from default API responses
- └─ (batch mode, depth 0 only) if LLM returns suggestedSearches → triggers deep-search runs
+ └─ (batch mode, depth 0 only) if AI analysis returns suggestedSearches → triggers deep-search runs
       └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
       └─ deep-search runs complete via the same webhook, depth 1 — no further recursion
  └─ marks actor run complete; if all runs done → marks scan complete
@@ -93,36 +111,36 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 
 ---
 
-## LLM Analysis
+## AI Analysis
 
 - **File:** `app/src/lib/analysis/`
 - **When:** After each Apify actor run completes, inside the webhook handler
 - **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
 - **Prompts:** `SYSTEM_PROMPT` + `buildAnalysisPrompt()` for per-item mode; `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPrompt()` for batch mode; all in `prompts.ts`
-- **Watch words:** optional per-brand terms passed to the prompt builder; the LLM is instructed to note any presence or implied association in its analysis and use its discretion on severity impact
+- **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Per-item output:** structured JSON `{ severity, title, llmAnalysis, isFalsePositive }`
 - **Batch output:** structured JSON `{ items: [{ url, title, severity, analysis, isFalsePositive }], suggestedSearches? }`
-- **Raw LLM response** string is stored on every finding as `rawLlmResponse` for debugging
+- **Raw AI response** string is stored on every finding as `rawLlmResponse` for debugging
 - **False positives** are written to Firestore with `isFalsePositive: true`; filtered from default API responses; visible in the brand page "Non-hits" section
 
 ### Analysis modes (`ActorConfig.analysisMode`)
 
-Each actor in the registry declares how its dataset items should be sent to the LLM:
+Each actor in the registry declares how its dataset items should be sent to AI analysis:
 
 | Mode | Behaviour |
 |---|---|
-| `'per-item'` (default) | One LLM call per dataset item → one Finding per item |
-| `'batch'` | All items combined into one LLM call → one consolidated Finding per run |
+| `'per-item'` (default) | One AI analysis call per dataset item → one Finding per item |
+| `'batch'` | All items combined into one AI analysis call → one consolidated Finding per run |
 
 `'batch'` is used for actors whose items are pages/slices of the same query (e.g. Google Search
-SERP pages), so the LLM sees the full result set rather than analysing each slice in isolation.
+SERP pages), so AI analysis sees the full result set rather than analysing each slice in isolation.
 The combined `rawData` is stored as `{ pages: [...], pageCount: N }`.
 
-See `REVIEW.md` for full prompt text and LLM pipeline details.
+See `REVIEW.md` for full prompt text and AI analysis pipeline details.
 
 ### Deep search (`suggestedSearches`)
 
-When the Google Search actor runs at depth 0 (initial scan), the LLM may include a
+When the Google Search actor runs at depth 0 (initial scan), AI analysis may include a
 `suggestedSearches` array in its response — up to 3 queries it wants to investigate further
 based on suspicious `relatedQueries` in the SERP data.
 
@@ -139,6 +157,24 @@ query being investigated when a depth-1 run is active.
 
 ---
 
+## Ignored Findings
+
+Users can manually dismiss (ignore) any non-false-positive finding at the individual card level. Ignored findings are stored in Firestore with `isIgnored: true` and `ignoredAt: Timestamp`.
+
+**Behaviour:**
+- Ignored findings are excluded from the default findings API response and from severity counts in `ScanSummary`
+- They are surfaced in a collapsible "Ignored" sub-section within each scan's expanded view
+- A brand-level "Ignored URLs" panel shows all ignored findings across all scans, accessible from a summary banner
+- Findings can be un-ignored from either location, restoring them to their original severity bucket
+- On each new scan, the webhook handler fetches all ignored URLs for the brand (Firestore query on `isIgnored == true`) and passes them to the AI analysis prompt — AI analysis is instructed to mark these as `isFalsePositive: true` if they appear in the new result set, preventing repeated re-reporting
+
+**API:**
+- `PATCH /api/brands/[brandId]/findings/[findingId]` — body `{ isIgnored: boolean }` — toggles ignored state
+- `GET /api/brands/[brandId]/findings?ignoredOnly=true` — returns all ignored findings (cross-scan if no `scanId`)
+- `GET /api/brands/[brandId]/findings?scanId=xxx&ignoredOnly=true` — ignored findings for a specific scan
+
+---
+
 ## Environment Variables
 
 | Variable | Purpose |
@@ -147,7 +183,7 @@ query being investigated when a depth-1 run is active.
 | `APIFY_WEBHOOK_SECRET` | Shared secret for webhook validation |
 | `WHOISXML_API_KEY` | WhoisXML Brand Alert API key (custom actor) |
 | `OPENROUTER_API_KEY` | OpenRouter API key |
-| `OPENROUTER_MODEL` | LLM model override (default: `anthropic/claude-3.5-haiku`) |
+| `OPENROUTER_MODEL` | AI analysis model override (default: `anthropic/claude-3.5-haiku`) |
 | `AUTH_JWT_SECRET` | JWT signing secret (7-day tokens) |
 | `GCP_PROJECT_ID` | Google Cloud project ID |
 | `FIRESTORE_DATABASE_ID` | Firestore DB (default: `(default)`) |
@@ -162,8 +198,8 @@ query being investigated when a depth-1 run is active.
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], watchWords[]?, createdAt, updatedAt |
-| `scans` | id, brandId, userId, status, actorIds[], actorRuns{}, completedRunCount, findingCount, startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, rawLlmResponse?, createdAt |
+| `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{}, completedRunCount, findingCount, startedAt, completedAt |
+| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, rawLlmResponse?, createdAt |
 
 ---
 
@@ -184,4 +220,4 @@ Script: `app/scripts/add-user.ts`. Reads `.env.local` automatically (same file u
 
 - [`docs/GCP_SETUP.md`](docs/GCP_SETUP.md) — GCP / Firestore / Cloud Run setup
 - [`docs/PIPELINE_SETUP.md`](docs/PIPELINE_SETUP.md) — Apify, OpenRouter, ngrok, env vars
-- [`REVIEW.md`](REVIEW.md) — Ongoing scan quality review: actor details and LLM prompts
+- [`REVIEW.md`](REVIEW.md) — Ongoing scan quality review: actor details and AI analysis prompts

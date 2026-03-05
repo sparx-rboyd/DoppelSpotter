@@ -7,23 +7,40 @@ type Params = { params: Promise<{ brandId: string }> };
 
 // GET /api/brands/[brandId]/findings
 // Query params:
-//   nonHitsOnly  (optional) — when "true", returns only LLM false-positives; otherwise returns only real findings
+//   nonHitsOnly  (optional) — when "true", returns only AI-classified false-positives (non-ignored)
+//   ignoredOnly  (optional) — when "true", returns only user-ignored findings (across all scans if no scanId)
+//   scanId       (optional) — when provided, filters findings to a specific scan
 export async function GET(request: NextRequest, { params }: Params) {
   const { uid, error } = requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;
   const nonHitsOnly = request.nextUrl.searchParams.get('nonHitsOnly') === 'true';
+  const ignoredOnly = request.nextUrl.searchParams.get('ignoredOnly') === 'true';
+  const scanId = request.nextUrl.searchParams.get('scanId');
 
   // Verify brand ownership
   const brandDoc = await db.collection('brands').doc(brandId).get();
   if (!brandDoc.exists) return errorResponse('Brand not found', 404);
   if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
 
-  const snapshot = await db
+  let query = db
     .collection('findings')
     .where('brandId', '==', brandId)
-    .where('userId', '==', uid)
+    .where('userId', '==', uid);
+
+  if (scanId) {
+    query = query.where('scanId', '==', scanId);
+  }
+
+  // For cross-scan ignoredOnly queries, filter at the Firestore level so we only
+  // fetch the small number of ignored documents rather than all findings for the brand.
+  // Requires a composite index: brandId ASC, userId ASC, isIgnored ASC, createdAt DESC.
+  if (ignoredOnly && !scanId) {
+    query = query.where('isIgnored', '==', true);
+  }
+
+  const snapshot = await query
     .orderBy('createdAt', 'desc')
     .limit(200)
     .get();
@@ -33,9 +50,19 @@ export async function GET(request: NextRequest, { params }: Params) {
     ...(doc.data() as Omit<Finding, 'id'>),
   }));
 
-  const findings = nonHitsOnly
-    ? all.filter((f) => f.isFalsePositive === true)
-    : all.filter((f) => !f.isFalsePositive);
+  let findings: Finding[];
+  if (ignoredOnly) {
+    // Only user-manually-ignored real findings (not auto-ignored AI false positives —
+    // those have their own non-hits section).
+    findings = all.filter((f) => f.isIgnored === true && !f.isFalsePositive);
+  } else if (nonHitsOnly) {
+    // All AI false positives, regardless of their ignored state (auto-ignored or
+    // explicitly un-ignored by the user).
+    findings = all.filter((f) => f.isFalsePositive === true);
+  } else {
+    // Default: real hits only — exclude AI false-positives and user-ignored findings
+    findings = all.filter((f) => !f.isFalsePositive && !f.isIgnored);
+  }
 
   return NextResponse.json({ data: findings });
 }
