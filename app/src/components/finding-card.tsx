@@ -20,19 +20,19 @@ import {
   Eye,
   Loader2,
 } from 'lucide-react';
-import { type Finding, type FindingSource } from '@/lib/types';
+import { type Finding, type FindingSource, type FindingSummary } from '@/lib/types';
 import { SeverityBadge } from './severity-badge';
 import { cn } from '@/lib/utils';
 
 interface FindingCardProps {
-  finding: Finding;
+  finding: FindingSummary;
   className?: string;
   /**
    * Called when the user toggles the ignored state.
-   * Receives the full finding (so the parent has access to the URL for URL-scoped updates)
-   * and the new desired ignored state. Should return a promise that resolves on success.
+   * Receives the lightweight list item (which still includes the URL/scanId needed
+   * for optimistic UI updates) and the new desired ignored state.
    */
-  onIgnoreToggle?: (finding: Finding, isIgnored: boolean) => Promise<void>;
+  onIgnoreToggle?: (finding: FindingSummary, isIgnored: boolean) => Promise<void>;
 }
 
 const sourceConfig: Record<
@@ -104,18 +104,33 @@ const sourceConfig: Record<
 function ExpandableSection({
   icon: Icon,
   label,
+  onOpen,
+  loading = false,
+  error,
   children,
 }: {
   icon: React.ElementType;
   label: string;
+  onOpen?: () => void;
+  loading?: boolean;
+  error?: string;
   children: React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+
+  function handleToggle() {
+    setOpen((prev) => {
+      const next = !prev;
+      if (next) onOpen?.();
+      return next;
+    });
+  }
+
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={handleToggle}
         className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 transition text-left"
       >
         {open ? (
@@ -126,7 +141,18 @@ function ExpandableSection({
         <Icon className="w-3.5 h-3.5 text-gray-500 flex-shrink-0" />
         <span className="text-xs font-medium text-gray-600">{label}</span>
       </button>
-      {open && (
+      {open && loading && (
+        <div className="p-3 text-xs text-gray-500 bg-white border-t border-gray-200 flex items-center gap-2">
+          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          Loading debug data...
+        </div>
+      )}
+      {open && !loading && error && (
+        <div className="p-3 text-xs text-red-600 bg-white border-t border-gray-200">
+          {error}
+        </div>
+      )}
+      {open && !loading && !error && (
         <pre className="p-3 text-xs text-gray-700 bg-white overflow-x-auto whitespace-pre-wrap break-words font-mono leading-relaxed max-h-80 overflow-y-auto border-t border-gray-200">
           {children}
         </pre>
@@ -146,6 +172,9 @@ export function FindingCard({ finding, className, onIgnoreToggle }: FindingCardP
   const showDebug = searchParams.get('debug') === 'true';
 
   const [ignoring, setIgnoring] = useState(false);
+  const [debugFinding, setDebugFinding] = useState<Finding | null>(null);
+  const [debugLoading, setDebugLoading] = useState(false);
+  const [debugError, setDebugError] = useState('');
 
   async function handleIgnoreToggle(e: React.MouseEvent) {
     e.stopPropagation();
@@ -155,6 +184,25 @@ export function FindingCard({ finding, className, onIgnoreToggle }: FindingCardP
       await onIgnoreToggle(finding, !isIgnored);
     } finally {
       setIgnoring(false);
+    }
+  }
+
+  async function ensureDebugFinding() {
+    if (debugFinding || debugLoading) return;
+
+    setDebugLoading(true);
+    setDebugError('');
+    try {
+      const res = await fetch(`/api/brands/${finding.brandId}/findings/${finding.id}`, {
+        credentials: 'same-origin',
+      });
+      if (!res.ok) throw new Error('Failed to load debug data');
+      const json = await res.json();
+      setDebugFinding(json.data ?? null);
+    } catch (err) {
+      setDebugError(err instanceof Error ? err.message : 'Failed to load debug data');
+    } finally {
+      setDebugLoading(false);
     }
   }
 
@@ -252,20 +300,34 @@ export function FindingCard({ finding, className, onIgnoreToggle }: FindingCardP
           {/* Debug expandables — visible only when ?debug=true */}
           {showDebug && (
             <div className="space-y-1.5">
-              <ExpandableSection icon={MessageSquare} label="Raw AI response">
-                {finding.rawLlmResponse
+              <ExpandableSection
+                icon={MessageSquare}
+                label="Raw AI response"
+                onOpen={ensureDebugFinding}
+                loading={debugLoading}
+                error={debugError}
+              >
+                {debugFinding?.rawLlmResponse
                   ? (() => {
                       try {
-                        return JSON.stringify(JSON.parse(finding.rawLlmResponse), null, 2);
+                        return JSON.stringify(JSON.parse(debugFinding.rawLlmResponse), null, 2);
                       } catch {
-                        return finding.rawLlmResponse;
+                        return debugFinding.rawLlmResponse;
                       }
                     })()
                   : '(not available — AI analysis may have failed or this is a legacy finding)'}
               </ExpandableSection>
 
-              <ExpandableSection icon={Code2} label="Raw actor data">
-                {JSON.stringify(finding.rawData, null, 2)}
+              <ExpandableSection
+                icon={Code2}
+                label="Raw actor data"
+                onOpen={ensureDebugFinding}
+                loading={debugLoading}
+                error={debugError}
+              >
+                {debugFinding?.rawData
+                  ? JSON.stringify(debugFinding.rawData, null, 2)
+                  : '(not available — this is a lightweight list item)'}
               </ExpandableSection>
             </div>
           )}

@@ -199,7 +199,7 @@ Users can manually dismiss (ignore) any non-false-positive finding at the indivi
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], watchWords[]?, safeWords[]?, createdAt, updatedAt |
-| `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{}, completedRunCount, findingCount, startedAt, completedAt |
+| `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{}, completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount** (denormalized — written by webhook, updated on ignore/un-ignore), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, rawLlmResponse?, createdAt |
 
 ---
@@ -214,6 +214,31 @@ npm run add-user -- --email user@example.com --password secret123
 ```
 
 Script: `app/scripts/add-user.ts`. Reads `.env.local` automatically (same file used by `next dev`).
+
+To backfill denormalized severity counts onto existing scan documents (needed after adding the count fields for the first time, or to recompute from findings after manual data changes):
+
+```bash
+# Run from the app/ directory
+npm run backfill-scan-counts           # only updates scans missing count fields
+npm run backfill-scan-counts -- --force  # recomputes all scans from findings
+```
+
+Script: `app/scripts/backfill-scan-counts.ts`.
+
+---
+
+## Findings API — Performance Design
+
+The findings API is optimised to minimise Firestore reads and HTTP round-trips on the brand page:
+
+- **Denormalized counts on scan documents** — `highCount`, `mediumCount`, `lowCount`, `nonHitCount`, `ignoredCount` are written by the webhook at scan-completion time and kept in sync by the PATCH handler on every ignore/un-ignore. The scans list endpoint (`GET /api/brands/[brandId]/scans`) reads these directly — no findings query needed.
+- **Lazy-loaded findings** — the brand page fetches findings for a scan in 3 separate stages, each only triggered on demand:
+  1. **Hits** — fetched when the scan row is first expanded
+  2. **Non-hits** — fetched when the user first opens the "Non-hits" sub-section
+  3. **Ignored** — fetched when the user first opens the "Ignored" sub-section
+- **Lightweight list payloads** — the findings list endpoints (`GET /api/brands/[brandId]/findings` and `GET /api/findings`) return a compact `FindingSummary` shape via Firestore `.select(...)`, excluding `rawData`, `rawLlmResponse`, and other fields not needed for normal rendering. This avoids repeatedly shipping the full SERP batch payload on every finding card.
+- **Debug details fetched on demand** — `FindingCard` fetches `GET /api/brands/[brandId]/findings/[findingId]` only when a debug section is opened (`?debug=true`). Normal list views never load raw actor data or raw AI responses.
+- **No redundant brand ownership checks on per-scan findings** — the `GET /api/brands/[brandId]/findings` route relies solely on `userId == uid` in the Firestore query for authorization (no extra brand doc read per request). The PATCH (ignore/un-ignore) route similarly skips the brand doc read, verifying ownership via the finding document itself.
 
 ---
 

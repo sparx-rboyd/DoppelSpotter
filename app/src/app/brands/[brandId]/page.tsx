@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { InfoTooltip } from '@/components/ui/tooltip';
 import { cn, formatScanDate } from '@/lib/utils';
-import type { BrandProfile, Finding, Scan, ScanSummary } from '@/lib/types';
+import type { BrandProfile, FindingSummary, Scan, ScanSummary } from '@/lib/types';
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -96,8 +96,8 @@ function SeverityGroup({
   onIgnoreToggle,
 }: {
   severity: 'high' | 'medium' | 'low';
-  findings: Finding[];
-  onIgnoreToggle?: (finding: Finding, isIgnored: boolean) => Promise<void>;
+  findings: FindingSummary[];
+  onIgnoreToggle?: (finding: FindingSummary, isIgnored: boolean) => Promise<void>;
 }) {
   const [isExpanded, setIsExpanded] = useState(severity === 'high');
   const [ignoringAll, setIgnoringAll] = useState(false);
@@ -176,13 +176,13 @@ export default function BrandDetailPage() {
   const [brand, setBrand] = useState<BrandProfile | null>(null);
   const [scans, setScans] = useState<ScanSummary[]>([]);
   const [expandedScanIds, setExpandedScanIds] = useState<string[]>([]);
-  const [scanFindings, setScanFindings] = useState<Record<string, Finding[]>>({});
-  const [scanNonHits, setScanNonHits] = useState<Record<string, Finding[]>>({});
-  const [scanIgnored, setScanIgnored] = useState<Record<string, Finding[]>>({});
+  const [scanFindings, setScanFindings] = useState<Record<string, FindingSummary[]>>({});
+  const [scanNonHits, setScanNonHits] = useState<Record<string, FindingSummary[]>>({});
+  const [scanIgnored, setScanIgnored] = useState<Record<string, FindingSummary[]>>({});
   const [loadingScanIds, setLoadingScanIds] = useState<string[]>([]);
   const [showNonHitsByScanId, setShowNonHitsByScanId] = useState<Record<string, boolean>>({});
   const [showIgnoredByScanId, setShowIgnoredByScanId] = useState<Record<string, boolean>>({});
-  const [allIgnoredFindings, setAllIgnoredFindings] = useState<Finding[]>([]);
+  const [allIgnoredFindings, setAllIgnoredFindings] = useState<FindingSummary[]>([]);
   const [showAllIgnored, setShowAllIgnored] = useState(false);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
@@ -194,7 +194,7 @@ export default function BrandDetailPage() {
   const [cancelling, setCancelling] = useState(false);
   const [activeScanId, setActiveScanId] = useState<string | null>(null);
   const [activeScan, setActiveScan] = useState<Scan | null>(null);
-  const [liveScanFindings, setLiveScanFindings] = useState<Finding[]>([]);
+  const [liveScanFindings, setLiveScanFindings] = useState<FindingSummary[]>([]);
   const [liveResultsExpanded, setLiveResultsExpanded] = useState(true);
   const [error, setError] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
@@ -232,32 +232,46 @@ export default function BrandDetailPage() {
   }
 
   async function loadScanFindings(scanId: string) {
-    // Skip if already cached or already loading
+    // Only loads hits — non-hits and ignored are lazy-loaded when those sections are first opened.
     if (scanFindings[scanId] !== undefined || loadingScanIds.includes(scanId)) return;
 
     setLoadingScanIds((prev) => [...prev, scanId]);
     try {
-      const [hitsRes, nonHitsRes, ignoredRes] = await Promise.all([
-        fetch(`/api/brands/${brandId}/findings?scanId=${scanId}`, { credentials: 'same-origin' }),
-        fetch(`/api/brands/${brandId}/findings?scanId=${scanId}&nonHitsOnly=true`, { credentials: 'same-origin' }),
-        fetch(`/api/brands/${brandId}/findings?scanId=${scanId}&ignoredOnly=true`, { credentials: 'same-origin' }),
-      ]);
-      if (hitsRes.ok) {
-        const json = await hitsRes.json();
+      const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}`, { credentials: 'same-origin' });
+      if (res.ok) {
+        const json = await res.json();
         setScanFindings((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
-      }
-      if (nonHitsRes.ok) {
-        const json = await nonHitsRes.json();
-        setScanNonHits((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
-      }
-      if (ignoredRes.ok) {
-        const json = await ignoredRes.json();
-        setScanIgnored((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
       }
     } catch {
       // Non-critical
     } finally {
       setLoadingScanIds((prev) => prev.filter((id) => id !== scanId));
+    }
+  }
+
+  async function loadScanNonHits(scanId: string) {
+    if (scanNonHits[scanId] !== undefined) return;
+    try {
+      const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}&nonHitsOnly=true`, { credentials: 'same-origin' });
+      if (res.ok) {
+        const json = await res.json();
+        setScanNonHits((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
+      }
+    } catch {
+      // Non-critical
+    }
+  }
+
+  async function loadScanIgnored(scanId: string) {
+    if (scanIgnored[scanId] !== undefined) return;
+    try {
+      const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}&ignoredOnly=true`, { credentials: 'same-origin' });
+      if (res.ok) {
+        const json = await res.json();
+        setScanIgnored((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
+      }
+    } catch {
+      // Non-critical
     }
   }
 
@@ -289,7 +303,7 @@ export default function BrandDetailPage() {
   // Ignore / un-ignore a finding
   // ---------------------------------------------------------------------------
 
-  async function handleIgnoreToggle(triggerFinding: Finding, isIgnored: boolean) {
+  async function handleIgnoreToggle(triggerFinding: FindingSummary, isIgnored: boolean) {
     const res = await fetch(`/api/brands/${brandId}/findings/${triggerFinding.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -309,8 +323,8 @@ export default function BrandDetailPage() {
 
       // Pre-compute which real (non-false-positive) findings will move between sections,
       // grouped by scan. We read from the current closure values before any setState calls.
-      const movingFromHits: Record<string, Finding[]> = {};
-      const movingFromIgnored: Record<string, Finding[]> = {};
+      const movingFromHits: Record<string, FindingSummary[]> = {};
+      const movingFromIgnored: Record<string, FindingSummary[]> = {};
 
       if (isIgnored) {
         for (const [sId, findings] of Object.entries(scanFindings)) {
@@ -326,7 +340,7 @@ export default function BrandDetailPage() {
 
       // Always update non-hits in place (they stay in their section regardless)
       setScanNonHits((prev) => {
-        const updated: Record<string, Finding[]> = {};
+        const updated: Record<string, FindingSummary[]> = {};
         for (const [sId, findings] of Object.entries(prev)) {
           updated[sId] = findings.map((f) => f.url === url ? { ...f, isIgnored } : f);
         }
@@ -344,7 +358,9 @@ export default function BrandDetailPage() {
         setScanIgnored((prev) => {
           const updated = { ...prev };
           for (const [sId, moved] of Object.entries(movingFromHits)) {
-            updated[sId] = [...moved, ...(prev[sId] ?? []).filter((f) => f.url !== url)];
+            // Only update if already loaded — if undefined, leave it so lazy-load fetches the full list
+            if (prev[sId] === undefined) continue;
+            updated[sId] = [...moved, ...prev[sId].filter((f) => f.url !== url)];
           }
           return updated;
         });
@@ -376,6 +392,8 @@ export default function BrandDetailPage() {
         setScanIgnored((prev) => {
           const updated = { ...prev };
           for (const sId of Object.keys(movingFromIgnored)) {
+            // Only update if already loaded
+            if (prev[sId] === undefined) continue;
             updated[sId] = prev[sId].filter((f) => f.url !== url);
           }
           return updated;
@@ -418,7 +436,7 @@ export default function BrandDetailPage() {
     // Locate the finding from whichever cache holds it. Non-hits stay in their
     // section; real findings move between hits ↔ ignored.
     const findingId = triggerFinding.id;
-    let targetFinding: Finding | undefined;
+    let targetFinding: FindingSummary | undefined;
     let targetScanId: string | undefined;
     let isNonHit = false;
 
@@ -444,7 +462,7 @@ export default function BrandDetailPage() {
     }
     if (!targetFinding || !targetScanId) return;
 
-    const updatedFinding: Finding = { ...targetFinding, isIgnored };
+    const updatedFinding: FindingSummary = { ...targetFinding, isIgnored };
 
     if (isNonHit) {
       setScanNonHits((prev) => {
@@ -462,10 +480,11 @@ export default function BrandDetailPage() {
         if (prev[targetScanId!] === undefined) return prev;
         return { ...prev, [targetScanId!]: prev[targetScanId!].filter((f) => f.id !== findingId) };
       });
-      setScanIgnored((prev) => ({
-        ...prev,
-        [targetScanId!]: [updatedFinding, ...(prev[targetScanId!] ?? [])],
-      }));
+      setScanIgnored((prev) => {
+        // Only update if already loaded — if undefined, leave it so lazy-load fetches the full list
+        if (prev[targetScanId!] === undefined) return prev;
+        return { ...prev, [targetScanId!]: [updatedFinding, ...prev[targetScanId!]] };
+      });
       setAllIgnoredFindings((prev) => [updatedFinding, ...prev.filter((f) => f.id !== findingId)]);
     } else {
       setScanIgnored((prev) => {
@@ -839,7 +858,7 @@ export default function BrandDetailPage() {
   // ---------------------------------------------------------------------------
 
   const SEVERITY_ORDER: Record<string, number> = { high: 0, medium: 1, low: 2 };
-  function sortBySeverity(items: Finding[]) {
+  function sortBySeverity(items: FindingSummary[]) {
     return [...items].sort(
       (a, b) => (SEVERITY_ORDER[a.severity] ?? 3) - (SEVERITY_ORDER[b.severity] ?? 3),
     );
@@ -1285,13 +1304,15 @@ export default function BrandDetailPage() {
                                   )}
 
                                   {/* Non-hits sub-section */}
-                                  {nonHits && nonHits.length > 0 && (
+                                  {scan.nonHitCount > 0 && (
                                     <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
                                       <button
                                         type="button"
-                                        onClick={() =>
-                                          setShowNonHitsByScanId((prev) => ({ ...prev, [scan.id]: !prev[scan.id] }))
-                                        }
+                                        onClick={() => {
+                                          const next = !showNonHitsByScanId[scan.id];
+                                          setShowNonHitsByScanId((prev) => ({ ...prev, [scan.id]: next }));
+                                          if (next) loadScanNonHits(scan.id);
+                                        }}
                                         className={cn(
                                           "w-full px-4 py-3 flex items-center gap-2 transition text-left",
                                           showNonHits ? "bg-gray-50 border-b border-gray-100" : "hover:bg-gray-50"
@@ -1303,33 +1324,42 @@ export default function BrandDetailPage() {
                                         <span className="text-sm font-medium text-gray-500">
                                           Non-hits
                                           <span className="ml-1.5 text-xs font-normal text-gray-400">
-                                            ({nonHits.length})
+                                            ({nonHits ? nonHits.length : scan.nonHitCount})
                                           </span>
                                         </span>
                                         <span className="text-xs text-gray-400">· classified as false positives by AI</span>
                                       </button>
                                       {showNonHits && (
                                         <div className="border-t border-gray-100 p-4 space-y-4">
-                                          {sortBySeverity(nonHits).map((finding) => (
-                                            <FindingCard
-                                              key={finding.id}
-                                              finding={finding}
-                                              onIgnoreToggle={handleIgnoreToggle}
-                                            />
-                                          ))}
+                                          {!nonHits ? (
+                                            <div className="flex items-center justify-center py-4 gap-2 text-gray-400">
+                                              <Loader2 className="w-4 h-4 animate-spin" />
+                                              <span className="text-sm">Loading…</span>
+                                            </div>
+                                          ) : (
+                                            sortBySeverity(nonHits).map((finding) => (
+                                              <FindingCard
+                                                key={finding.id}
+                                                finding={finding}
+                                                onIgnoreToggle={handleIgnoreToggle}
+                                              />
+                                            ))
+                                          )}
                                         </div>
                                       )}
                                     </div>
                                   )}
 
                                   {/* Ignored sub-section */}
-                                  {ignored && ignored.length > 0 && (
+                                  {(scan.ignoredCount ?? 0) > 0 && (
                                     <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
                                       <button
                                         type="button"
-                                        onClick={() =>
-                                          setShowIgnoredByScanId((prev) => ({ ...prev, [scan.id]: !prev[scan.id] }))
-                                        }
+                                        onClick={() => {
+                                          const next = !showIgnoredByScanId[scan.id];
+                                          setShowIgnoredByScanId((prev) => ({ ...prev, [scan.id]: next }));
+                                          if (next) loadScanIgnored(scan.id);
+                                        }}
                                         className={cn(
                                           "w-full px-4 py-3 flex items-center gap-2 transition text-left",
                                           showIgnored ? "bg-gray-50 border-b border-gray-100" : "hover:bg-gray-50"
@@ -1342,20 +1372,27 @@ export default function BrandDetailPage() {
                                         <span className="text-sm font-medium text-gray-500">
                                           Ignored
                                           <span className="ml-1.5 text-xs font-normal text-gray-400">
-                                            ({ignored.length})
+                                            ({ignored ? ignored.length : (scan.ignoredCount ?? 0)})
                                           </span>
                                         </span>
                                         <span className="text-xs text-gray-400">· manually dismissed</span>
                                       </button>
                                       {showIgnored && (
                                         <div className="border-t border-gray-100 p-4 space-y-4">
-                                          {ignored.map((finding) => (
-                                            <FindingCard
-                                              key={finding.id}
-                                              finding={finding}
-                                              onIgnoreToggle={handleIgnoreToggle}
-                                            />
-                                          ))}
+                                          {!ignored ? (
+                                            <div className="flex items-center justify-center py-4 gap-2 text-gray-400">
+                                              <Loader2 className="w-4 h-4 animate-spin" />
+                                              <span className="text-sm">Loading…</span>
+                                            </div>
+                                          ) : (
+                                            ignored.map((finding) => (
+                                              <FindingCard
+                                                key={finding.id}
+                                                finding={finding}
+                                                onIgnoreToggle={handleIgnoreToggle}
+                                              />
+                                            ))
+                                          )}
                                         </div>
                                       )}
                                     </div>

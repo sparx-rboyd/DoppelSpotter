@@ -43,28 +43,31 @@ export type FindingSource =
   | 'trademark'
   | 'unknown';
 
-export interface Finding {
+export interface FindingSummary {
   id: string;
   scanId: string;
   brandId: string;
-  userId: string;
   source: FindingSource;
-  actorId: string;
   severity: Severity;
   title: string;
-  description: string;
   llmAnalysis: string;
   url?: string;
-  rawData: Record<string, unknown>;
   /** Set to true for AI-classified false positives (not real threats). */
   isFalsePositive?: boolean;
   /** Set to true when the user manually dismisses this finding. */
   isIgnored?: boolean;
+  createdAt: Timestamp;
+}
+
+export interface Finding extends FindingSummary {
+  userId: string;
+  actorId: string;
+  description: string;
+  rawData: Record<string, unknown>;
   /** Timestamp when the finding was ignored by the user. */
   ignoredAt?: Timestamp;
   /** The raw JSON string returned by AI analysis before parsing. */
   rawLlmResponse?: string;
-  createdAt: Timestamp;
 }
 
 // ─── Scans ─────────────────────────────────────────────────────────────────
@@ -110,7 +113,14 @@ export interface Scan {
   actorRuns?: Record<string, ActorRunInfo>;
   /** How many actor runs have completed (succeeded or failed) — used to detect scan completion */
   completedRunCount?: number;
+  /** Total non-false-positive findings (high + medium + low + ignored) */
   findingCount: number;
+  /** Denormalized per-severity counts — written by the webhook and updated on ignore/un-ignore */
+  highCount?: number;
+  mediumCount?: number;
+  lowCount?: number;
+  nonHitCount?: number;
+  ignoredCount?: number;
   errorMessage?: string;
   startedAt: Timestamp;
   completedAt?: Timestamp;

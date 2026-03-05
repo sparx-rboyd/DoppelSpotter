@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
-import type { BrandProfile, Finding } from '@/lib/types';
+import type { BrandProfile, FindingSummary } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
 
@@ -19,10 +19,15 @@ export async function GET(request: NextRequest, { params }: Params) {
   const ignoredOnly = request.nextUrl.searchParams.get('ignoredOnly') === 'true';
   const scanId = request.nextUrl.searchParams.get('scanId');
 
-  // Verify brand ownership
-  const brandDoc = await db.collection('brands').doc(brandId).get();
-  if (!brandDoc.exists) return errorResponse('Brand not found', 404);
-  if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
+  // Authorization is enforced by the userId filter in every Firestore query below —
+  // a user can only retrieve findings that belong to them. We still verify brand
+  // existence for the cross-scan ignoredOnly path to return a proper 404, but skip
+  // it for per-scan queries where an empty result is a sufficient response.
+  if (ignoredOnly && !scanId) {
+    const brandDoc = await db.collection('brands').doc(brandId).get();
+    if (!brandDoc.exists) return errorResponse('Brand not found', 404);
+    if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
+  }
 
   let query = db
     .collection('findings')
@@ -41,16 +46,28 @@ export async function GET(request: NextRequest, { params }: Params) {
   }
 
   const snapshot = await query
+    .select(
+      'scanId',
+      'brandId',
+      'source',
+      'severity',
+      'title',
+      'llmAnalysis',
+      'url',
+      'isFalsePositive',
+      'isIgnored',
+      'createdAt',
+    )
     .orderBy('createdAt', 'desc')
     .limit(200)
     .get();
 
-  const all: Finding[] = snapshot.docs.map((doc) => ({
+  const all: FindingSummary[] = snapshot.docs.map((doc) => ({
     id: doc.id,
-    ...(doc.data() as Omit<Finding, 'id'>),
+    ...(doc.data() as Omit<FindingSummary, 'id'>),
   }));
 
-  let findings: Finding[];
+  let findings: FindingSummary[];
   if (ignoredOnly) {
     // Only user-manually-ignored real findings (not auto-ignored AI false positives —
     // those have their own non-hits section).

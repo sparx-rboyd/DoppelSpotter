@@ -23,7 +23,9 @@
                             500: '#0ea5e9',
                             600: '#0284c7',
                             700: '#0369a1',
+                            800: '#075985',
                             900: '#0c4a6e',
+                            950: '#082f49',
                         },
                         accent: {
                             500: '#f59e0b',
@@ -39,7 +41,7 @@
             background-clip: text;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-            background-image: linear-gradient(90deg, #0ea5e9, #8b5cf6);
+            background-image: linear-gradient(90deg, #0ea5e9, #0369a1);
         }
         .hero-pattern {
             background-color: #ffffff;
@@ -51,18 +53,27 @@
 <body class="font-sans text-gray-800 antialiased bg-white">
 
     <!-- Navbar -->
-    <nav class="fixed w-full bg-white/80 backdrop-blur-md z-50 border-b border-gray-100">
+    <nav class="fixed w-full bg-brand-600 z-50 shadow-md">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center h-20">
                 <div class="flex items-center gap-2">
-                    <i data-lucide="scan-eye" class="text-brand-600 w-8 h-8"></i>
-                    <span class="font-bold text-xl tracking-tight text-gray-900">DoppelSpotter</span>
+                    <i data-lucide="scan-eye" class="text-white w-8 h-8"></i>
+                    <span class="font-bold text-xl tracking-tight text-white">DoppelSpotter</span>
                 </div>
-                <div class="hidden md:flex space-x-8">
-                    <a href="#problem" class="text-gray-500 hover:text-gray-900 font-medium transition">The Problem</a>
-                    <a href="#solution" class="text-gray-500 hover:text-gray-900 font-medium transition">Solution</a>
-                    <a href="#architecture" class="text-gray-500 hover:text-gray-900 font-medium transition">Architecture</a>
-                    <a href="#alignment" class="text-gray-500 hover:text-gray-900 font-medium transition">Challenge Alignment</a>
+                <div class="hidden md:flex items-center gap-8">
+                    <a href="#problem" class="text-white hover:text-white font-medium transition">The Problem</a>
+                    <a href="#solution" class="text-white hover:text-white font-medium transition">Solution</a>
+                    <a href="#architecture" class="text-white hover:text-white font-medium transition">Architecture</a>
+                    <a href="#alignment" class="text-white hover:text-white font-medium transition">Challenge Alignment</a>
+                    <a
+                        href="https://github.com/sparx-rboyd/DoppelSpotter"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-semibold text-brand-700 shadow-sm transition hover:bg-brand-50"
+                    >
+                        <i data-lucide="github" class="w-4 h-4"></i>
+                        <span>GitHub</span>
+                    </a>
                 </div>
             </div>
         </div>
@@ -97,7 +108,7 @@
                     <a href="#architecture" class="bg-brand-600 hover:bg-brand-700 text-white px-8 py-3 rounded-full font-medium transition shadow-md flex items-center justify-center gap-2">
                         <i data-lucide="cpu" class="w-5 h-5"></i> View Architecture
                     </a>
-                    <a href="#alignment" class="bg-white hover:bg-gray-50 text-gray-900 border border-gray-200 px-8 py-3 rounded-full font-medium transition shadow-sm flex items-center justify-center gap-2">
+                    <a href="#alignment" class="bg-white hover:bg-brand-50 text-brand-700 border border-brand-100 px-8 py-3 rounded-full font-medium transition shadow-sm flex items-center justify-center gap-2">
                         <i data-lucide="target" class="w-5 h-5"></i> Challenge Alignment
                     </a>
                 </div>
@@ -129,7 +140,7 @@
 
                     <div class="space-y-4">
                         <!-- Mock Item 1 -->
-                        <div class="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 shadow-sm flex items-start gap-3 sm:gap-5 hover:border-brand-300 transition cursor-pointer">
+                        <div class="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 shadow-sm flex items-start gap-3 sm:gap-5 hover:border-brand-500 transition cursor-pointer">
                             <div class="bg-red-50 p-2 sm:p-3 rounded-lg text-red-600 flex-shrink-0">
                                 <i data-lucide="globe" class="w-5 h-5 sm:w-6 sm:h-6"></i>
                             </div>
@@ -148,7 +159,7 @@
                         </div>
 
                         <!-- Mock Item 2 -->
-                        <div class="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 shadow-sm flex items-start gap-3 sm:gap-5 hover:border-brand-300 transition cursor-pointer">
+                        <div class="bg-white p-4 sm:p-5 rounded-xl border border-gray-200 shadow-sm flex items-start gap-3 sm:gap-5 hover:border-brand-500 transition cursor-pointer">
                             <div class="bg-amber-50 p-2 sm:p-3 rounded-lg text-amber-600 flex-shrink-0">
                                 <i data-lucide="instagram" class="w-5 h-5 sm:w-6 sm:h-6"></i>
                             </div>
@@ -172,7 +183,7 @@
     </section>
 
     <!-- The Problem Section -->
-    <section id="problem" class="py-24 bg-gray-50">
+    <section id="problem" class="py-24 bg-brand-50/40">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center max-w-3xl mx-auto mb-16">
                 <h2 class="text-3xl font-bold text-gray-900 mb-4">The Problem: Brand Protection is Inaccessible</h2>
@@ -180,24 +191,24 @@
             </div>
 
             <div class="grid md:grid-cols-3 gap-8">
-                <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-                    <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center mb-6">
+                <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 transition hover:border-brand-500">
+                    <div class="w-12 h-12 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center mb-6">
                         <i data-lucide="mouse-pointer-click" class="w-6 h-6"></i>
                     </div>
                     <h3 class="text-xl font-bold text-gray-900 mb-3">Customers Diverted</h3>
                     <p class="text-gray-600 mb-4">Over <a href="https://korlabs.io/documents/1/tma2024-shielding-brands.pdf" target="_blank" class="text-brand-600 hover:underline">2.3 million typosquatting domains</a> have been registered to mimic popular brands, sending buyers to competitors or scam sites.</p>
                 </div>
 
-                <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-                    <div class="w-12 h-12 bg-purple-50 text-purple-600 rounded-xl flex items-center justify-center mb-6">
+                <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 transition hover:border-brand-500">
+                    <div class="w-12 h-12 bg-brand-100 text-brand-700 rounded-xl flex items-center justify-center mb-6">
                         <i data-lucide="gavel" class="w-6 h-6"></i>
                     </div>
                     <h3 class="text-xl font-bold text-gray-900 mb-3">Record Domain Disputes</h3>
                     <p class="text-gray-600 mb-4">WIPO handled a record <a href="https://www.wipo.int/export/sites/www/amc/en/docs/2024_domainnamereport.pdf" target="_blank" class="text-brand-600 hover:underline">6,168 domain disputes</a> in 2024. Retail (37%) and finance (13%) are the most targeted sectors.</p>
                 </div>
 
-                <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-100">
-                    <div class="w-12 h-12 bg-rose-50 text-rose-600 rounded-xl flex items-center justify-center mb-6">
+                <div class="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 transition hover:border-brand-500">
+                    <div class="w-12 h-12 bg-brand-50 text-brand-700 rounded-xl flex items-center justify-center mb-6">
                         <i data-lucide="smartphone" class="w-6 h-6"></i>
                     </div>
                     <h3 class="text-xl font-bold text-gray-900 mb-3">Clone Apps Trade on Trust</h3>
@@ -251,33 +262,33 @@
                 </div>
 
                 <div class="lg:w-1/2 w-full">
-                    <div class="bg-gray-900 rounded-3xl p-8 shadow-2xl relative overflow-hidden h-full">
-                        <div class="absolute top-0 right-0 w-64 h-64 bg-brand-600 rounded-full mix-blend-multiply filter blur-3xl opacity-30"></div>
+                    <div class="bg-gradient-to-br from-brand-950 via-[#0a2540] to-[#07111f] rounded-3xl p-8 shadow-2xl relative overflow-hidden h-full border border-brand-900/60">
+                        <div class="absolute top-0 right-0 w-64 h-64 bg-brand-500 rounded-full mix-blend-screen filter blur-3xl opacity-20"></div>
                         <h3 class="text-xl font-bold text-white mb-6">Core AI Value</h3>
                         
                         <div class="space-y-6 relative z-10">
-                            <div class="bg-gray-800/80 backdrop-blur-sm p-5 rounded-xl border border-gray-700">
+                            <div class="bg-white/5 backdrop-blur-sm p-5 rounded-xl border border-brand-900/70">
                                 <div class="flex items-center gap-3 mb-2">
-                                    <i data-lucide="brain-circuit" class="w-5 h-5 text-sky-400"></i>
+                                    <i data-lucide="brain-circuit" class="w-5 h-5 text-white/90"></i>
                                     <h4 class="font-semibold text-white">Classifies Intent</h4>
                                 </div>
-                                <p class="text-sm text-gray-400">Goes beyond dumb keyword matching to understand context at scale-separating legitimate mentions from malicious activity.</p>
+                                <p class="text-sm text-brand-100/70">Goes beyond dumb keyword matching to understand context at scale-separating legitimate mentions from malicious activity.</p>
                             </div>
                             
-                            <div class="bg-gray-800/80 backdrop-blur-sm p-5 rounded-xl border border-gray-700">
+                            <div class="bg-white/5 backdrop-blur-sm p-5 rounded-xl border border-brand-900/70">
                                 <div class="flex items-center gap-3 mb-2">
-                                    <i data-lucide="bar-chart-3" class="w-5 h-5 text-purple-400"></i>
+                                    <i data-lucide="bar-chart-3" class="w-5 h-5 text-white/90"></i>
                                     <h4 class="font-semibold text-white">Scores Severity</h4>
                                 </div>
-                                <p class="text-sm text-gray-400">Doesn't just dump raw data. Automatically prioritises threats so users can act immediately on what matters most.</p>
+                                <p class="text-sm text-brand-100/70">Doesn't just dump raw data. Automatically prioritises threats so users can act immediately on what matters most.</p>
                             </div>
                             
-                            <div class="bg-gray-800/80 backdrop-blur-sm p-5 rounded-xl border border-gray-700">
+                            <div class="bg-white/5 backdrop-blur-sm p-5 rounded-xl border border-brand-900/70">
                                 <div class="flex items-center gap-3 mb-2">
-                                    <i data-lucide="message-square" class="w-5 h-5 text-emerald-400"></i>
+                                    <i data-lucide="message-square" class="w-5 h-5 text-brand-100"></i>
                                     <h4 class="font-semibold text-white">Plain English Context</h4>
                                 </div>
-                                <p class="text-sm text-gray-400">Translates complex data points into a human-readable summary of the finding, the flag reason, and the risk.</p>
+                                <p class="text-sm text-brand-100/70">Translates complex data points into a human-readable summary of the finding, the flag reason, and the risk.</p>
                             </div>
                         </div>
                     </div>
@@ -287,7 +298,7 @@
     </section>
 
     <!-- Architecture Section -->
-    <section id="architecture" class="py-24 bg-gray-50 border-t border-gray-100">
+    <section id="architecture" class="py-24 bg-brand-50/30 border-t border-brand-100">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center max-w-3xl mx-auto mb-16">
                 <h2 class="text-3xl font-bold text-gray-900 mb-4">Technical Architecture & Actors</h2>
@@ -318,7 +329,7 @@
                 <div class="overflow-x-auto bg-white rounded-xl shadow-sm border border-gray-200">
                     <table class="w-full text-left border-collapse">
                         <thead>
-                            <tr class="bg-gray-50 border-b border-gray-200">
+                            <tr class="bg-brand-50 border-b border-brand-100">
                                 <th class="p-3 sm:p-4 font-semibold text-gray-900 text-sm">Surface</th>
                                 <th class="p-3 sm:p-4 font-semibold text-gray-900 text-sm">Apify Actor</th>
                                 <th class="p-3 sm:p-4 font-semibold text-gray-900 text-sm hidden md:table-cell">Function</th>
@@ -360,7 +371,7 @@
     </section>
 
     <!-- Hackathon Alignment Section -->
-    <section id="alignment" class="py-24 bg-gray-900 text-white relative overflow-hidden">
+    <section id="alignment" class="py-24 bg-gradient-to-br from-brand-950 via-[#0a2540] to-[#07111f] text-white relative overflow-hidden">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
             <div class="text-center max-w-3xl mx-auto mb-16">
                 <div class="flex items-center justify-center gap-3 sm:gap-4 mb-6">
@@ -369,49 +380,49 @@
                     <img src="apify-logo-wordmark-dark.png" alt="Apify" class="h-6 sm:h-7 w-auto brightness-0 invert opacity-80">
                 </div>
                 <h2 class="text-3xl font-bold mb-4">Hackathon Alignment</h2>
-                <p class="text-xl text-gray-400">How DoppelSpotter maps to the GenAI Zürich 2026 Apify Challenge.</p>
+                <p class="text-xl text-brand-100/70">How DoppelSpotter maps to the GenAI Zürich 2026 Apify Challenge.</p>
             </div>
 
             <div class="grid md:grid-cols-2 gap-8 mb-12">
-                <div class="bg-gray-800/50 backdrop-blur-sm p-8 rounded-2xl border border-gray-700">
-                    <div class="inline-flex items-center justify-center w-12 h-12 bg-brand-900 text-brand-400 rounded-xl mb-6">
+                <div class="bg-white/5 backdrop-blur-sm p-8 rounded-2xl border border-brand-900/70">
+                    <div class="inline-flex items-center justify-center w-12 h-12 bg-brand-900 text-brand-100 rounded-xl mb-6">
                         <span class="font-bold text-xl">1</span>
                     </div>
                     <h3 class="text-xl font-bold mb-3">Path 1: AI Agent</h3>
-                    <p class="text-gray-400">An autonomous pipeline that scrapes live web data, analyzes findings with an LLM via OpenRouter, and delivers ranked infringement alerts with zero human in the loop.</p>
+                    <p class="text-brand-100/70">An autonomous pipeline that scrapes live web data, analyzes findings with an LLM via OpenRouter, and delivers ranked infringement alerts with zero human in the loop.</p>
                 </div>
 
-                <div class="bg-gray-800/50 backdrop-blur-sm p-8 rounded-2xl border border-gray-700">
-                    <div class="inline-flex items-center justify-center w-12 h-12 bg-purple-900 text-purple-400 rounded-xl mb-6">
+                <div class="bg-white/5 backdrop-blur-sm p-8 rounded-2xl border border-brand-900/70">
+                    <div class="inline-flex items-center justify-center w-12 h-12 bg-brand-900 text-brand-100 rounded-xl mb-6">
                         <span class="font-bold text-xl">3</span>
                     </div>
                     <h3 class="text-xl font-bold mb-3">Path 3: Build an Actor</h3>
-                    <p class="text-gray-400">The <code>doppelspotter/whoisxml-brand-alert</code> wrapper is published to the Apify Store as a standalone, reusable Actor. Any developer building domain monitoring tools can utilise it.</p>
+                    <p class="text-brand-100/70">The <code>doppelspotter/whoisxml-brand-alert</code> wrapper is published to the Apify Store as a standalone, reusable Actor. Any developer building domain monitoring tools can utilise it.</p>
                 </div>
             </div>
 
-            <div class="bg-gradient-to-r from-brand-900/50 to-gray-800/50 rounded-2xl p-8 border border-gray-700">
-                <h3 class="text-xl font-bold mb-6 flex items-center gap-2"><i data-lucide="check-circle" class="text-brand-400"></i> Success Metrics Addressed</h3>
+            <div class="bg-gradient-to-r from-brand-900/60 to-brand-950/60 rounded-2xl p-8 border border-brand-900/70">
+                <h3 class="text-xl font-bold mb-6 flex items-center gap-2"><i data-lucide="check-circle" class="text-brand-100"></i> Success Metrics Addressed</h3>
                 <ul class="space-y-4">
                     <li class="flex items-start gap-3">
-                        <i data-lucide="check" class="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5"></i>
+                        <i data-lucide="check" class="w-5 h-5 text-brand-100 flex-shrink-0 mt-0.5"></i>
                         <div>
                             <strong class="text-white block">Solves a real business problem with web data</strong>
-                            <span class="text-gray-400 text-sm">Brand infringement is a concrete, costly problem for SMEs - and live web scraping is the only way to detect it globally.</span>
+                            <span class="text-brand-100/70 text-sm">Brand infringement is a concrete, costly problem for SMEs - and live web scraping is the only way to detect it globally.</span>
                         </div>
                     </li>
                     <li class="flex items-start gap-3">
-                        <i data-lucide="check" class="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5"></i>
+                        <i data-lucide="check" class="w-5 h-5 text-brand-100 flex-shrink-0 mt-0.5"></i>
                         <div>
                             <strong class="text-white block">Works end-to-end</strong>
-                            <span class="text-gray-400 text-sm">Brand profile in, ranked infringement digest out. A complete pipeline from Apify scraping to OpenRouter AI analysis to user notification.</span>
+                            <span class="text-brand-100/70 text-sm">Brand profile in, ranked infringement digest out. A complete pipeline from Apify scraping to OpenRouter AI analysis to user notification.</span>
                         </div>
                     </li>
                     <li class="flex items-start gap-3">
-                        <i data-lucide="check" class="w-5 h-5 text-green-400 flex-shrink-0 mt-0.5"></i>
+                        <i data-lucide="check" class="w-5 h-5 text-brand-100 flex-shrink-0 mt-0.5"></i>
                         <div>
                             <strong class="text-white block">Quality and depth of Apify integration</strong>
-                            <span class="text-gray-400 text-sm">Multiple actors spanning diverse monitoring surfaces form the backbone of the product, with a newly published Actor contributing back to the Apify ecosystem.</span>
+                            <span class="text-brand-100/70 text-sm">Multiple actors spanning diverse monitoring surfaces form the backbone of the product, with a newly published Actor contributing back to the Apify ecosystem.</span>
                         </div>
                     </li>
                 </ul>

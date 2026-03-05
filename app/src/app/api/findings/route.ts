@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth } from '@/lib/api-utils';
-import type { Finding } from '@/lib/types';
+import type { FindingSummary } from '@/lib/types';
 
 // GET /api/findings — latest findings across all of the authenticated user's brands
 // Query params:
@@ -18,6 +18,18 @@ export async function GET(request: NextRequest) {
   const snapshot = await db
     .collection('findings')
     .where('userId', '==', uid)
+    .select(
+      'scanId',
+      'brandId',
+      'source',
+      'severity',
+      'title',
+      'llmAnalysis',
+      'url',
+      'isFalsePositive',
+      'isIgnored',
+      'createdAt',
+    )
     .orderBy('createdAt', 'desc')
     .limit(limit * 4)
     .get();
@@ -26,9 +38,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ data: [] });
   }
 
-  const all: Finding[] = snapshot.docs.map((doc) => ({
+  const all: FindingSummary[] = snapshot.docs.map((doc) => ({
     id: doc.id,
-    ...(doc.data() as Omit<Finding, 'id'>),
+    ...(doc.data() as Omit<FindingSummary, 'id'>),
   }));
 
   const findings = nonHitsOnly

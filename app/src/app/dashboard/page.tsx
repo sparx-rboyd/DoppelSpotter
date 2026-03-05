@@ -8,10 +8,10 @@ import { Navbar } from '@/components/navbar';
 import { FindingCard } from '@/components/finding-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import type { Finding } from '@/lib/types';
+import type { FindingSummary } from '@/lib/types';
 
 export default function DashboardPage() {
-  const [findings, setFindings] = useState<Finding[]>([]);
+  const [findings, setFindings] = useState<FindingSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 

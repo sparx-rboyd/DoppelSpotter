@@ -181,10 +181,11 @@ async function handleSucceededRun({
   const analysisMode = actorConfig?.analysisMode ?? 'per-item';
 
   let newFindingCount = 0;
+  const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
 
   if (analysisMode === 'batch') {
     // Send all SERP pages to AI analysis in one call → one Finding per individual search result
-    const { findingCount, suggestedSearches } = await analyseAndWriteBatch({
+    const { findingCount, suggestedSearches, counts: batchCounts } = await analyseAndWriteBatch({
       scanDoc,
       scan,
       brand,
@@ -197,6 +198,10 @@ async function handleSucceededRun({
       ignoredUrls,
     });
     newFindingCount = findingCount;
+    counts.high = batchCounts.high;
+    counts.medium = batchCounts.medium;
+    counts.low = batchCounts.low;
+    counts.nonHit = batchCounts.nonHit;
 
     // Trigger deep follow-up searches if AI analysis requested them and this is a depth-0 run
     if (suggestedSearches && suggestedSearches.length > 0 && searchDepth === 0) {
@@ -238,8 +243,13 @@ async function handleSucceededRun({
           createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
         };
         await findingRef.set(finding);
-        if (!analysisResult.isFalsePositive) {
+        if (analysisResult.isFalsePositive) {
+          counts.nonHit++;
+        } else {
           newFindingCount++;
+          if (analysisResult.severity === 'high') counts.high++;
+          else if (analysisResult.severity === 'medium') counts.medium++;
+          else if (analysisResult.severity === 'low') counts.low++;
         }
       } catch (err) {
         // On AI analysis failure, write a fallback finding so no data is silently lost
@@ -262,6 +272,7 @@ async function handleSucceededRun({
         };
         await findingRef.set(fallbackFinding);
         newFindingCount++;
+        counts.medium++;
       }
 
       // Update per-item progress counter so the UI can show "X / N analysed"
@@ -275,7 +286,7 @@ async function handleSucceededRun({
     `[webhook] Actor ${actorId} (run ${runId}, depth ${searchDepth}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items (mode: ${analysisMode})`,
   );
 
-  await markActorRunComplete(scanDoc, runId, 'succeeded', newFindingCount);
+  await markActorRunComplete(scanDoc, runId, 'succeeded', newFindingCount, counts);
 }
 
 /**
@@ -305,9 +316,10 @@ async function analyseAndWriteBatch({
   items: Record<string, unknown>[];
   searchDepth: number;
   ignoredUrls?: string[];
-}): Promise<{ findingCount: number; suggestedSearches?: string[] }> {
+}): Promise<{ findingCount: number; suggestedSearches?: string[]; counts: { high: number; medium: number; low: number; nonHit: number } }> {
   let findingCount = 0;
   let suggestedSearches: string[] | undefined;
+  const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
 
   // All pages stored together on every Finding so the full raw dataset is always
   // accessible from any individual result card.
@@ -351,11 +363,20 @@ async function analyseAndWriteBatch({
         createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
       };
       await findingRef.set(finding);
-      return pageItem.isFalsePositive ? 0 : 1;
+      return pageItem;
     });
 
-    const counts = await Promise.all(writeOps);
-    findingCount = counts.reduce<number>((sum, c) => sum + c, 0);
+    const written = await Promise.all(writeOps);
+    for (const pageItem of written) {
+      if (pageItem.isFalsePositive) {
+        counts.nonHit++;
+      } else {
+        findingCount++;
+        if (pageItem.severity === 'high') counts.high++;
+        else if (pageItem.severity === 'medium') counts.medium++;
+        else if (pageItem.severity === 'low') counts.low++;
+      }
+    }
   } catch (err) {
     console.error(`[webhook] Batch AI analysis failed for dataset ${datasetId}:`, err);
     const findingRef = db.collection('findings').doc();
@@ -376,6 +397,7 @@ async function analyseAndWriteBatch({
     };
     await findingRef.set(fallbackFinding);
     findingCount++;
+    counts.medium++;
   }
 
   // Mark all SERP pages as analysed at once (batch mode resolves in one AI analysis call)
@@ -383,7 +405,7 @@ async function analyseAndWriteBatch({
     [`actorRuns.${runId}.analysedCount`]: items.length,
   });
 
-  return { findingCount, suggestedSearches };
+  return { findingCount, suggestedSearches, counts };
 }
 
 /**
@@ -555,6 +577,7 @@ async function markActorRunComplete(
   runId: string,
   runStatus: 'succeeded' | 'failed',
   newFindingCount = 0,
+  newCounts: { high: number; medium: number; low: number; nonHit: number } = { high: 0, medium: 0, low: 0, nonHit: 0 },
 ) {
   await db.runTransaction(async (tx) => {
     const freshSnap = await tx.get(scanDoc.ref);
@@ -577,6 +600,10 @@ async function markActorRunComplete(
       [`actorRuns.${runId}.status`]: runStatus,
       completedRunCount: FieldValue.increment(1),
       findingCount: FieldValue.increment(newFindingCount),
+      highCount: FieldValue.increment(newCounts.high),
+      mediumCount: FieldValue.increment(newCounts.medium),
+      lowCount: FieldValue.increment(newCounts.low),
+      nonHitCount: FieldValue.increment(newCounts.nonHit),
     };
 
     if (allDone) {

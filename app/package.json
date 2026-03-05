@@ -11,7 +11,8 @@
     "start": "next start",
     "lint": "next lint",
     "type-check": "tsc --noEmit",
-    "add-user": "tsx scripts/add-user.ts"
+    "add-user": "tsx scripts/add-user.ts",
+    "backfill-scan-counts": "tsx scripts/backfill-scan-counts.ts"
   },
   "dependencies": {
     "@google-cloud/firestore": "^8.3.0",
