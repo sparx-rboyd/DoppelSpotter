@@ -73,6 +73,9 @@ See `REVIEW.md` for full actor table and rationale.
 
 ```
 POST /api/scan
+ └─ verifies ownership + checks `brands.activeScanId` inside a Firestore transaction
+ └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
+ └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ reads CORE_ACTOR_IDS (or actorIds from request body)
  └─ calls startActorRun() for each actor → registers Apify webhook
  └─ stores runId → scan document in Firestore
@@ -80,8 +83,14 @@ POST /api/scan
 DELETE /api/scan?scanId=xxx
  └─ verifies ownership; returns 409 if scan is not pending/running
  └─ marks scan status → 'cancelled' in Firestore immediately
+ └─ clears `brands.activeScanId` if it still points at this scan
  └─ best-effort calls abortActorRun() for every actorRunId (silently ignores already-terminal runs)
  └─ webhook handler skips callbacks for cancelled scans; markActorRunComplete is a no-op if scan is cancelled
+
+GET /api/brands/[brandId]/active-scan
+ └─ verifies ownership
+ └─ resolves `brands.activeScanId` to the current pending/running scan, if any
+ └─ clears stale pointers automatically if the referenced scan is missing or terminal
 
 GET /api/brands/[brandId]/scans
  └─ returns all terminal scans (completed|cancelled|failed) ordered newest-first
@@ -106,7 +115,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ (batch mode, depth 0 only) if AI analysis returns suggestedSearches → triggers deep-search runs
       └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
       └─ deep-search runs complete via the same webhook, depth 1 — no further recursion
- └─ marks actor run complete; if all runs done → marks scan complete
+ └─ marks actor run complete; if all runs done → marks scan complete and clears `brands.activeScanId`
 ```
 
 ---
@@ -198,7 +207,7 @@ Users can manually dismiss (ignore) any non-false-positive finding at the indivi
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], watchWords[]?, safeWords[]?, createdAt, updatedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **activeScanId?**, watchWords[]?, safeWords[]?, createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{}, completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount** (denormalized — written by webhook, updated on ignore/un-ignore), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, rawLlmResponse?, createdAt |
 

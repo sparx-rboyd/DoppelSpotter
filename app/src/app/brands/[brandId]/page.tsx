@@ -26,14 +26,6 @@ function scanStorageKey(brandId: string) {
   return `doppelspotter:scan:${brandId}`;
 }
 
-function getStoredScanId(brandId: string): string | null {
-  try {
-    return localStorage.getItem(scanStorageKey(brandId));
-  } catch {
-    return null;
-  }
-}
-
 function setStoredScanId(brandId: string, scanId: string) {
   try {
     localStorage.setItem(scanStorageKey(brandId), scanId);
@@ -299,6 +291,38 @@ export default function BrandDetailPage() {
     }
   }
 
+  function attachToActiveScan(scan: Scan) {
+    setScanning(true);
+    setCancelling(false);
+    setError('');
+    setActiveScanId(scan.id);
+    setActiveScan(scan);
+    setLiveScanFindings([]);
+    setStoredScanId(brandId, scan.id);
+    startPolling(scan.id);
+    void fetchLiveFindings(scan.id);
+  }
+
+  async function restoreActiveScan() {
+    try {
+      const res = await fetch(`/api/brands/${brandId}/active-scan`, { credentials: 'same-origin' });
+      if (!res.ok) {
+        clearStoredScanId(brandId);
+        return;
+      }
+
+      const json = await res.json();
+      const scan = (json.data ?? null) as Scan | null;
+      if (scan && (scan.status === 'pending' || scan.status === 'running')) {
+        attachToActiveScan(scan);
+      } else {
+        clearStoredScanId(brandId);
+      }
+    } catch {
+      // Non-critical
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Ignore / un-ignore a finding
   // ---------------------------------------------------------------------------
@@ -545,26 +569,9 @@ export default function BrandDetailPage() {
         // Fetch scans list (findings lazy-loaded on expand)
         await fetchScans();
 
-        // Resume scan progress banner if a scan was in flight when the page was last loaded
-        const storedScanId = getStoredScanId(brandId);
-        if (storedScanId) {
-          const scanRes = await fetch(`/api/scan?scanId=${storedScanId}`, { credentials: 'same-origin' });
-          if (scanRes.ok) {
-            const scanJson = await scanRes.json();
-            const scan = scanJson.data as Scan;
-            if (scan.status === 'pending' || scan.status === 'running') {
-              setScanning(true);
-              setActiveScanId(storedScanId);
-              setActiveScan(scan);
-              startPolling(storedScanId);
-              void fetchLiveFindings(storedScanId);
-            } else {
-              clearStoredScanId(brandId);
-            }
-          } else {
-            clearStoredScanId(brandId);
-          }
-        }
+        // Resume any globally active scan for this brand, even if it was started in another tab
+        // or environment that shares the same Firestore data.
+        await restoreActiveScan();
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
@@ -622,6 +629,7 @@ export default function BrandDetailPage() {
           setScanning(false);
           setCancelling(false);
           setActiveScanId(null);
+          setActiveScan(null);
           setLiveScanFindings([]);
           // (scan complete — findings visible in the scan list row)
         } else if (scan.status === 'failed') {
@@ -674,6 +682,11 @@ export default function BrandDetailPage() {
 
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
+        const existingScan = json.data?.activeScan as Scan | undefined;
+        if (res.status === 409 && existingScan) {
+          attachToActiveScan(existingScan);
+          return;
+        }
         throw new Error(json.error ?? 'Failed to start scan');
       }
 
@@ -867,7 +880,6 @@ export default function BrandDetailPage() {
   const totalFindings = scans.reduce((sum, s) => sum + s.highCount + s.mediumCount + s.lowCount, 0);
   const totalNonHits = scans.reduce((sum, s) => sum + s.nonHitCount, 0);
   const totalIgnored = scans.reduce((sum, s) => sum + (s.ignoredCount ?? 0), 0);
-  const globalHighCount = scans.reduce((sum, s) => sum + s.highCount, 0);
 
   // ---------------------------------------------------------------------------
   // Render

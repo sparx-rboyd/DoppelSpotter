@@ -17,6 +17,8 @@ export interface BrandProfile {
   name: string;
   keywords: string[];
   officialDomains: string[];
+  /** Internal pointer to the currently active scan for this brand, if any. */
+  activeScanId?: string;
   /** Terms AI analysis should flag if found associated with the brand in search results. */
   watchWords?: string[];
   /** Terms the brand owner is comfortable being associated with; AI analysis treats results containing these with reduced caution. */

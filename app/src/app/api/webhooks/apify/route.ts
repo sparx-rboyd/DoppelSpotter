@@ -8,6 +8,7 @@ import { SYSTEM_PROMPT, BATCH_SYSTEM_PROMPT, buildAnalysisPrompt, buildBatchAnal
 import { parseAnalysisOutput, parseBatchAnalysisOutput, MAX_SUGGESTED_SEARCHES } from '@/lib/analysis/types';
 import type { PerPageFinding } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo } from '@/lib/types';
+import { clearBrandActiveScanIfMatches } from '@/lib/scans';
 
 /** Maximum items to analyse per actor run — caps AI analysis cost and latency */
 const MAX_ITEMS_PER_RUN = 50;
@@ -621,6 +622,8 @@ async function markActorRunComplete(
       }
 
       console.log(`[webhook] Scan ${scanDoc.id} is complete — status: ${updates.status}`);
+
+      await clearBrandActiveScanIfMatches(db.collection('brands').doc(fresh.brandId), scanDoc.id, tx);
     }
 
     tx.update(scanDoc.ref, updates);
