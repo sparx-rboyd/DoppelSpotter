@@ -28,7 +28,7 @@ export function SeverityBadge({ severity }: SeverityBadgeProps) {
   const { variant, label, icon: Icon } = config[severity];
   return (
     <Badge variant={variant}>
-      <Icon className="w-3 h-3" />
+      <Icon className="w-3.5 h-3.5" />
       {label}
     </Badge>
   );

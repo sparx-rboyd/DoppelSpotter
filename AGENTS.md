@@ -118,6 +118,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
 - **Prompts:** `SYSTEM_PROMPT` + `buildAnalysisPrompt()` for per-item mode; `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPrompt()` for batch mode; all in `prompts.ts`
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
+- **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
 - **Per-item output:** structured JSON `{ severity, title, llmAnalysis, isFalsePositive }`
 - **Batch output:** structured JSON `{ items: [{ url, title, severity, analysis, isFalsePositive }], suggestedSearches? }`
 - **Raw AI response** string is stored on every finding as `rawLlmResponse` for debugging
@@ -197,7 +198,7 @@ Users can manually dismiss (ignore) any non-false-positive finding at the indivi
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], watchWords[]?, createdAt, updatedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], watchWords[]?, safeWords[]?, createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{}, completedRunCount, findingCount, startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, rawLlmResponse?, createdAt |
 

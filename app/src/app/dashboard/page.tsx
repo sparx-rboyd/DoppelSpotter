@@ -38,7 +38,7 @@ export default function DashboardPage() {
     <AuthGuard>
       <Navbar />
 
-      <main className="pt-16 min-h-screen bg-gray-50/50">
+      <main className="pt-16 min-h-screen bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
 
           {/* Page header */}
@@ -56,9 +56,9 @@ export default function DashboardPage() {
           </div>
 
           {/* Findings panel */}
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+          <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
             {/* Panel header */}
-            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-4">
+            <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between gap-4 bg-gray-100">
               <div>
                 <h2 className="text-base sm:text-lg font-semibold text-gray-900">Recent Threats Detected</h2>
                 <p className="text-xs sm:text-sm text-gray-500">
@@ -71,7 +71,7 @@ export default function DashboardPage() {
               </div>
               {highCount > 0 && (
                 <Badge variant="danger">
-                  <AlertCircle className="w-3 h-3" />
+                  <AlertCircle className="w-3.5 h-3.5" />
                   {highCount} High Risk
                 </Badge>
               )}

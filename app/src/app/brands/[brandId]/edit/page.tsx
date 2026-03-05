@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { InfoTooltip } from '@/components/ui/tooltip';
 import type { BrandProfile } from '@/lib/types';
 
 export default function EditBrandPage() {
@@ -23,9 +24,12 @@ export default function EditBrandPage() {
   const [keywordInput, setKeywordInput] = useState('');
   const [keywords, setKeywords] = useState<string[]>([]);
   const [domainInput, setDomainInput] = useState('');
+  const [domainError, setDomainError] = useState('');
   const [domains, setDomains] = useState<string[]>([]);
   const [watchWordInput, setWatchWordInput] = useState('');
   const [watchWords, setWatchWords] = useState<string[]>([]);
+  const [safeWordInput, setSafeWordInput] = useState('');
+  const [safeWords, setSafeWords] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
@@ -42,6 +46,7 @@ export default function EditBrandPage() {
         setKeywords(brand.keywords);
         setDomains(brand.officialDomains);
         setWatchWords(brand.watchWords ?? []);
+        setSafeWords(brand.safeWords ?? []);
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : 'Failed to load brand');
       } finally {
@@ -64,9 +69,27 @@ export default function EditBrandPage() {
   }
 
   function addDomain() {
-    const trimmed = domainInput.trim().toLowerCase().replace(/^https?:\/\//, '');
-    if (trimmed && !domains.includes(trimmed)) {
-      setDomains([...domains, trimmed]);
+    const normalized = domainInput
+      .trim()
+      .toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .split('/')[0]
+      .replace(/^www\./, '');
+
+    if (!normalized) {
+      setDomainInput('');
+      setDomainError('');
+      return;
+    }
+
+    if (!/^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(normalized)) {
+      setDomainError('Please enter a valid domain (e.g. acme.com)');
+      return;
+    }
+
+    setDomainError('');
+    if (!domains.includes(normalized)) {
+      setDomains([...domains, normalized]);
     }
     setDomainInput('');
   }
@@ -87,6 +110,18 @@ export default function EditBrandPage() {
     setWatchWords(watchWords.filter((x) => x !== w));
   }
 
+  function addSafeWord() {
+    const trimmed = safeWordInput.trim().toLowerCase();
+    if (trimmed && !safeWords.includes(trimmed)) {
+      setSafeWords([...safeWords, trimmed]);
+    }
+    setSafeWordInput('');
+  }
+
+  function removeSafeWord(w: string) {
+    setSafeWords(safeWords.filter((x) => x !== w));
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
@@ -104,6 +139,7 @@ export default function EditBrandPage() {
           keywords,
           officialDomains: domains,
           watchWords,
+          safeWords,
         }),
       });
 
@@ -122,7 +158,7 @@ export default function EditBrandPage() {
   return (
     <AuthGuard>
       <Navbar />
-      <main className="pt-16 min-h-screen bg-gray-50/50">
+      <main className="pt-16 min-h-screen bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
           <div className="flex items-center gap-3 mb-8">
             <Link href={`/brands/${brandId}`} className="text-gray-500 hover:text-gray-900 transition">
@@ -149,10 +185,10 @@ export default function EditBrandPage() {
           {!loadingBrand && !loadError && (
             <form onSubmit={handleSubmit} className="space-y-6">
               <Card>
-                <CardHeader>
+                <CardHeader className="px-6 py-5">
                   <h2 className="font-semibold text-gray-900">Brand details</h2>
                 </CardHeader>
-                <CardContent className="space-y-5">
+                <CardContent className="space-y-7 p-6">
                   <Input
                     id="name"
                     label="Brand name"
@@ -160,13 +196,14 @@ export default function EditBrandPage() {
                     value={name}
                     onChange={(e) => setName(e.target.value)}
                     required
-                    hint="The primary name you want to monitor across all surfaces."
+                    tooltip="The primary name you want to monitor across all surfaces."
                   />
 
                   {/* Keywords */}
                   <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium text-gray-700">
+                    <label className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
                       Keywords <span className="text-gray-400 font-normal">(optional)</span>
+                      <InfoTooltip content="The words associated with your brand that you want to protect and monitor (e.g. your trademarks). Scans will search for these keywords." />
                     </label>
                     <div className="flex gap-2">
                       <input
@@ -184,59 +221,62 @@ export default function EditBrandPage() {
                       </Button>
                     </div>
                     {keywords.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-1">
+                      <div className="flex flex-wrap gap-2.5 mt-1">
                         {keywords.map((kw) => (
-                          <Badge key={kw} variant="brand">
+                          <Badge key={kw} variant="default">
                             {kw}
                             <button type="button" onClick={() => removeKeyword(kw)} className="ml-1 hover:opacity-70">
-                              <X className="w-3 h-3" />
+                              <X className="w-3.5 h-3.5" />
                             </button>
                           </Badge>
                         ))}
                       </div>
                     )}
-                    <p className="text-xs text-gray-500">The words associated with your brand that you want to protect and monitor (e.g. your trademarks). Scans will search for these keywords.</p>
                   </div>
 
                   {/* Official domains */}
                   <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium text-gray-700">
+                    <label className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
                       Official domains <span className="text-gray-400 font-normal">(optional)</span>
+                      <InfoTooltip content="Domains that you own, so that the AI analysis knows not to flag them." />
                     </label>
                     <div className="flex gap-2">
                       <input
                         type="text"
                         value={domainInput}
-                        onChange={(e) => setDomainInput(e.target.value)}
+                        onChange={(e) => { setDomainInput(e.target.value); setDomainError(''); }}
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') { e.preventDefault(); addDomain(); }
                         }}
                         placeholder="e.g. acme.com"
-                        className="flex-1 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
+                        className={`flex-1 px-3 py-2 rounded-lg border text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition ${domainError ? 'border-red-400' : 'border-gray-300'}`}
                       />
                       <Button type="button" variant="secondary" size="sm" onClick={addDomain}>
                         Add
                       </Button>
                     </div>
+                    {domainError && (
+                      <p className="text-xs text-red-600">{domainError}</p>
+                    )}
                     {domains.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-1">
+                      <div className="flex flex-wrap gap-2.5 mt-1">
                         {domains.map((d) => (
                           <Badge key={d} variant="default">
                             {d}
                             <button type="button" onClick={() => removeDomain(d)} className="ml-1 hover:opacity-70">
-                              <X className="w-3 h-3" />
+                              <X className="w-3.5 h-3.5" />
                             </button>
                           </Badge>
                         ))}
                       </div>
                     )}
-                    <p className="text-xs text-gray-500">Domains that you own, so that the AI analysis knows not to flag them.</p>
                   </div>
 
                   {/* Watch words */}
                   <div className="flex flex-col gap-2">
-                    <label className="text-sm font-medium text-gray-700">
+                    <label className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
                       Watch words <span className="text-gray-400 font-normal">(optional)</span>
+                      <InfoTooltip content="Words that you don't want to be associated with your brand. Scans won't search for these words, but if they appear in scan results the AI analysis will treat the results with more caution." />
                     </label>
                     <div className="flex gap-2">
                       <input
@@ -254,18 +294,52 @@ export default function EditBrandPage() {
                       </Button>
                     </div>
                     {watchWords.length > 0 && (
-                      <div className="flex flex-wrap gap-2 mt-1">
+                      <div className="flex flex-wrap gap-2.5 mt-1">
                         {watchWords.map((w) => (
-                          <Badge key={w} variant="warning">
+                          <Badge key={w} variant="default">
                             {w}
                             <button type="button" onClick={() => removeWatchWord(w)} className="ml-1 hover:opacity-70">
-                              <X className="w-3 h-3" />
+                              <X className="w-3.5 h-3.5" />
                             </button>
                           </Badge>
                         ))}
                       </div>
                     )}
-                    <p className="text-xs text-gray-500">Words that you don&apos;t want to be associated with your brand. Scans won&apos;t search for these words, but if they appear in scan results the AI analysis will treat the results with more caution.</p>
+                  </div>
+
+                  {/* Safe words */}
+                  <div className="flex flex-col gap-2">
+                    <label className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                      Safe words <span className="text-gray-400 font-normal">(optional)</span>
+                      <InfoTooltip content="Words that you're happy to be associated with your brand. If they appear in scan results the AI analysis will treat the results with less caution." />
+                    </label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={safeWordInput}
+                        onChange={(e) => setSafeWordInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') { e.preventDefault(); addSafeWord(); }
+                        }}
+                        placeholder="Add a safe word and press Enter"
+                        className="flex-1 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
+                      />
+                      <Button type="button" variant="secondary" size="sm" onClick={addSafeWord}>
+                        Add
+                      </Button>
+                    </div>
+                    {safeWords.length > 0 && (
+                      <div className="flex flex-wrap gap-2.5 mt-1">
+                        {safeWords.map((w) => (
+                          <Badge key={w} variant="default">
+                            {w}
+                            <button type="button" onClick={() => removeSafeWord(w)} className="ml-1 hover:opacity-70">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

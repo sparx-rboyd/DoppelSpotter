@@ -74,14 +74,19 @@ export function buildAnalysisPrompt(params: {
   keywords: string[];
   officialDomains: string[];
   watchWords?: string[];
+  safeWords?: string[];
   ignoredUrls?: string[];
   source: FindingSource;
   rawData: Record<string, unknown>;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, ignoredUrls, source, rawData } = params;
+  const { brandName, keywords, officialDomains, watchWords, safeWords, ignoredUrls, source, rawData } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — note any presence or implied association in your analysis): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with — if present, treat the result with reduced caution unless there are strong warning signs in other areas): ${safeWords.join(', ')}`
     : null;
 
   const ignoredUrlsLine = ignoredUrls && ignoredUrls.length > 0
@@ -91,7 +96,7 @@ export function buildAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${ignoredUrlsLine ? `${ignoredUrlsLine}\n` : ''}Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${ignoredUrlsLine ? `${ignoredUrlsLine}\n` : ''}Monitoring surface: ${source}
 
 Raw scraping result to analyse:
 ${JSON.stringify(rawData, null, 2)}
@@ -112,16 +117,21 @@ export function buildBatchAnalysisPrompt(params: {
   keywords: string[];
   officialDomains: string[];
   watchWords?: string[];
+  safeWords?: string[];
   ignoredUrls?: string[];
   source: FindingSource;
   rawItems: Record<string, unknown>[];
   /** Pass true for depth-0 runs so AI analysis knows it may suggest follow-up searches. */
   canSuggestSearches?: boolean;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, ignoredUrls, source, rawItems, canSuggestSearches } = params;
+  const { brandName, keywords, officialDomains, watchWords, safeWords, ignoredUrls, source, rawItems, canSuggestSearches } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that result): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with — if present in a result, treat it with reduced caution in the individual "analysis" field unless there are strong warning signs in other areas): ${safeWords.join(', ')}`
     : null;
 
   const ignoredUrlsLine = ignoredUrls && ignoredUrls.length > 0
@@ -135,7 +145,7 @@ export function buildBatchAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${ignoredUrlsLine ? `${ignoredUrlsLine}\n` : ''}Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${ignoredUrlsLine ? `${ignoredUrlsLine}\n` : ''}Monitoring surface: ${source}
 
 ${deepSearchInstruction}
 

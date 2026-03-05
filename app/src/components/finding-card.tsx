@@ -161,10 +161,10 @@ export function FindingCard({ finding, className, onIgnoreToggle }: FindingCardP
   return (
     <div
       className={cn(
-        'bg-white p-4 sm:p-5 rounded-xl border shadow-sm',
+        'bg-white p-4 sm:p-5 rounded-xl border',
         muted
           ? 'border-gray-200 opacity-75'
-          : 'border-gray-200 hover:border-brand-300 transition',
+          : 'border-gray-200 hover:border-gray-300 transition',
         className,
       )}
     >
@@ -182,22 +182,22 @@ export function FindingCard({ finding, className, onIgnoreToggle }: FindingCardP
         {/* Content */}
         <div className="flex-1 min-w-0">
           {/* Title row */}
-          <div className="flex flex-wrap items-center gap-2 mb-1">
+          <div className="flex flex-wrap items-center gap-2.5 mb-2.5">
             <h4
               className={cn(
-                'font-semibold text-sm sm:text-base',
+                'font-semibold text-sm',
                 muted ? 'text-gray-500' : 'text-gray-900',
               )}
             >
               {finding.title}
             </h4>
             {isIgnored ? (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
-                <EyeOff className="w-3 h-3" />
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-500 border border-transparent">
+                <EyeOff className="w-3.5 h-3.5" />
                 Ignored
               </span>
             ) : isFalsePositive ? (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
+              <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-500 border border-transparent">
                 Non-hit
               </span>
             ) : (
@@ -208,10 +208,10 @@ export function FindingCard({ finding, className, onIgnoreToggle }: FindingCardP
                 href={finding.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-brand-50 text-brand-600 hover:bg-brand-100 transition"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition"
                 onClick={(e) => e.stopPropagation()}
               >
-                <ExternalLink className="w-3 h-3" />
+                <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
                 Visit
               </a>
             )}
@@ -222,18 +222,18 @@ export function FindingCard({ finding, className, onIgnoreToggle }: FindingCardP
                 onClick={handleIgnoreToggle}
                 disabled={ignoring}
                 className={cn(
-                  'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium transition',
+                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border transition',
                   isIgnored
-                    ? 'bg-brand-50 text-brand-600 hover:bg-brand-100'
-                    : 'bg-gray-100 text-gray-500 hover:bg-gray-200',
+                    ? 'bg-gray-900 text-white border-transparent hover:bg-black'
+                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900',
                 )}
               >
                 {ignoring ? (
-                  <Loader2 className="w-3 h-3 animate-spin" />
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : isIgnored ? (
-                  <Eye className="w-3 h-3" />
+                  <Eye className="w-3.5 h-3.5" />
                 ) : (
-                  <EyeOff className="w-3 h-3" />
+                  <EyeOff className="w-3.5 h-3.5 text-gray-400" />
                 )}
                 {isIgnored ? 'Un-ignore' : 'Ignore'}
               </button>

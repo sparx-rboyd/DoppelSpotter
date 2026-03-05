@@ -1,21 +1,23 @@
 import { type InputHTMLAttributes, forwardRef } from 'react';
 import { cn } from '@/lib/utils';
+import { InfoTooltip } from '@/components/ui/tooltip';
 
 interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
   label?: string;
   error?: string;
-  hint?: string;
+  tooltip?: string;
 }
 
 export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
-  { label, error, hint, className, id, ...props },
+  { label, error, tooltip, className, id, ...props },
   ref,
 ) {
   return (
     <div className="flex flex-col gap-1">
       {label && (
-        <label htmlFor={id} className="text-sm font-medium text-gray-700">
+        <label htmlFor={id} className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
           {label}
+          {tooltip && <InfoTooltip content={tooltip} />}
         </label>
       )}
       <input
@@ -29,7 +31,6 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(function Input(
         )}
         {...props}
       />
-      {hint && !error && <p className="text-xs text-gray-500">{hint}</p>}
       {error && <p className="text-xs text-red-600">{error}</p>}
     </div>
   );

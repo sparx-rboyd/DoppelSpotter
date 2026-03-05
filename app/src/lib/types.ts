@@ -19,6 +19,8 @@ export interface BrandProfile {
   officialDomains: string[];
   /** Terms AI analysis should flag if found associated with the brand in search results. */
   watchWords?: string[];
+  /** Terms the brand owner is comfortable being associated with; AI analysis treats results containing these with reduced caution. */
+  safeWords?: string[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

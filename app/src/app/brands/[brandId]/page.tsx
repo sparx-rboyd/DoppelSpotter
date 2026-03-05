@@ -12,9 +12,8 @@ import { Navbar } from '@/components/navbar';
 import { FindingCard } from '@/components/finding-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent } from '@/components/ui/card';
 import { InfoTooltip } from '@/components/ui/tooltip';
-import { formatDate, formatScanDate } from '@/lib/utils';
+import { cn, formatScanDate } from '@/lib/utils';
 import type { BrandProfile, Finding, Scan, ScanSummary } from '@/lib/types';
 
 const POLL_INTERVAL_MS = 5_000;
@@ -58,22 +57,22 @@ function clearStoredScanId(brandId: string) {
 function SeverityPills({ high, medium, low }: { high: number; medium: number; low: number }) {
   if (high === 0 && medium === 0 && low === 0) return null;
   return (
-    <span className="flex items-center gap-1.5">
+    <span className="flex items-center gap-2">
       {high > 0 && (
         <Badge variant="danger">
-          <AlertCircle className="w-3 h-3" />
+          <AlertCircle className="w-3.5 h-3.5" />
           {high} High
         </Badge>
       )}
       {medium > 0 && (
         <Badge variant="warning">
-          <AlertTriangle className="w-3 h-3" />
+          <AlertTriangle className="w-3.5 h-3.5" />
           {medium} Medium
         </Badge>
       )}
       {low > 0 && (
         <Badge variant="success">
-          <Info className="w-3 h-3" />
+          <Info className="w-3.5 h-3.5" />
           {low} Low
         </Badge>
       )}
@@ -120,7 +119,7 @@ function SeverityGroup({
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className="flex items-center hover:bg-gray-50 transition">
+      <div className={cn("flex items-center transition", isExpanded ? "bg-gray-50 border-b border-gray-100" : "hover:bg-gray-50")}>
         <button
           type="button"
           onClick={() => setIsExpanded((v) => !v)}
@@ -131,7 +130,7 @@ function SeverityGroup({
             ? <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
             : <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />}
           <Badge variant={variant}>
-            <Icon className="w-3 h-3" />
+            <Icon className="w-3.5 h-3.5" />
             {label}
           </Badge>
           <span className="text-xs text-gray-500">
@@ -185,6 +184,8 @@ export default function BrandDetailPage() {
   const [showAllIgnored, setShowAllIgnored] = useState(false);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
+
+  const [expandedBrandSection, setExpandedBrandSection] = useState<'keywords' | 'officialDomains' | 'watchWords' | 'safeWords' | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -832,7 +833,7 @@ export default function BrandDetailPage() {
   return (
     <AuthGuard>
       <Navbar />
-      <main className="pt-16 min-h-screen bg-gray-50/50">
+      <main className="pt-16 min-h-screen bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
 
           {/* Back link */}
@@ -842,10 +843,7 @@ export default function BrandDetailPage() {
                 <ArrowLeft className="w-5 h-5" />
               </Link>
               {brand && (
-                <div>
-                  <h1 className="text-2xl font-bold text-gray-900">{brand.name}</h1>
-                  <p className="text-sm text-gray-500 mt-0.5">Brand profile · created {formatDate(brand.createdAt)}</p>
-                </div>
+                <h1 className="text-2xl font-bold text-gray-900">{brand.name}</h1>
               )}
             </div>
             {brand && (
@@ -873,47 +871,110 @@ export default function BrandDetailPage() {
           {brand && !loading && (
             <>
               {/* Brand meta */}
-              <div className="grid sm:grid-cols-3 gap-4 mb-8">
-                <Card>
-                  <CardContent className="py-4">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      Keywords
-                      <InfoTooltip content="The words associated with your brand that you want to protect and monitor (e.g. your trademarks). Scans will search for these keywords." />
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {brand.keywords.length > 0
-                        ? brand.keywords.map((kw) => <Badge key={kw} variant="brand">{kw}</Badge>)
-                        : <span className="text-sm text-gray-400">None set</span>}
+              {(() => {
+                const keywords = brand.keywords;
+                const domains = brand.officialDomains;
+                const watchWords = brand.watchWords ?? [];
+                const safeWords = brand.safeWords ?? [];
+
+                type Section = 'keywords' | 'officialDomains' | 'watchWords' | 'safeWords';
+                function toggleSection(section: Section) {
+                  setExpandedBrandSection((prev) => (prev === section ? null : section));
+                }
+
+                const sections: {
+                  key: Section;
+                  label: string;
+                  count: number;
+                  tooltip: string;
+                  items: string[];
+                  badgeVariant: 'brand' | 'default' | 'warning';
+                  emptyLabel: string;
+                }[] = [
+                  {
+                    key: 'keywords',
+                    label: 'Keywords',
+                    count: keywords.length,
+                    tooltip: 'The words associated with your brand that you want to protect and monitor (e.g. your trademarks). Scans will search for these keywords.',
+                    items: keywords,
+                    badgeVariant: 'default',
+                    emptyLabel: 'No keywords set',
+                  },
+                  {
+                    key: 'officialDomains',
+                    label: 'Official Domains',
+                    count: domains.length,
+                    tooltip: 'Domains that you own, so that the AI analysis knows not to flag them.',
+                    items: domains,
+                    badgeVariant: 'default',
+                    emptyLabel: 'No official domains set',
+                  },
+                  {
+                    key: 'watchWords',
+                    label: 'Watch Words',
+                    count: watchWords.length,
+                    tooltip: "Words that you don't want to be associated with your brand. Scans won't search for these words, but if they appear in scan results the AI analysis will treat the results with more caution.",
+                    items: watchWords,
+                    badgeVariant: 'default',
+                    emptyLabel: 'No watch words set',
+                  },
+                  {
+                    key: 'safeWords',
+                    label: 'Safe Words',
+                    count: safeWords.length,
+                    tooltip: "Words that you're happy to be associated with your brand. If they appear in scan results the AI analysis will treat the results with less caution.",
+                    items: safeWords,
+                    badgeVariant: 'default',
+                    emptyLabel: 'No safe words set',
+                  },
+                ];
+
+                const activeSection = sections.find((s) => s.key === expandedBrandSection);
+
+                return (
+                  <div className="mb-8">
+                    <div className="flex items-center gap-1 flex-wrap">
+                      {sections.map((section, idx) => {
+                        const isOpen = expandedBrandSection === section.key;
+                        return (
+                          <div key={section.key} className="flex items-center gap-1">
+                            {idx > 0 && <span className="text-gray-300 text-xs select-none">·</span>}
+                            <button
+                              type="button"
+                              onClick={() => toggleSection(section.key)}
+                              className={cn(
+                                "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition",
+                                isOpen
+                                  ? "bg-gray-900 text-white"
+                                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+                              )}
+                            >
+                              <span>{section.label}</span>
+                              <span className={cn(
+                                "inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold",
+                                isOpen ? "bg-white text-gray-900" : "bg-gray-200 text-gray-600"
+                              )}>
+                                {section.count}
+                              </span>
+                              <InfoTooltip content={section.tooltip} />
+                            </button>
+                          </div>
+                        );
+                      })}
                     </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="py-4">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      Official Domains
-                      <InfoTooltip content="Domains that you own, so that the AI analysis knows not to flag them." />
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {brand.officialDomains.length > 0
-                        ? brand.officialDomains.map((d) => <Badge key={d} variant="default">{d}</Badge>)
-                        : <span className="text-sm text-gray-400">None set</span>}
-                    </div>
-                  </CardContent>
-                </Card>
-                <Card>
-                  <CardContent className="py-4">
-                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2 flex items-center gap-1.5">
-                      Watch Words
-                      <InfoTooltip content="Words that you don't want to be associated with your brand. Scans won't search for these words, but if they appear in scan results the AI analysis will treat the results with more caution." />
-                    </p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {(brand.watchWords ?? []).length > 0
-                        ? (brand.watchWords ?? []).map((w) => <Badge key={w} variant="warning">{w}</Badge>)
-                        : <span className="text-sm text-gray-400">None set</span>}
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+
+                    {activeSection && (
+                      <div className="mt-2 px-3 py-2.5 bg-white border border-gray-200 rounded-xl flex flex-wrap gap-2">
+                        {activeSection.items.length > 0
+                          ? activeSection.items.map((item) => (
+                              <Badge key={item} variant={activeSection.badgeVariant}>{item}</Badge>
+                            ))
+                          : <span className="text-sm text-gray-400">{activeSection.emptyLabel}</span>}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* Scan progress banner */}
               {scanning && (
@@ -973,9 +1034,9 @@ export default function BrandDetailPage() {
               )}
 
               {/* Findings panel */}
-              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
                 {/* Panel header */}
-                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-4">
+                <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between gap-4 bg-gray-100">
                   <div className="flex items-center gap-3">
                     <div>
                       <h2 className="text-base font-semibold text-gray-900">Findings</h2>
@@ -985,12 +1046,6 @@ export default function BrandDetailPage() {
                           : `${scans.length} scan${scans.length !== 1 ? 's' : ''} · ${totalFindings} finding${totalFindings !== 1 ? 's' : ''} detected`}
                       </p>
                     </div>
-                    {globalHighCount > 0 && (
-                      <Badge variant="danger">
-                        <AlertCircle className="w-3 h-3" />
-                        {globalHighCount} High Risk
-                      </Badge>
-                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {(totalFindings > 0 || totalNonHits > 0) && !confirmClear && (
@@ -1014,7 +1069,7 @@ export default function BrandDetailPage() {
 
                 {/* Inline clear all confirmation */}
                 {confirmClear && (
-                  <div className="px-5 py-4 bg-red-50 border-b border-red-100 flex items-center justify-between gap-4">
+                  <div className="px-6 py-4 bg-red-50 border-b border-red-100 flex items-center justify-between gap-4">
                     <p className="text-sm text-red-800">
                       Permanently delete all {totalFindings + totalNonHits + totalIgnored} finding{(totalFindings + totalNonHits + totalIgnored) !== 1 ? 's' : ''} and scan history? This cannot be undone.
                     </p>
@@ -1056,7 +1111,7 @@ export default function BrandDetailPage() {
                         <div key={scan.id}>
                           {/* Scan row header */}
                           {isConfirmingDelete ? (
-                            <div className="px-5 py-3.5 bg-red-50 flex items-center justify-between gap-4">
+                            <div className="px-6 py-4 bg-red-50 flex items-center justify-between gap-4">
                               <p className="text-sm text-red-800">
                                 Delete this scan and its {scan.highCount + scan.mediumCount + scan.lowCount + scan.nonHitCount + (scan.ignoredCount ?? 0)} result{(scan.highCount + scan.mediumCount + scan.lowCount + scan.nonHitCount + (scan.ignoredCount ?? 0)) !== 1 ? 's' : ''}? This cannot be undone.
                               </p>
@@ -1082,14 +1137,14 @@ export default function BrandDetailPage() {
                               </div>
                             </div>
                           ) : (
-                            <div className="flex items-center gap-3 px-5 py-3.5 hover:bg-gray-50/70 transition group">
-                              {/* Expand toggle */}
-                              <button
-                                type="button"
-                                onClick={() => toggleScanExpand(scan.id)}
-                                className="flex items-center gap-3 flex-1 min-w-0 text-left"
-                                aria-expanded={isExpanded}
-                              >
+                    <div className="flex items-center gap-4 px-6 py-4 hover:bg-gray-50 transition group">
+                      {/* Expand toggle */}
+                      <button
+                        type="button"
+                        onClick={() => toggleScanExpand(scan.id)}
+                        className="flex items-center gap-4 flex-1 min-w-0 text-left"
+                        aria-expanded={isExpanded}
+                      >
                                 {isExpanded
                                   ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
                                   : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
@@ -1143,7 +1198,7 @@ export default function BrandDetailPage() {
 
                           {/* Expanded body */}
                           {isExpanded && (
-                            <div className="border-t border-gray-100 px-4 sm:px-6 py-5 bg-gray-50/30">
+                            <div className="border-t border-gray-100 px-4 sm:px-6 py-5 bg-gray-50">
                               {isLoading ? (
                                 <div className="flex items-center justify-center py-8 gap-2 text-gray-400">
                                   <Loader2 className="w-4 h-4 animate-spin" />
@@ -1180,7 +1235,10 @@ export default function BrandDetailPage() {
                                         onClick={() =>
                                           setShowNonHitsByScanId((prev) => ({ ...prev, [scan.id]: !prev[scan.id] }))
                                         }
-                                        className="w-full px-4 py-3 flex items-center gap-2 hover:bg-gray-50 transition text-left"
+                                        className={cn(
+                                          "w-full px-4 py-3 flex items-center gap-2 transition text-left",
+                                          showNonHits ? "bg-gray-50 border-b border-gray-100" : "hover:bg-gray-50"
+                                        )}
                                       >
                                         {showNonHits
                                           ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
@@ -1215,7 +1273,10 @@ export default function BrandDetailPage() {
                                         onClick={() =>
                                           setShowIgnoredByScanId((prev) => ({ ...prev, [scan.id]: !prev[scan.id] }))
                                         }
-                                        className="w-full px-4 py-3 flex items-center gap-2 hover:bg-gray-50 transition text-left"
+                                        className={cn(
+                                          "w-full px-4 py-3 flex items-center gap-2 transition text-left",
+                                          showIgnored ? "bg-gray-50 border-b border-gray-100" : "hover:bg-gray-50"
+                                        )}
                                       >
                                         {showIgnored
                                           ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
@@ -1254,11 +1315,14 @@ export default function BrandDetailPage() {
               </div>
               {/* Brand-level ignored URLs panel */}
               {allIgnoredFindings.length > 0 && (
-                <div className="mt-6 bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="mt-6 bg-white rounded-2xl border border-gray-200 overflow-hidden">
                   <button
                     type="button"
                     onClick={() => setShowAllIgnored((v) => !v)}
-                    className="w-full px-5 py-4 flex items-center gap-3 hover:bg-gray-50 transition text-left"
+                    className={cn(
+                      "w-full px-6 py-5 flex items-center gap-3 transition text-left bg-gray-100",
+                      showAllIgnored ? "border-b border-gray-200" : "hover:bg-gray-200"
+                    )}
                     aria-expanded={showAllIgnored}
                   >
                     {showAllIgnored

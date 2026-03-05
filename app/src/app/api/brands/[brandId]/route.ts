@@ -33,7 +33,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (!doc.exists) return errorResponse('Brand not found', 404);
   if ((doc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
 
-  let body: Partial<Pick<BrandProfile, 'name' | 'keywords' | 'officialDomains' | 'watchWords'>>;
+  let body: Partial<Pick<BrandProfile, 'name' | 'keywords' | 'officialDomains' | 'watchWords' | 'safeWords'>>;
   try {
     body = await request.json();
   } catch {
@@ -46,6 +46,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (body.keywords) updates.keywords = body.keywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
   if (body.officialDomains) updates.officialDomains = body.officialDomains.map((d) => d.trim().toLowerCase()).filter(Boolean);
   if (body.watchWords !== undefined) updates.watchWords = body.watchWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
+  if (body.safeWords !== undefined) updates.safeWords = body.safeWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
 
   await db.collection('brands').doc(brandId).update(updates);
 
