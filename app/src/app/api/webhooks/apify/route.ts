@@ -320,7 +320,7 @@ async function analyseAndWriteBatch({
     });
 
     const counts = await Promise.all(writeOps);
-    findingCount = counts.reduce((sum, c) => sum + c, 0);
+    findingCount = counts.reduce<number>((sum, c) => sum + c, 0);
   } catch (err) {
     console.error(`[webhook] Batch LLM analysis failed for dataset ${datasetId}:`, err);
     const findingRef = db.collection('findings').doc();
