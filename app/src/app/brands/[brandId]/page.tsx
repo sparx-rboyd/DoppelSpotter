@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
-  ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, CheckCircle2, Loader2,
+  ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Loader2,
   ChevronDown, ChevronRight, Pencil, Trash2, X, EyeOff,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -85,9 +85,9 @@ function SeverityPills({ high, medium, low }: { high: number; medium: number; lo
 // ---------------------------------------------------------------------------
 
 const SEVERITY_GROUP_CONFIG = {
-  high:   { variant: 'danger'  as const, label: 'High',   icon: AlertCircle },
-  medium: { variant: 'warning' as const, label: 'Medium', icon: AlertTriangle },
-  low:    { variant: 'success' as const, label: 'Low',    icon: Info },
+  high:   { variant: 'danger'  as const, label: 'High',   icon: AlertCircle,   headerBg: 'bg-red-50',   headerBorder: 'border-red-100',   hoverBg: 'hover:bg-red-50' },
+  medium: { variant: 'warning' as const, label: 'Medium', icon: AlertTriangle, headerBg: 'bg-amber-50', headerBorder: 'border-amber-100', hoverBg: 'hover:bg-amber-50' },
+  low:    { variant: 'success' as const, label: 'Low',    icon: Info,          headerBg: 'bg-green-50', headerBorder: 'border-green-100', hoverBg: 'hover:bg-green-50' },
 };
 
 function SeverityGroup({
@@ -97,16 +97,16 @@ function SeverityGroup({
 }: {
   severity: 'high' | 'medium' | 'low';
   findings: Finding[];
-  onIgnoreToggle: (finding: Finding, isIgnored: boolean) => Promise<void>;
+  onIgnoreToggle?: (finding: Finding, isIgnored: boolean) => Promise<void>;
 }) {
   const [isExpanded, setIsExpanded] = useState(severity === 'high');
   const [ignoringAll, setIgnoringAll] = useState(false);
 
-  const { variant, label, icon: Icon } = SEVERITY_GROUP_CONFIG[severity];
+  const { variant, label, icon: Icon, headerBg, headerBorder, hoverBg } = SEVERITY_GROUP_CONFIG[severity];
 
   async function handleIgnoreAll(e: React.MouseEvent) {
     e.stopPropagation();
-    if (ignoringAll) return;
+    if (!onIgnoreToggle || ignoringAll) return;
     setIgnoringAll(true);
     try {
       for (const finding of findings) {
@@ -119,7 +119,7 @@ function SeverityGroup({
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className={cn("flex items-center transition", isExpanded ? "bg-gray-50 border-b border-gray-100" : "hover:bg-gray-50")}>
+      <div className={cn("flex items-center transition border-b", isExpanded ? `${headerBg} ${headerBorder}` : `border-transparent ${hoverBg}`)}>
         <button
           type="button"
           onClick={() => setIsExpanded((v) => !v)}
@@ -137,17 +137,19 @@ function SeverityGroup({
             {findings.length} finding{findings.length !== 1 ? 's' : ''}
           </span>
         </button>
-        <button
-          type="button"
-          onClick={handleIgnoreAll}
-          disabled={ignoringAll}
-          className="flex-shrink-0 mr-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition disabled:opacity-50"
-        >
-          {ignoringAll
-            ? <Loader2 className="w-3 h-3 animate-spin" />
-            : <EyeOff className="w-3 h-3" />}
-          Ignore all
-        </button>
+        {onIgnoreToggle && (
+          <button
+            type="button"
+            onClick={handleIgnoreAll}
+            disabled={ignoringAll}
+            className="flex-shrink-0 mr-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition disabled:opacity-50"
+          >
+            {ignoringAll
+              ? <Loader2 className="w-3 h-3 animate-spin" />
+              : <EyeOff className="w-3 h-3" />}
+            Ignore all
+          </button>
+        )}
       </div>
       {isExpanded && (
         <div className="border-t border-gray-100 p-4 space-y-4">
@@ -192,8 +194,8 @@ export default function BrandDetailPage() {
   const [cancelling, setCancelling] = useState(false);
   const [activeScanId, setActiveScanId] = useState<string | null>(null);
   const [activeScan, setActiveScan] = useState<Scan | null>(null);
-  const [scanComplete, setScanComplete] = useState(false);
-  const [scanCancelled, setScanCancelled] = useState(false);
+  const [liveScanFindings, setLiveScanFindings] = useState<Finding[]>([]);
+  const [liveResultsExpanded, setLiveResultsExpanded] = useState(true);
   const [error, setError] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -268,6 +270,18 @@ export default function BrandDetailPage() {
       }
     } catch {
       // Non-critical
+    }
+  }
+
+  async function fetchLiveFindings(scanId: string) {
+    try {
+      const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}`, { credentials: 'same-origin' });
+      if (res.ok) {
+        const json = await res.json();
+        setLiveScanFindings(json.data ?? []);
+      }
+    } catch {
+      // Non-critical — polling will retry
     }
   }
 
@@ -524,11 +538,9 @@ export default function BrandDetailPage() {
               setActiveScanId(storedScanId);
               setActiveScan(scan);
               startPolling(storedScanId);
+              void fetchLiveFindings(storedScanId);
             } else {
               clearStoredScanId(brandId);
-              if (scan.status === 'cancelled') {
-                setScanCancelled(true);
-              }
             }
           } else {
             clearStoredScanId(brandId);
@@ -577,18 +589,29 @@ export default function BrandDetailPage() {
         if (scan.status === 'completed') {
           stopPolling();
           clearStoredScanId(brandId);
+          // Fetch the final findings so they appear in the live section right before
+          // the transition — this catches results from batch-mode scans that complete
+          // in one go and are otherwise too brief to catch via polling.
+          await fetchLiveFindings(scanId);
+          // Fetch the scan list before transitioning so that:
+          //   (a) the completed scan row and its loading state are ready to render
+          //       the moment the live section disappears, and
+          //   (b) totalFindings is populated before the completion banner renders.
+          await fetchScans(scanId);
+          // Transition: live section disappears; the scan row (already expanded
+          // with a loading spinner from loadScanFindings) becomes visible.
           setScanning(false);
           setCancelling(false);
           setActiveScanId(null);
-          setScanComplete(true);
-          // Refresh scans list; the completed scan becomes the newest entry and auto-expands
-          await fetchScans(scanId);
+          setLiveScanFindings([]);
+          // (scan complete — findings visible in the scan list row)
         } else if (scan.status === 'failed') {
           stopPolling();
           clearStoredScanId(brandId);
           setScanning(false);
           setCancelling(false);
           setActiveScanId(null);
+          setLiveScanFindings([]);
           setError(scan.errorMessage ?? 'Scan failed');
           setActiveScan(null);
           await fetchScans();
@@ -598,9 +621,12 @@ export default function BrandDetailPage() {
           setScanning(false);
           setCancelling(false);
           setActiveScanId(null);
-          setScanCancelled(true);
+          setLiveScanFindings([]);
           setActiveScan(null);
           await fetchScans();
+        } else {
+          // Scan still running — refresh live findings
+          await fetchLiveFindings(scanId);
         }
       } catch {
         // Transient poll failure — keep trying
@@ -615,10 +641,9 @@ export default function BrandDetailPage() {
   async function triggerScan() {
     setScanning(true);
     setError('');
-    setScanComplete(false);
-    setScanCancelled(false);
     setActiveScanId(null);
     setActiveScan(null);
+    setLiveScanFindings([]);
 
     try {
       const res = await fetch('/api/scan', {
@@ -731,7 +756,6 @@ export default function BrandDetailPage() {
       setScanIgnored({});
       setAllIgnoredFindings([]);
       setExpandedScanIds([]);
-      setScanComplete(false);
       setActiveScan(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to clear history');
@@ -839,7 +863,7 @@ export default function BrandDetailPage() {
           {/* Back link */}
           <div className="flex items-center justify-between gap-3 mb-8">
             <div className="flex items-center gap-3">
-              <Link href="/brands" className="text-gray-500 hover:text-gray-900 transition">
+              <Link href="/brands" className="text-brand-600 hover:text-brand-700 transition">
                 <ArrowLeft className="w-5 h-5" />
               </Link>
               {brand && (
@@ -945,7 +969,7 @@ export default function BrandDetailPage() {
                               className={cn(
                                 "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition",
                                 isOpen
-                                  ? "bg-gray-900 text-white"
+                                  ? "bg-brand-600 text-white"
                                   : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
                               )}
                             >
@@ -956,7 +980,7 @@ export default function BrandDetailPage() {
                               )}>
                                 {section.count}
                               </span>
-                              <InfoTooltip content={section.tooltip} />
+                              <InfoTooltip content={section.tooltip} iconClassName={isOpen ? 'text-white/70 hover:text-white' : 'text-gray-400 hover:text-gray-500'} />
                             </button>
                           </div>
                         );
@@ -993,10 +1017,10 @@ export default function BrandDetailPage() {
                     </div>
                     {!cancelling && (
                       <Button
-                        variant="ghost"
+                        variant="secondary"
                         size="sm"
                         onClick={cancelScan}
-                        className="flex-shrink-0 text-brand-600 hover:text-red-600 hover:bg-red-50"
+                        className="flex-shrink-0 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
                       >
                         <X className="w-3.5 h-3.5" />
                         Cancel
@@ -1012,31 +1036,11 @@ export default function BrandDetailPage() {
                 </div>
               )}
 
-              {/* Scan complete banner */}
-              {scanComplete && !scanning && (
-                <div className="mb-6 bg-green-50 border border-green-200 rounded-xl px-5 py-4 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-green-600" />
-                  <span className="text-sm font-medium text-green-800">
-                    Scan complete — {totalFindings} finding{totalFindings !== 1 ? 's' : ''} detected
-                    {totalNonHits > 0 && `, ${totalNonHits} non-hit${totalNonHits !== 1 ? 's' : ''} filtered`}
-                  </span>
-                </div>
-              )}
-              {/* Scan cancelled banner */}
-              {scanCancelled && !scanning && (
-                <div className="mb-6 bg-gray-50 border border-gray-200 rounded-xl px-5 py-4 flex items-center gap-2">
-                  <X className="w-4 h-4 text-gray-400" />
-                  <span className="text-sm font-medium text-gray-600">
-                    Scan cancelled
-                    {totalFindings > 0 && ` — ${totalFindings} finding${totalFindings !== 1 ? 's' : ''} from previous scans`}
-                  </span>
-                </div>
-              )}
 
               {/* Findings panel */}
               <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
                 {/* Panel header */}
-                <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between gap-4 bg-gray-100">
+                <div className="px-6 py-5 border-b border-brand-100 flex items-center justify-between gap-4 bg-brand-50">
                   <div className="flex items-center gap-3">
                     <div>
                       <h2 className="text-base font-semibold text-gray-900">Findings</h2>
@@ -1087,10 +1091,63 @@ export default function BrandDetailPage() {
 
                 {/* Scan result sets */}
                 <div className="divide-y divide-gray-100">
-                  {scans.length === 0 ? (
+                  {/* Live findings — shown while a scan is in progress */}
+                  {scanning && (
+                    <div className="bg-brand-50/40">
+                      {/* Live row header */}
+                      <div className="flex items-center gap-4 px-6 py-4">
+                        <button
+                          type="button"
+                          onClick={() => setLiveResultsExpanded((v) => !v)}
+                          className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                          aria-expanded={liveResultsExpanded}
+                        >
+                          {liveResultsExpanded
+                            ? <ChevronDown className="w-4 h-4 text-brand-400 flex-shrink-0" />
+                            : <ChevronRight className="w-4 h-4 text-brand-400 flex-shrink-0" />}
+                          <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
+                          <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
+                            Scan in progress
+                          </span>
+                          {liveScanFindings.length > 0 && (
+                            <SeverityPills
+                              high={liveScanFindings.filter((f) => f.severity === 'high').length}
+                              medium={liveScanFindings.filter((f) => f.severity === 'medium').length}
+                              low={liveScanFindings.filter((f) => f.severity === 'low').length}
+                            />
+                          )}
+                        </button>
+                      </div>
+                      {/* Live row body */}
+                      {liveResultsExpanded && (
+                        <div className="border-t border-brand-100 px-4 sm:px-6 py-5 bg-brand-50/30">
+                          {liveScanFindings.length === 0 ? (
+                            <div className="flex items-center justify-center py-8 gap-2 text-gray-400">
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span className="text-sm">Waiting for first results…</span>
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              {(['high', 'medium', 'low'] as const)
+                                .filter((sev) => liveScanFindings.some((f) => f.severity === sev))
+                                .map((sev) => (
+                                  <SeverityGroup
+                                    key={`live-${sev}`}
+                                    severity={sev}
+                                    findings={liveScanFindings.filter((f) => f.severity === sev)}
+                                  />
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {scans.length === 0 && !scanning ? (
                     <div className="flex flex-col items-center justify-center py-12 gap-3">
-                      <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center">
-                        <Shield className="w-5 h-5 text-gray-400" />
+                      <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
+                        <Shield className="w-5 h-5 text-brand-600" />
                       </div>
                       <p className="text-sm text-gray-500">No findings yet. Run a scan to start monitoring.</p>
                     </div>
@@ -1209,7 +1266,7 @@ export default function BrandDetailPage() {
                                   {/* Real findings grouped by severity */}
                                   {!hits || hits.length === 0 ? (
                                     <div className="flex flex-col items-center justify-center py-8 gap-2">
-                                      <Shield className="w-5 h-5 text-gray-300" />
+                                      <Shield className="w-5 h-5 text-brand-300" />
                                       <p className="text-sm text-gray-400">No findings detected in this scan.</p>
                                     </div>
                                   ) : (
@@ -1320,8 +1377,8 @@ export default function BrandDetailPage() {
                     type="button"
                     onClick={() => setShowAllIgnored((v) => !v)}
                     className={cn(
-                      "w-full px-6 py-5 flex items-center gap-3 transition text-left bg-gray-100",
-                      showAllIgnored ? "border-b border-gray-200" : "hover:bg-gray-200"
+                      "w-full px-6 py-5 flex items-center gap-3 transition text-left bg-brand-50",
+                      showAllIgnored ? "border-b border-brand-100" : "hover:bg-brand-100"
                     )}
                     aria-expanded={showAllIgnored}
                   >

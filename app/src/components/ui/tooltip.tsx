@@ -2,15 +2,16 @@ import { Info } from 'lucide-react';
 
 interface InfoTooltipProps {
   content: string;
+  iconClassName?: string;
 }
 
-export function InfoTooltip({ content }: InfoTooltipProps) {
+export function InfoTooltip({ content, iconClassName }: InfoTooltipProps) {
   return (
     <span className="relative inline-flex group/tooltip">
       <span
         role="img"
         aria-label="More information"
-        className="inline-flex text-gray-400 hover:text-gray-500 transition-colors cursor-default"
+        className={`inline-flex transition-colors cursor-default ${iconClassName ?? 'text-gray-400 hover:text-gray-500'}`}
       >
         <Info className="w-3.5 h-3.5" />
       </span>

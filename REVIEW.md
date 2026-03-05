@@ -212,18 +212,19 @@ Each dataset item (one per SERP page scraped) has this structure:
 
 ### AI analysis implications
 
-**AI analysis receives one full SERP page as `rawData`.** This means:
+The Google Search actor uses `analysisMode: 'batch'`. All 3 SERP pages are combined into
+a **single AI analysis call** via `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPrompt()`.
 
-- A single AI analysis call sees up to 10 organic results, related queries, PAA, and paid
-  ads simultaneously — it's classifying the entire page, not individual results.
-- The `rawData` payload sent to AI analysis is large. For 3 pages, we make 3 AI analysis calls.
-- The AI analysis prompt's `source` field is set to `"google"` for all calls from this actor.
-- AI analysis is asked to return one `Finding` per page — it must synthesise across
-  all results on the page and identify the most significant concern (if any).
-
-This is a potential quality issue: if page 1 contains 9 benign results and 1 suspicious
-one, AI analysis may or may not flag it. Consider whether the actor should be restructured
-to push **one item per organic result** instead of one item per page.
+- AI analysis sees all organic and paid results across all pages simultaneously and returns
+  **one assessed item per individual URL** — so up to ~30 organic results + paid results,
+  each evaluated independently.
+- One Firestore `Finding` is written per assessed result.
+- The full set of raw SERP pages is stored as `{ pages: [...], pageCount: N }` on every
+  Finding's `rawData` so the complete dataset is always available for debugging.
+- `relatedQueries` from all pages are reviewed by AI analysis; suspicious terms are returned
+  as `suggestedSearches` to trigger depth-1 follow-up scans.
+- Both `organicResults` and `paidResults` are assessed — paid results surface competitors
+  bidding on the brand name.
 
 ### Observations / tuning notes
 
@@ -267,9 +268,10 @@ POST /api/scan
 Apify calls POST /api/webhooks/apify on SUCCEEDED / FAILED / ABORTED
   └─ validates X-Apify-Webhook-Secret header
   └─ fetches up to 50 items from the Apify dataset (MAX_ITEMS_PER_RUN = 50)
+  └─ fetches all ignored URLs for the brand (isIgnored == true) → passed to AI analysis prompts
   └─ checks actor's analysisMode ('per-item' | 'batch')
        ├─ 'per-item': for each item → analyseItem() → AI analysis call → write Finding
-       └─ 'batch':    all items combined → analyseItemBatch() → one AI analysis call → write one consolidated Finding
+       └─ 'batch':    all items combined → analyseItemBatch() → one AI analysis call → write one Finding per assessed result
   └─ marks actor run complete; once all runs done → marks scan complete
 ```
 
@@ -279,7 +281,8 @@ Apify calls POST /api/webhooks/apify on SUCCEEDED / FAILED / ABORTED
 - Only on `ACTOR.RUN.SUCCEEDED` events (failed/aborted runs skip analysis)
 - Items are capped at 50 per run (`MAX_ITEMS_PER_RUN`)
 - For `per-item` actors: one sequential AI analysis call per item (avoids OpenRouter rate limits)
-- For `batch` actors (e.g. Google Search): one AI analysis call for all items combined → one Finding
+- For `batch` actors (e.g. Google Search): one AI analysis call for all items combined → one Finding per individual result assessed
+- Ignored URLs for the brand are fetched from Firestore at webhook time and injected into both `buildAnalysisPrompt()` and `buildBatchAnalysisPrompt()` — AI analysis is instructed to mark any matching URL as `isFalsePositive: true`
 
 ### AI Analysis Provider & Model
 
@@ -294,9 +297,11 @@ Apify calls POST /api/webhooks/apify on SUCCEEDED / FAILED / ABORTED
 
 **Relevant file:** `app/src/lib/analysis/openrouter.ts`
 
-### System Prompt
+### System Prompt (per-item mode)
 
-**Defined in:** `app/src/lib/analysis/prompts.ts` → `SYSTEM_PROMPT` (line 7)
+**Defined in:** `app/src/lib/analysis/prompts.ts` → `SYSTEM_PROMPT`
+
+Used for actors whose `analysisMode` is `'per-item'`. Returns a single `AnalysisOutput` object.
 
 ```
 You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
@@ -319,45 +324,155 @@ Severity guidelines:
 Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).
 ```
 
-### User Prompt Template
+### System Prompt (batch mode)
 
-**Defined in:** `app/src/lib/analysis/prompts.ts` → `buildAnalysisPrompt()` (line 29)
+**Defined in:** `app/src/lib/analysis/prompts.ts` → `BATCH_SYSTEM_PROMPT`
+
+Used for the Google Search actor (`analysisMode: 'batch'`). Returns a `BatchAnalysisOutput` — an array of per-result assessments plus optional `suggestedSearches`.
+
+```
+You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive one or more Google Search results pages (SERP data) for a brand. Your task is to extract every
+individual organic result and paid result from all pages and assess each one separately for brand infringement.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "items": [
+    {
+      "url": "the exact URL of this result",
+      "title": "the page title of this result",
+      "severity": "high" | "medium" | "low",
+      "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
+      "isFalsePositive": boolean
+    }
+  ],
+  "suggestedSearches": ["query 1", "query 2"]
+}
+
+Rules for "items":
+- Include every organic result (from organicResults[]) and every paid result (from paidResults[]) across all pages.
+- Do NOT include the SERP page itself — assess individual result URLs only.
+- Each item must have all five fields: url, title, severity, analysis, isFalsePositive.
+- Each "analysis" must be fully standalone — do NOT reference other items in the list.
+
+[... severity guidelines identical to per-item prompt ...]
+
+The "suggestedSearches" field is OPTIONAL. Only include it when you spot suspicious related search terms
+(from "relatedQueries" sections) that warrant a dedicated follow-up search. Criteria:
+- The query implies impersonation, fraud, or brand misuse (e.g. "fake [brand]", "[brand] scam")
+- The query involves a lookalike name NOT covered in the results above
+- You genuinely need more data before you can assess whether a threat exists
+
+Do NOT suggest follow-up searches for clearly legitimate queries, queries already investigated,
+or more than 3 in total. Omit "suggestedSearches" entirely if none are warranted.
+```
+
+### User Prompt Template (per-item mode)
+
+**Defined in:** `app/src/lib/analysis/prompts.ts` → `buildAnalysisPrompt()`
 
 ```
 Brand being protected: "<brand.name>"
 Brand keywords: <keywords joined with ", ">
 Official domains: <officialDomains joined with ", ">
+[Watch words: <watchWords joined with ", "> (only if brand has watchWords)]
+[Safe words: <safeWords joined with ", "> (only if brand has safeWords)]
+[Previously reviewed and dismissed URLs:
+  - <url1>
+  - <url2>
+  (only if brand has ignored URLs — AI analysis instructed to set isFalsePositive: true for matches)]
 Monitoring surface: <source>
 
 Raw scraping result to analyse:
 <JSON.stringify(rawData, null, 2)>
 
-Analyse this result and return your assessment as JSON.
+Analyse this result and return your assessment as JSON. Do not include "suggestedSearches" — this is a single-item analysis.
 ```
 
 The `source` field is the actor's `FindingSource` tag (e.g. `google`, `domain`, `instagram`).
 The `rawData` is the full unmodified item from the Apify dataset.
 
+### User Prompt Template (batch mode)
+
+**Defined in:** `app/src/lib/analysis/prompts.ts` → `buildBatchAnalysisPrompt()`
+
+```
+Brand being protected: "<brand.name>"
+Brand keywords: <keywords>
+Official domains: <officialDomains>
+[Watch words: ... (only if set)]
+[Safe words: ... (only if set)]
+[Previously reviewed and dismissed URLs: ... (only if set)]
+Monitoring surface: <source>
+
+<deep search instruction — either "include up to 3 suggestedSearches" or "do NOT include suggestedSearches">
+
+The following N SERP page(s) are from the same Google Search actor run. Assess every individual organic and
+paid result across all pages. Return one item in the "items" array per result URL.
+
+Raw SERP data (N pages):
+<JSON.stringify(rawItems, null, 2)>
+```
+
+`canSuggestSearches` is `true` for depth-0 runs and `false` for depth-1 (deep follow-up) runs.
+
+### Watch Words & Safe Words
+
+Both are optional per-brand fields (`BrandProfile.watchWords`, `BrandProfile.safeWords`), set via the
+brand create/edit form and stored in Firestore.
+
+| Field | Prompt instruction |
+|---|---|
+| `watchWords` | "concerning terms the brand owner does NOT want associated with their brand — note any presence or implied association and use its discretion on severity impact" |
+| `safeWords` | "terms the brand owner is comfortable being associated with — treat results containing these with reduced caution unless there are strong warning signs elsewhere" |
+
+Both are passed to **both** `buildAnalysisPrompt()` and `buildBatchAnalysisPrompt()` and are omitted from the prompt when not set.
+
 ### Expected AI Analysis Output Schema
 
-**Defined in:** `app/src/lib/analysis/types.ts` → `AnalysisOutput`
+**Defined in:** `app/src/lib/analysis/types.ts`
 
 ```typescript
+// Per-item mode
 interface AnalysisOutput {
   severity: 'high' | 'medium' | 'low';
   title: string;          // max 10 words
   llmAnalysis: string;    // 2–4 sentence plain-language explanation
   isFalsePositive: boolean;
+  suggestedSearches?: string[];  // batch mode only — ignored for per-item
+}
+
+// Batch mode — one assessed result per organic/paid search result
+interface PerPageFinding {
+  url: string;
+  title: string;
+  severity: 'high' | 'medium' | 'low';
+  analysis: string;       // 2–3 sentence standalone explanation
+  isFalsePositive: boolean;
+}
+
+interface BatchAnalysisOutput {
+  items: PerPageFinding[];
+  suggestedSearches?: string[];  // up to MAX_SUGGESTED_SEARCHES (3) queries
 }
 ```
 
 ### Output Parsing
 
-`parseAnalysisOutput()` in `app/src/lib/analysis/types.ts`:
+**`parseAnalysisOutput()`** in `app/src/lib/analysis/types.ts` (per-item mode):
 1. Strips markdown code fences (in case the model wraps JSON in ` ```json ``` `)
 2. `JSON.parse()`s the result
-3. Validates all four fields are present and correctly typed
-4. Returns `null` on any failure
+3. Validates all four required fields (`severity`, `title`, `llmAnalysis`, `isFalsePositive`) are present and correctly typed
+4. Validates optional `suggestedSearches` — filters to non-empty strings, caps at `MAX_SUGGESTED_SEARCHES` (3)
+5. Returns `null` on any failure
+
+**`parseBatchAnalysisOutput()`** in `app/src/lib/analysis/types.ts` (batch mode):
+1. Same code-fence stripping
+2. `JSON.parse()`s the result
+3. Validates `items` is a non-empty array; filters out any items missing required fields
+4. Validates optional `suggestedSearches` — same filtering as above
+5. Returns `null` if `items` is empty or entirely invalid after filtering
 
 ### Fallback Behaviour
 
@@ -372,8 +487,16 @@ rawData:     (full item preserved)
 
 ### False Positive Filtering
 
-If AI analysis returns `isFalsePositive: true`, the item is **not** written to Firestore as a Finding.
-The scan's `findingCount` is only incremented for non-false-positive results.
+If AI analysis returns `isFalsePositive: true`, the Finding **is** still written to Firestore with
+`isFalsePositive: true` and is also automatically set to `isIgnored: true` (with `ignoredAt` timestamp).
+This means:
+
+- The scan's `findingCount` is **not** incremented for false-positive results.
+- False positives are excluded from the default findings API response and from `ScanSummary` severity counts.
+- They are visible in the brand page "Non-hits" section.
+- Because they carry `isIgnored: true`, their URLs are automatically included in the ignored URLs list
+  passed to AI analysis on future scans — preventing repeated re-reporting.
+- Users can un-ignore them if needed, which restores them to their original severity bucket.
 
 ---
 

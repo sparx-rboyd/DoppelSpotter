@@ -58,7 +58,7 @@ export default function DashboardPage() {
           {/* Findings panel */}
           <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
             {/* Panel header */}
-            <div className="px-6 py-5 border-b border-gray-200 flex items-center justify-between gap-4 bg-gray-100">
+            <div className="px-6 py-5 border-b border-brand-100 flex items-center justify-between gap-4 bg-brand-50">
               <div>
                 <h2 className="text-base sm:text-lg font-semibold text-gray-900">Recent Threats Detected</h2>
                 <p className="text-xs sm:text-sm text-gray-500">
@@ -96,8 +96,8 @@ export default function DashboardPage() {
             {/* Empty state */}
             {!loading && !error && findings.length === 0 && (
               <div className="flex flex-col items-center justify-center py-16 gap-3">
-                <div className="w-10 h-10 bg-gray-50 rounded-xl flex items-center justify-center">
-                  <Shield className="w-5 h-5 text-gray-400" />
+                <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
+                  <Shield className="w-5 h-5 text-brand-600" />
                 </div>
                 <p className="text-sm text-gray-500">No findings yet. Run a scan on a brand to see results here.</p>
               </div>

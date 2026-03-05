@@ -22,13 +22,13 @@ export function Navbar() {
   }
 
   return (
-    <nav className="fixed w-full bg-white/80 backdrop-blur-md z-50 border-b border-gray-100">
+    <nav className="fixed w-full bg-brand-600 z-50 shadow-md">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           {/* Logo */}
           <Link href="/dashboard" className="flex items-center gap-2">
-            <ScanEye className="text-brand-600 w-6 h-6" />
-            <span className="font-bold text-lg tracking-tight text-gray-900">DoppelSpotter</span>
+            <ScanEye className="text-white w-6 h-6" />
+            <span className="font-bold text-lg tracking-tight text-white">DoppelSpotter</span>
           </Link>
 
           {/* Nav links */}
@@ -40,8 +40,8 @@ export function Navbar() {
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition',
                   pathname.startsWith(href)
-                    ? 'bg-brand-50 text-brand-700'
-                    : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50',
+                    ? 'bg-white/20 text-white'
+                    : 'text-white/70 hover:text-white hover:bg-white/10',
                 )}
               >
                 <Icon className="w-4 h-4" />
@@ -53,7 +53,7 @@ export function Navbar() {
           {/* Sign out */}
           <button
             onClick={handleSignOut}
-            className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-900 transition px-3 py-2 rounded-lg hover:bg-gray-50"
+            className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition px-3 py-2 rounded-lg hover:bg-white/10"
           >
             <LogOut className="w-4 h-4" />
             <span className="hidden sm:inline">Sign out</span>
