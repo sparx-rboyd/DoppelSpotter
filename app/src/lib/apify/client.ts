@@ -1,9 +1,7 @@
 import { ApifyClient } from 'apify-client';
 import type { BrandProfile } from '@/lib/types';
-import { getGoogleResultsPageCount } from '@/lib/brands';
+import { getDeepSearchGooglePageCount, getGoogleResultsPageCount } from '@/lib/brands';
 import type { ActorConfig } from './actors';
-
-const MIN_DEEP_SEARCH_GOOGLE_PAGE_COUNT = 3;
 
 let _client: ApifyClient | null = null;
 
@@ -105,14 +103,13 @@ export async function startDeepSearchRun(
   googleResultsLimit?: number,
 ): Promise<{ runId: string }> {
   const client = getClient();
-  const deepSearchPageCount = Math.max(
-    getGoogleResultsPageCount(googleResultsLimit),
-    MIN_DEEP_SEARCH_GOOGLE_PAGE_COUNT,
-  );
+  const initialPageCount = getGoogleResultsPageCount(googleResultsLimit);
+  const deepSearchPageCount = getDeepSearchGooglePageCount(googleResultsLimit);
 
   console.log('[apify] Starting deep search run', {
     query,
     googleResultsLimit: googleResultsLimit ?? null,
+    initialPageCount,
     deepSearchPageCount,
   });
 

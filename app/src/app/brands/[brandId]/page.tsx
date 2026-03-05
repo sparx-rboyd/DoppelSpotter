@@ -816,6 +816,23 @@ export default function BrandDetailPage() {
   const isDeepSearchActive = inFlightRuns.some((r) => (r.searchDepth ?? 0) > 0);
   const deepSearchCount = inFlightRuns.filter((r) => (r.searchDepth ?? 0) > 0).length;
 
+  function getRunAnalysisCounts(run?: ActorRunInfo): { completed: number; total: number } | null {
+    if (!run || run.status !== 'analysing') return null;
+    const total = run.itemCount ?? 0;
+    if (total <= 0) return null;
+    const completed = Math.max(0, Math.min(total, run.analysedCount ?? 0));
+    return { completed, total };
+  }
+
+  function withAnalysisCounts(inProgressLabel: string, finalisingLabel: string, run?: ActorRunInfo): string {
+    const counts = getRunAnalysisCounts(run);
+    if (!counts) return `${inProgressLabel}…`;
+    if (counts.completed >= counts.total) {
+      return `${finalisingLabel} (${counts.total}/${counts.total})…`;
+    }
+    return `${inProgressLabel} (${counts.completed}/${counts.total})…`;
+  }
+
   function getScanStatusLabel(): string {
     if (!activeRun) return 'Starting scan…';
 
@@ -828,8 +845,12 @@ export default function BrandDetailPage() {
             : `Fetching deeper results (${deepSearchCount} quer${deepSearchCount !== 1 ? 'ies' : 'y'})…`;
         case 'analysing':
           return query
-            ? `Analysing deeper results for "${query}"…`
-            : `Analysing deeper results with AI…`;
+            ? withAnalysisCounts(
+              `Analysing deeper results for "${query}"`,
+              `Finalising deeper results for "${query}"`,
+              activeRun,
+            )
+            : withAnalysisCounts('Analysing deeper results with AI', 'Finalising deeper results with AI', activeRun);
         default:
           return deepSearchCount > 1
             ? `Investigating ${deepSearchCount} related queries…`
@@ -841,7 +862,7 @@ export default function BrandDetailPage() {
 
     switch (runStatus) {
       case 'fetching_dataset': return 'Fetching results from Apify…';
-      case 'analysing': return 'Analysing results with AI…';
+      case 'analysing': return withAnalysisCounts('Analysing results with AI', 'Finalising results with AI', activeRun);
       default: return 'Waiting for web search to complete…';
     }
   }

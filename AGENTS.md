@@ -107,12 +107,14 @@ GET /api/brands/[brandId]/findings?scanId=xxx
 
 Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ validates X-Apify-Webhook-Secret header
+ └─ on SUCCEEDED, atomically claims the actor run by transitioning it to `fetching_dataset` before any dataset fetch / AI analysis begins
+ └─ duplicate callbacks for a run already in `fetching_dataset` / `analysing` are acknowledged and skipped before expensive work starts
  └─ fetches up to 50 items from Apify dataset
  └─ per-item mode: one AI analysis call per dataset item → one Finding per item
  └─ batch mode (Google Search): normalize SERP pages into compact organic-result candidates
       └─ excludes ads from AI analysis; keeps `relatedQueries` + `peopleAlsoAsk` as run-level context
       └─ dedupes repeated URLs within the run before analysis
-      └─ chunked AI classification: one call per bounded candidate chunk
+      └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
       └─ each chunk may return grounded `suggestedSearches` based on its suspicious results + SERP context
       └─ webhook combines, dedupes, and ranks chunk suggestions
       └─ aggregate suggestion fallback reviews SERP intent signals + notable candidate outcomes when chunk suggestions are weak or absent
@@ -122,7 +124,9 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ suggestions are reserved on the originating run so duplicate callbacks do not fan out extra searches
       └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
       └─ each deep-search Google run uses at least 3 SERP pages, even when the initial scan is configured for fewer
-      └─ detailed debug logging records normalization, chunk outcomes, suggestion ranking, reservations, and deep-search launches
+      └─ `actorRuns.*.analysedCount` increments as chunks finish so the UI can show meaningful `X / N` AI-analysis progress
+      └─ unexpected processing errors after partial finding writes reconcile scan counts from persisted findings, mark the affected run terminal, and let the scan complete normally when useful results already exist
+      └─ detailed debug logging records claim/skip decisions, normalization, chunk outcomes, suggestion ranking, reservations, and deep-search launches
       └─ deep-search runs complete via the same webhook, depth 1 — no further recursion
  └─ marks actor run complete; if all runs done → marks scan complete and clears `brands.activeScanId`
 ```
@@ -175,9 +179,9 @@ check before triggering). Suggested queries are reserved on the originating run 
 Apify runs are started, so duplicate webhook callbacks do not fan out duplicate deep-search runs.
 `markActorRunComplete` always reads `actorRunIds.length` from a fresh Firestore snapshot inside
 its transaction, so dynamically-added runs are counted correctly for scan completion. Deep-search
-runs are skipped entirely when `allowAiDeepSearches` is false for the brand. When enabled, each
-deep-search Google run uses at least 3 SERP pages so low initial result limits do not starve
-follow-up coverage.
+runs are skipped entirely when `allowAiDeepSearches` is false for the brand. When enabled, every
+deep-search Google run uses a fixed 3-page SERP budget, regardless of the brand's initial Google
+results limit, so follow-up searches retain enough depth to surface abusive result clusters.
 
 `ActorRunInfo` carries `searchDepth` (0 or 1) and `searchQuery` (the literal query string for
 depth-1 runs). The brand page progress indicator shows a "Deep search" badge and surfaces the

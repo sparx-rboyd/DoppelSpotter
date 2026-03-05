@@ -31,6 +31,7 @@ import { clearBrandActiveScanIfMatches } from '@/lib/scans';
 /** Maximum items to analyse per actor run — caps AI analysis cost and latency */
 const MAX_ITEMS_PER_RUN = 50;
 const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
+const GOOGLE_ANALYSIS_CONCURRENCY = 3;
 const MAX_GOOGLE_CONTEXT_RELATED_QUERIES = 20;
 const MAX_GOOGLE_CONTEXT_PEOPLE_ALSO_ASK = 20;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
@@ -127,19 +128,91 @@ export async function POST(request: NextRequest) {
   const webhookUrl = `${(process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')}/api/webhooks/apify`;
 
   if (resource.status === 'SUCCEEDED') {
-    await handleSucceededRun({
-      runId: resource.id,
-      datasetId: resource.defaultDatasetId,
-      scanDoc,
-      scan,
-      webhookUrl,
-    });
+    const claim = await claimSucceededRunForProcessing(scanDoc, resource.id);
+    if (claim.kind === 'cancelled') {
+      console.log(`[webhook] Ignoring callback for run ${resource.id} — scan ${scanDoc.id} is cancelled`);
+      return NextResponse.json({ received: true });
+    }
+    if (claim.kind === 'already_terminal') {
+      console.log(`[webhook] Ignoring duplicate callback for run ${resource.id} — already ${claim.status}`);
+      return NextResponse.json({ received: true });
+    }
+    if (claim.kind === 'already_processing') {
+      console.log(
+        `[webhook] Ignoring duplicate callback for run ${resource.id} — already being processed (${claim.status})`,
+      );
+      return NextResponse.json({ received: true });
+    }
+    if (claim.kind === 'missing') {
+      console.warn(`[webhook] No actor run metadata found for runId=${resource.id} on scan ${scanDoc.id}`);
+      return NextResponse.json({ received: true });
+    }
+
+    try {
+      await handleSucceededRun({
+        runId: resource.id,
+        datasetId: resource.defaultDatasetId,
+        scanDoc,
+        scan: claim.scan,
+        webhookUrl,
+      });
+    } catch (err) {
+      await recoverFromSucceededRunError({
+        scanDoc,
+        runId: resource.id,
+        err,
+      });
+    }
   } else if (resource.status === 'FAILED' || resource.status === 'ABORTED') {
     console.warn(`[webhook] Actor run ${resource.id} ended with status: ${resource.status}`);
     await markActorRunComplete(scanDoc, resource.id, 'failed');
   }
 
   return NextResponse.json({ received: true });
+}
+
+type SucceededRunClaimResult =
+  | { kind: 'claimed'; scan: Scan }
+  | { kind: 'cancelled' }
+  | { kind: 'already_terminal'; status: 'succeeded' | 'failed' }
+  | { kind: 'already_processing'; status: 'fetching_dataset' | 'analysing' }
+  | { kind: 'missing' };
+
+/**
+ * Claim a successful webhook callback before any dataset fetch / AI analysis begins.
+ *
+ * This transaction closes the race where duplicate Apify callbacks arrive close
+ * together: only the winner is allowed to transition the run into
+ * `fetching_dataset`, and any concurrent loser exits before doing expensive work.
+ */
+async function claimSucceededRunForProcessing(
+  scanDoc: QueryDocumentSnapshot,
+  runId: string,
+): Promise<SucceededRunClaimResult> {
+  return db.runTransaction(async (tx) => {
+    const freshSnap = await tx.get(scanDoc.ref);
+    if (!freshSnap.exists) return { kind: 'missing' };
+
+    const fresh = freshSnap.data() as Scan;
+    if (fresh.status === 'cancelled') return { kind: 'cancelled' };
+
+    const run = fresh.actorRuns?.[runId];
+    if (!run) return { kind: 'missing' };
+
+    if (run.status === 'succeeded' || run.status === 'failed') {
+      return { kind: 'already_terminal', status: run.status };
+    }
+
+    if (run.status === 'fetching_dataset' || run.status === 'analysing') {
+      return { kind: 'already_processing', status: run.status };
+    }
+
+    tx.update(scanDoc.ref, {
+      [`actorRuns.${runId}.status`]: 'fetching_dataset',
+    });
+
+    return { kind: 'claimed', scan: fresh };
+  });
 }
 
 /**
@@ -187,9 +260,6 @@ async function handleSucceededRun({
   const ignoredUrls = ignoredSnap.docs
     .map((d) => (d.data() as { url?: string }).url)
     .filter((u): u is string => typeof u === 'string' && u.length > 0);
-
-  // Phase 1 → Phase 2: signal that we are now retrieving the Apify dataset
-  await scanDoc.ref.update({ [`actorRuns.${runId}.status`]: 'fetching_dataset' });
 
   // Fetch raw scraping results from Apify's dataset
   let items: Record<string, unknown>[];
@@ -374,6 +444,27 @@ async function handleSucceededRun({
   await markActorRunComplete(scanDoc, runId, 'succeeded', newFindingCount, counts);
 }
 
+async function recoverFromSucceededRunError({
+  scanDoc,
+  runId,
+  err,
+}: {
+  scanDoc: QueryDocumentSnapshot;
+  runId: string;
+  err: unknown;
+}) {
+  console.error(`[webhook] Unexpected error while processing succeeded run ${runId}:`, err);
+
+  await markActorRunComplete(
+    scanDoc,
+    runId,
+    'failed',
+    0,
+    { high: 0, medium: 0, low: 0, nonHit: 0 },
+    { reconcilePersistedCounts: true },
+  );
+}
+
 /**
  * Batch mode: send all SERP pages to AI analysis in one call, then write one Finding
  * per individual search result assessed. Returns the count of non-false-positive
@@ -422,6 +513,8 @@ async function analyseAndWriteBatch({
     searchDepth,
     searchQuery: searchQuery ?? null,
     candidateCount: normalizedRun.candidates.length,
+    chunkCount: Math.ceil(normalizedRun.candidates.length / GOOGLE_ANALYSIS_CHUNK_SIZE),
+    chunkConcurrency: GOOGLE_ANALYSIS_CONCURRENCY,
     sourceQueries: normalizedRun.runContext.sourceQueries,
     relatedQueryCount: normalizedRun.runContext.relatedQueries.length,
     relatedQueriesSample: normalizedRun.runContext.relatedQueries.slice(0, 5),
@@ -438,64 +531,82 @@ async function analyseAndWriteBatch({
   const outcomes = new Map<string, { candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>();
   const suggestionScores = new Map<string, SuggestedSearchScore>();
   const chunks = chunkArray(normalizedRun.candidates, GOOGLE_ANALYSIS_CHUNK_SIZE);
+  const chunkResults = await mapWithConcurrency(
+    chunks,
+    GOOGLE_ANALYSIS_CONCURRENCY,
+    async (chunk, chunkIndex): Promise<GoogleChunkAnalysisResult> => {
+      logGoogleDebug('chunk-start', {
+        scanId: scanDoc.id,
+        runId,
+        chunkIndex: chunkIndex + 1,
+        chunkCount: chunks.length,
+        candidateCount: chunk.length,
+        candidateUrls: chunk.map((candidate) => candidate.normalizedUrl).slice(0, 10),
+      });
 
-  for (const [chunkIndex, chunk] of chunks.entries()) {
-    logGoogleDebug('chunk-start', {
-      scanId: scanDoc.id,
-      runId,
-      chunkIndex: chunkIndex + 1,
-      chunkCount: chunks.length,
-      candidateCount: chunk.length,
-      candidateUrls: chunk.map((candidate) => candidate.normalizedUrl).slice(0, 10),
-    });
-    try {
-      const chunkResult = await analyseGoogleChunk({
-        brand,
-        source,
-        candidates: chunk,
-        runContext: normalizedRun.runContext,
-        ignoredUrls,
-        canSuggestSearches,
-      });
-      for (const [normalizedUrl, value] of chunkResult.outcomes.entries()) {
-        outcomes.set(normalizedUrl, value);
-      }
-      if (canSuggestSearches && chunkResult.suggestedSearches && chunkResult.suggestedSearches.length > 0) {
-        scoreSuggestedSearches({
-          scores: suggestionScores,
-          suggestedSearches: chunkResult.suggestedSearches,
-          chunkOutcomes: chunkResult.outcomes.values(),
-          sourceQueries: normalizedRun.runContext.sourceQueries,
+      try {
+        const chunkResult = await analyseGoogleChunk({
+          brand,
+          source,
+          candidates: chunk,
+          runContext: normalizedRun.runContext,
+          ignoredUrls,
+          canSuggestSearches,
+        });
+
+        logGoogleDebug('chunk-complete', {
+          scanId: scanDoc.id,
+          runId,
+          chunkIndex: chunkIndex + 1,
+          chunkCount: chunks.length,
+          counts: summarizeGoogleOutcomeCounts(chunkResult.outcomes.values()),
+          suggestedSearches: chunkResult.suggestedSearches ?? [],
+        });
+
+        return chunkResult;
+      } catch (err) {
+        console.error(`[webhook] Google chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
+
+        const fallbackOutcomes = new Map<string, { candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>();
+        for (const candidate of chunk) {
+          fallbackOutcomes.set(candidate.normalizedUrl, {
+            candidate,
+            outcome: buildGoogleFallbackOutcome('AI analysis failed for this chunk. Raw data is preserved for manual review.'),
+          });
+        }
+
+        logGoogleDebug('chunk-failed', {
+          scanId: scanDoc.id,
+          runId,
+          chunkIndex: chunkIndex + 1,
+          chunkCount: chunks.length,
+          fallbackCandidateUrls: chunk.map((candidate) => candidate.normalizedUrl).slice(0, 10),
+        });
+
+        return {
+          outcomes: fallbackOutcomes,
+          suggestedSearches: undefined,
+        };
+      } finally {
+        await scanDoc.ref.update({
+          [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
         });
       }
-      logGoogleDebug('chunk-complete', {
-        scanId: scanDoc.id,
-        runId,
-        chunkIndex: chunkIndex + 1,
-        chunkCount: chunks.length,
-        counts: summarizeGoogleOutcomeCounts(chunkResult.outcomes.values()),
-        suggestedSearches: chunkResult.suggestedSearches ?? [],
-      });
-    } catch (err) {
-      console.error(`[webhook] Google chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
-      for (const candidate of chunk) {
-        outcomes.set(candidate.normalizedUrl, {
-          candidate,
-          outcome: buildGoogleFallbackOutcome('AI analysis failed for this chunk. Raw data is preserved for manual review.'),
-        });
-      }
-      logGoogleDebug('chunk-failed', {
-        scanId: scanDoc.id,
-        runId,
-        chunkIndex: chunkIndex + 1,
-        chunkCount: chunks.length,
-        fallbackCandidateUrls: chunk.map((candidate) => candidate.normalizedUrl).slice(0, 10),
+    },
+  );
+
+  for (const chunkResult of chunkResults) {
+    for (const [normalizedUrl, value] of chunkResult.outcomes.entries()) {
+      outcomes.set(normalizedUrl, value);
+    }
+    if (canSuggestSearches && chunkResult.suggestedSearches && chunkResult.suggestedSearches.length > 0) {
+      scoreSuggestedSearches({
+        scores: suggestionScores,
+        suggestedSearches: chunkResult.suggestedSearches,
+        chunkOutcomes: chunkResult.outcomes.values(),
+        sourceQueries: normalizedRun.runContext.sourceQueries,
       });
     }
-
-    await scanDoc.ref.update({
-      [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
-    });
   }
 
   const chunkRankedSuggestions = canSuggestSearches ? rankSuggestedSearches(suggestionScores) : undefined;
@@ -611,6 +722,19 @@ type SuggestedSearchScore = {
 type FindingDelta = {
   findingCount: number;
   counts: { high: number; medium: number; low: number; nonHit: number };
+};
+
+type ScanFindingTotals = {
+  findingCount: number;
+  highCount: number;
+  mediumCount: number;
+  lowCount: number;
+  nonHitCount: number;
+  ignoredCount: number;
+};
+
+type MarkActorRunCompleteOptions = {
+  reconcilePersistedCounts?: boolean;
 };
 
 function normalizeGoogleSerpRun({
@@ -866,7 +990,9 @@ async function upsertGoogleFinding({
           isIgnored: true,
           ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
         }),
-        rawLlmResponse: preferredOutcome.rawLlmResponse,
+        ...(typeof preferredOutcome.rawLlmResponse === 'string' && {
+          rawLlmResponse: preferredOutcome.rawLlmResponse,
+        }),
         createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
       };
       tx.set(findingRef, finding);
@@ -881,8 +1007,12 @@ async function upsertGoogleFinding({
       url: candidate.normalizedUrl,
       rawData: mergedRawData,
       isFalsePositive: preferredOutcome.isFalsePositive,
-      rawLlmResponse: preferredOutcome.rawLlmResponse ?? existing.rawLlmResponse,
     };
+
+    const rawLlmResponse = preferredOutcome.rawLlmResponse ?? existing.rawLlmResponse;
+    if (typeof rawLlmResponse === 'string') {
+      updates.rawLlmResponse = rawLlmResponse;
+    }
 
     if (preferredOutcome.isFalsePositive) {
       updates.isIgnored = true;
@@ -1269,6 +1399,56 @@ function diffFindingStates(previous: FindingDelta, next: FindingDelta): FindingD
   };
 }
 
+function buildScanFindingTotals(findings: Iterable<Pick<Finding, 'severity' | 'isFalsePositive' | 'isIgnored'>>): ScanFindingTotals {
+  const totals: ScanFindingTotals = {
+    findingCount: 0,
+    highCount: 0,
+    mediumCount: 0,
+    lowCount: 0,
+    nonHitCount: 0,
+    ignoredCount: 0,
+  };
+
+  for (const finding of findings) {
+    if (finding.isFalsePositive) {
+      totals.nonHitCount++;
+      continue;
+    }
+
+    totals.findingCount++;
+
+    if (finding.isIgnored) {
+      totals.ignoredCount++;
+      continue;
+    }
+
+    if (finding.severity === 'high') totals.highCount++;
+    else if (finding.severity === 'medium') totals.mediumCount++;
+    else totals.lowCount++;
+  }
+
+  return totals;
+}
+
+function getNextScanFindingTotals(
+  scan: Scan,
+  newFindingCount: number,
+  newCounts: { high: number; medium: number; low: number; nonHit: number },
+): ScanFindingTotals {
+  return {
+    findingCount: (scan.findingCount ?? 0) + newFindingCount,
+    highCount: (scan.highCount ?? 0) + newCounts.high,
+    mediumCount: (scan.mediumCount ?? 0) + newCounts.medium,
+    lowCount: (scan.lowCount ?? 0) + newCounts.low,
+    nonHitCount: (scan.nonHitCount ?? 0) + newCounts.nonHit,
+    ignoredCount: scan.ignoredCount ?? 0,
+  };
+}
+
+function hasPersistedScanResults(totals: ScanFindingTotals): boolean {
+  return totals.findingCount > 0 || totals.nonHitCount > 0;
+}
+
 function hasGoogleSuggestionSignals(runContext: GoogleRunContext): boolean {
   return runContext.relatedQueries.length > 0 || runContext.peopleAlsoAsk.length > 0;
 }
@@ -1490,6 +1670,29 @@ function chunkArray<T>(values: T[], size: number): T[][] {
   return chunks;
 }
 
+async function mapWithConcurrency<T, R>(
+  values: T[],
+  concurrency: number,
+  worker: (value: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (values.length === 0) return [];
+
+  const safeConcurrency = Math.max(1, Math.min(concurrency, values.length));
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+
+  async function runWorker() {
+    while (true) {
+      const currentIndex = nextIndex++;
+      if (currentIndex >= values.length) return;
+      results[currentIndex] = await worker(values[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: safeConcurrency }, () => runWorker()));
+  return results;
+}
+
 /**
  * Use a Firestore transaction to atomically mark an actor run as complete,
  * increment completedRunCount, update findingCount, and — if all runs are
@@ -1504,6 +1707,7 @@ async function markActorRunComplete(
   runStatus: 'succeeded' | 'failed',
   newFindingCount = 0,
   newCounts: { high: number; medium: number; low: number; nonHit: number } = { high: 0, medium: 0, low: 0, nonHit: 0 },
+  options: MarkActorRunCompleteOptions = {},
 ) {
   await db.runTransaction(async (tx) => {
     const freshSnap = await tx.get(scanDoc.ref);
@@ -1527,15 +1731,41 @@ async function markActorRunComplete(
     const totalRunCount = fresh.actorRunIds?.length ?? 1;
     const updatedCompletedCount = (fresh.completedRunCount ?? 0) + 1;
     const allDone = updatedCompletedCount >= totalRunCount;
+    const reconciledTotals = options.reconcilePersistedCounts
+      ? buildScanFindingTotals(
+        (
+          await tx.get(
+            db
+              .collection('findings')
+              .where('scanId', '==', scanDoc.id)
+              .where('brandId', '==', fresh.brandId)
+              .where('userId', '==', fresh.userId)
+              .select('severity', 'isFalsePositive', 'isIgnored'),
+          )
+        ).docs.map((doc) => doc.data() as Pick<Finding, 'severity' | 'isFalsePositive' | 'isIgnored'>),
+      )
+      : null;
+    const nextTotals = reconciledTotals ?? getNextScanFindingTotals(fresh, newFindingCount, newCounts);
 
     const updates: Record<string, unknown> = {
       [`actorRuns.${runId}.status`]: runStatus,
       completedRunCount: FieldValue.increment(1),
-      findingCount: FieldValue.increment(newFindingCount),
-      highCount: FieldValue.increment(newCounts.high),
-      mediumCount: FieldValue.increment(newCounts.medium),
-      lowCount: FieldValue.increment(newCounts.low),
-      nonHitCount: FieldValue.increment(newCounts.nonHit),
+      ...(reconciledTotals
+        ? {
+          findingCount: reconciledTotals.findingCount,
+          highCount: reconciledTotals.highCount,
+          mediumCount: reconciledTotals.mediumCount,
+          lowCount: reconciledTotals.lowCount,
+          nonHitCount: reconciledTotals.nonHitCount,
+          ignoredCount: reconciledTotals.ignoredCount,
+        }
+        : {
+          findingCount: FieldValue.increment(newFindingCount),
+          highCount: FieldValue.increment(newCounts.high),
+          mediumCount: FieldValue.increment(newCounts.medium),
+          lowCount: FieldValue.increment(newCounts.low),
+          nonHitCount: FieldValue.increment(newCounts.nonHit),
+        }),
     };
 
     if (allDone) {
@@ -1544,12 +1774,19 @@ async function markActorRunComplete(
       const anySucceeded =
         runStatus === 'succeeded' ||
         Object.values(actorRuns).some((r) => r.status === 'succeeded');
+      const hasResults = hasPersistedScanResults(nextTotals);
 
-      updates.status = anySucceeded ? 'completed' : 'failed';
+      updates.status = anySucceeded || hasResults ? 'completed' : 'failed';
       updates.completedAt = FieldValue.serverTimestamp();
 
-      if (!anySucceeded) {
+      if (updates.status === 'failed') {
         updates.errorMessage = 'All actor runs failed or were aborted';
+      } else if (fresh.errorMessage) {
+        updates.errorMessage = FieldValue.delete();
+      }
+
+      if (!anySucceeded && hasResults) {
+        console.warn(`[webhook] Scan ${scanDoc.id} completed after a processing error because persisted results were already available`);
       }
 
       console.log(`[webhook] Scan ${scanDoc.id} is complete — status: ${updates.status}`);

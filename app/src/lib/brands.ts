@@ -4,6 +4,8 @@ export const MAX_GOOGLE_RESULTS_LIMIT = 100;
 export const DEFAULT_GOOGLE_RESULTS_LIMIT = 10;
 export const GOOGLE_SERP_RESULTS_PER_PAGE = 10;
 export const DEFAULT_ALLOW_AI_DEEP_SEARCHES = true;
+export const MIN_DEEP_SEARCH_PAGE_COUNT = 1;
+export const MAX_DEEP_SEARCH_PAGE_COUNT = 3;
 
 export function isValidGoogleResultsLimit(value: unknown): value is number {
   return (
@@ -21,6 +23,11 @@ export function normalizeGoogleResultsLimit(value: unknown): number {
 
 export function getGoogleResultsPageCount(value: unknown): number {
   return Math.ceil(normalizeGoogleResultsLimit(value) / GOOGLE_SERP_RESULTS_PER_PAGE);
+}
+
+export function getDeepSearchGooglePageCount(value: unknown): number {
+  void value;
+  return MAX_DEEP_SEARCH_PAGE_COUNT;
 }
 
 export function isValidAllowAiDeepSearches(value: unknown): value is boolean {
