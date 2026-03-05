@@ -64,11 +64,11 @@ export function parseAnalysisOutput(raw: string): AnalysisOutput | null {
     // Validate optional suggestedSearches — must be an array of non-empty strings if present
     let suggestedSearches: string[] | undefined;
     if (Array.isArray(parsed.suggestedSearches)) {
-      suggestedSearches = parsed.suggestedSearches
+      const filtered = parsed.suggestedSearches
         .filter((s: unknown): s is string => typeof s === 'string' && s.trim().length > 0)
         .map((s: string) => s.trim())
         .slice(0, MAX_SUGGESTED_SEARCHES);
-      if (suggestedSearches.length === 0) suggestedSearches = undefined;
+      suggestedSearches = filtered.length > 0 ? filtered : undefined;
     }
 
     return {
