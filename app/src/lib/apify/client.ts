@@ -91,6 +91,33 @@ export async function startActorRun(
 }
 
 /**
+ * Start a Google Search actor run for a specific deep-search query.
+ * Used by the webhook handler when the LLM requests follow-up searches.
+ * The actor input mirrors the core scan input but uses a custom query string.
+ */
+export async function startDeepSearchRun(
+  query: string,
+  webhookUrl: string,
+): Promise<{ runId: string }> {
+  const client = getClient();
+
+  const run = await client.actor('apify/google-search-scraper').start(
+    { queries: query, maxPagesPerQuery: 3, resultsPerPage: 10 },
+    {
+      webhooks: [
+        {
+          eventTypes: ['ACTOR.RUN.SUCCEEDED', 'ACTOR.RUN.FAILED', 'ACTOR.RUN.ABORTED'],
+          requestUrl: webhookUrl,
+          headersTemplate: `{"X-Apify-Webhook-Secret": "${process.env.APIFY_WEBHOOK_SECRET}"}`,
+        },
+      ],
+    },
+  );
+
+  return { runId: run.id };
+}
+
+/**
  * Fetch all items from an Apify dataset.
  * Used by the webhook handler after an actor run succeeds.
  */

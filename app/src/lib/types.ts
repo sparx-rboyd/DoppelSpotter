@@ -17,6 +17,8 @@ export interface BrandProfile {
   name: string;
   keywords: string[];
   officialDomains: string[];
+  /** Terms the LLM should flag if found associated with the brand in search results. */
+  watchWords?: string[];
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -63,13 +65,30 @@ export interface Finding {
 
 export type ScanStatus = 'pending' | 'running' | 'completed' | 'failed';
 
-export type ActorRunStatus = 'pending' | 'running' | 'succeeded' | 'failed';
+export type ActorRunStatus =
+  | 'pending'
+  | 'running'
+  | 'fetching_dataset'
+  | 'analysing'
+  | 'succeeded'
+  | 'failed';
 
 export interface ActorRunInfo {
   actorId: string;
   source: FindingSource;
   /** Apify run status for this individual actor */
   status: ActorRunStatus;
+  /** Total items in the dataset — set once the dataset has been fetched */
+  itemCount?: number;
+  /** Number of items that have completed LLM analysis so far */
+  analysedCount?: number;
+  /**
+   * 0 = initial scan run; 1 = LLM-requested deep follow-up.
+   * Deep searches are never spawned from depth > 0 (loop guard).
+   */
+  searchDepth?: number;
+  /** The literal query string used for this run — set on deep follow-up runs */
+  searchQuery?: string;
 }
 
 export interface Scan {

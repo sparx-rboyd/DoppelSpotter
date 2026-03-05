@@ -2,7 +2,7 @@ import type { FindingSource } from '@/lib/types';
 
 /**
  * System prompt for brand infringement classification.
- * The LLM is asked to return structured JSON matching AnalysisOutput.
+ * Used for per-item analysis mode — the LLM returns a single AnalysisOutput object.
  */
 export const SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
 
@@ -24,24 +24,112 @@ Severity guidelines:
 Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).`;
 
 /**
+ * System prompt for batch (Google Search) analysis mode.
+ * The LLM assesses every individual organic and paid search result separately
+ * and returns a BatchAnalysisOutput — an array of per-result items.
+ */
+export const BATCH_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive one or more Google Search results pages (SERP data) for a brand. Your task is to extract every individual organic result and paid result from all pages and assess each one separately for brand infringement.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "items": [
+    {
+      "url": "the exact URL of this result",
+      "title": "the page title of this result",
+      "severity": "high" | "medium" | "low",
+      "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
+      "isFalsePositive": boolean
+    }
+  ],
+  "suggestedSearches": ["query 1", "query 2"]
+}
+
+Rules for "items":
+- Include every organic result (from organicResults[]) and every paid result (from paidResults[]) across all pages.
+- Do NOT include the SERP page itself — assess individual result URLs only.
+- Each item must have all five fields: url, title, severity, analysis, isFalsePositive.
+
+Severity guidelines:
+- "high": Clear impersonation, phishing, counterfeit, or direct brand misuse posing immediate risk to customers or the brand
+- "medium": Suspicious activity that warrants investigation but may have a legitimate explanation (e.g. fan accounts, resellers using the brand name)
+- "low": Likely benign mention but worth logging (e.g. news articles, legitimate reviews)
+
+Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).
+
+The "suggestedSearches" field is OPTIONAL. Only include it when you spot suspicious related search terms (from the "relatedQueries" sections) that warrant a dedicated follow-up search and were NOT already covered by the results above. Criteria:
+- The query implies impersonation, fraud, or brand misuse (e.g. "fake [brand]", "[brand] scam")
+- The query involves a lookalike name NOT covered in the results above
+- You genuinely need more data before you can assess whether a threat exists
+
+Do NOT suggest follow-up searches for clearly legitimate queries, queries already investigated, or more than 3 in total. Omit "suggestedSearches" entirely (do not include an empty array) if none are warranted.`;
+
+/**
  * Build the user prompt for a specific finding.
  */
 export function buildAnalysisPrompt(params: {
   brandName: string;
   keywords: string[];
   officialDomains: string[];
+  watchWords?: string[];
   source: FindingSource;
   rawData: Record<string, unknown>;
 }): string {
-  const { brandName, keywords, officialDomains, source, rawData } = params;
+  const { brandName, keywords, officialDomains, watchWords, source, rawData } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — note any presence or implied association in your analysis): ${watchWords.join(', ')}`
+    : null;
 
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}Monitoring surface: ${source}
 
 Raw scraping result to analyse:
 ${JSON.stringify(rawData, null, 2)}
 
-Analyse this result and return your assessment as JSON.`;
+Analyse this result and return your assessment as JSON. Do not include "suggestedSearches" — this is a single-item analysis.`;
+}
+
+/**
+ * Build the user prompt for a batch of items from the same actor run.
+ * Used when an actor's analysisMode is 'batch' — all SERP pages are combined into
+ * a single LLM call. The LLM returns one assessment per individual search result.
+ *
+ * When canSuggestSearches is false (depth-1 follow-up runs), the prompt explicitly
+ * tells the LLM not to include suggestedSearches so no further recursion occurs.
+ */
+export function buildBatchAnalysisPrompt(params: {
+  brandName: string;
+  keywords: string[];
+  officialDomains: string[];
+  watchWords?: string[];
+  source: FindingSource;
+  rawItems: Record<string, unknown>[];
+  /** Pass true for depth-0 runs so the LLM knows it may suggest follow-up searches. */
+  canSuggestSearches?: boolean;
+}): string {
+  const { brandName, keywords, officialDomains, watchWords, source, rawItems, canSuggestSearches } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that result): ${watchWords.join(', ')}`
+    : null;
+
+  const deepSearchInstruction = canSuggestSearches
+    ? `Each result page may include a "relatedQueries" array. Review them for suspicious terms and include up to 3 in "suggestedSearches" if warranted (see system prompt criteria).`
+    : `Do NOT include "suggestedSearches" in your response — this is a follow-up search and no further recursion is allowed.`;
+
+  return `Brand being protected: "${brandName}"
+Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}Monitoring surface: ${source}
+
+${deepSearchInstruction}
+
+The following ${rawItems.length} SERP page(s) are from the same Google Search actor run. Assess every individual organic and paid result across all pages. Return one item in the "items" array per result URL.
+
+Raw SERP data (${rawItems.length} page${rawItems.length !== 1 ? 's' : ''}):
+${JSON.stringify(rawItems, null, 2)}`;
 }

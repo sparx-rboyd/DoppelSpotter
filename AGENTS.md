@@ -78,11 +78,17 @@ POST /api/scan
        └─ stores runId → scan document in Firestore
 
 Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
-  └─ validates X-Apify-Webhook-Secret header
-  └─ fetches up to 50 items from Apify dataset
-  └─ for each item: calls LLM → writes Finding to Firestore (all items, including false positives)
-       └─ isFalsePositive: true findings are stored but excluded from default API responses
-  └─ marks actor run complete; if all runs done → marks scan complete
+ └─ validates X-Apify-Webhook-Secret header
+ └─ fetches up to 50 items from Apify dataset
+ └─ per-item mode: one LLM call per dataset item → one Finding per item
+ └─ batch mode (Google Search): one LLM call for all SERP pages combined
+      └─ LLM returns per-result assessments (one per organic/paid result across all pages)
+      └─ one Finding written per individual search result
+      └─ isFalsePositive: true findings are stored but excluded from default API responses
+ └─ (batch mode, depth 0 only) if LLM returns suggestedSearches → triggers deep-search runs
+      └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
+      └─ deep-search runs complete via the same webhook, depth 1 — no further recursion
+ └─ marks actor run complete; if all runs done → marks scan complete
 ```
 
 ---
@@ -90,14 +96,46 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 ## LLM Analysis
 
 - **File:** `app/src/lib/analysis/`
-- **When:** Once per dataset item, sequentially, inside the webhook handler
+- **When:** After each Apify actor run completes, inside the webhook handler
 - **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
-- **Prompts:** `SYSTEM_PROMPT` and `buildAnalysisPrompt()` in `prompts.ts`
-- **Output:** structured JSON `{ severity, title, llmAnalysis, isFalsePositive }`
+- **Prompts:** `SYSTEM_PROMPT` + `buildAnalysisPrompt()` for per-item mode; `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPrompt()` for batch mode; all in `prompts.ts`
+- **Watch words:** optional per-brand terms passed to the prompt builder; the LLM is instructed to note any presence or implied association in its analysis and use its discretion on severity impact
+- **Per-item output:** structured JSON `{ severity, title, llmAnalysis, isFalsePositive }`
+- **Batch output:** structured JSON `{ items: [{ url, title, severity, analysis, isFalsePositive }], suggestedSearches? }`
 - **Raw LLM response** string is stored on every finding as `rawLlmResponse` for debugging
 - **False positives** are written to Firestore with `isFalsePositive: true`; filtered from default API responses; visible in the brand page "Non-hits" section
 
+### Analysis modes (`ActorConfig.analysisMode`)
+
+Each actor in the registry declares how its dataset items should be sent to the LLM:
+
+| Mode | Behaviour |
+|---|---|
+| `'per-item'` (default) | One LLM call per dataset item → one Finding per item |
+| `'batch'` | All items combined into one LLM call → one consolidated Finding per run |
+
+`'batch'` is used for actors whose items are pages/slices of the same query (e.g. Google Search
+SERP pages), so the LLM sees the full result set rather than analysing each slice in isolation.
+The combined `rawData` is stored as `{ pages: [...], pageCount: N }`.
+
 See `REVIEW.md` for full prompt text and LLM pipeline details.
+
+### Deep search (`suggestedSearches`)
+
+When the Google Search actor runs at depth 0 (initial scan), the LLM may include a
+`suggestedSearches` array in its response — up to 3 queries it wants to investigate further
+based on suspicious `relatedQueries` in the SERP data.
+
+The webhook handler calls `startDeepSearchRun()` for each suggested query, registers the new
+Apify run IDs on the scan document, and processes results via the same webhook pipeline at
+depth 1. Deep-search runs never produce further follow-ups (hard loop guard: `searchDepth === 0`
+check before triggering). `markActorRunComplete` always reads `actorRunIds.length` from a
+fresh Firestore snapshot inside its transaction, so dynamically-added runs are counted correctly
+for scan completion.
+
+`ActorRunInfo` carries `searchDepth` (0 or 1) and `searchQuery` (the literal query string for
+depth-1 runs). The brand page progress indicator shows a "Deep search" badge and surfaces the
+query being investigated when a depth-1 run is active.
 
 ---
 
@@ -123,7 +161,7 @@ See `REVIEW.md` for full prompt text and LLM pipeline details.
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], createdAt, updatedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], watchWords[]?, createdAt, updatedAt |
 | `scans` | id, brandId, userId, status, actorIds[], actorRuns{}, completedRunCount, findingCount, startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, rawLlmResponse?, createdAt |
 

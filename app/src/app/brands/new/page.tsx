@@ -19,6 +19,8 @@ export default function NewBrandPage() {
   const [keywords, setKeywords] = useState<string[]>([]);
   const [domainInput, setDomainInput] = useState('');
   const [domains, setDomains] = useState<string[]>([]);
+  const [watchWordInput, setWatchWordInput] = useState('');
+  const [watchWords, setWatchWords] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -46,6 +48,18 @@ export default function NewBrandPage() {
     setDomains(domains.filter((x) => x !== d));
   }
 
+  function addWatchWord() {
+    const trimmed = watchWordInput.trim().toLowerCase();
+    if (trimmed && !watchWords.includes(trimmed)) {
+      setWatchWords([...watchWords, trimmed]);
+    }
+    setWatchWordInput('');
+  }
+
+  function removeWatchWord(w: string) {
+    setWatchWords(watchWords.filter((x) => x !== w));
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
@@ -58,7 +72,7 @@ export default function NewBrandPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ name: name.trim(), keywords, officialDomains: domains }),
+        body: JSON.stringify({ name: name.trim(), keywords, officialDomains: domains, watchWords }),
       });
 
       if (!res.ok) {
@@ -173,6 +187,41 @@ export default function NewBrandPage() {
                     </div>
                   )}
                   <p className="text-xs text-gray-500">Your legitimate domains — used to filter out your own properties from results.</p>
+                </div>
+
+                {/* Watch words */}
+                <div className="flex flex-col gap-2">
+                  <label className="text-sm font-medium text-gray-700">
+                    Watch words <span className="text-gray-400 font-normal">(optional)</span>
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={watchWordInput}
+                      onChange={(e) => setWatchWordInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') { e.preventDefault(); addWatchWord(); }
+                      }}
+                      placeholder="Add a watch word and press Enter"
+                      className="flex-1 px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
+                    />
+                    <Button type="button" variant="secondary" size="sm" onClick={addWatchWord}>
+                      Add
+                    </Button>
+                  </div>
+                  {watchWords.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {watchWords.map((w) => (
+                        <Badge key={w} variant="warning">
+                          {w}
+                          <button type="button" onClick={() => removeWatchWord(w)} className="ml-1 hover:opacity-70">
+                            <X className="w-3 h-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                  <p className="text-xs text-gray-500">Terms you don&apos;t want associated with your brand — the LLM will flag results where these appear.</p>
                 </div>
               </CardContent>
             </Card>

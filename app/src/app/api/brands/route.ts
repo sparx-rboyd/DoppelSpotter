@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
     return errorResponse('Invalid JSON body');
   }
 
-  const { name, keywords = [], officialDomains = [] } = body;
+  const { name, keywords = [], officialDomains = [], watchWords = [] } = body;
 
   if (!name || typeof name !== 'string' || name.trim().length === 0) {
     return errorResponse('Brand name is required');
@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
     name: name.trim(),
     keywords: keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean),
     officialDomains: officialDomains.map((d) => String(d).trim().toLowerCase()).filter(Boolean),
+    watchWords: (watchWords as string[]).map((w) => String(w).trim().toLowerCase()).filter(Boolean),
     createdAt: now,
     updatedAt: now,
   };

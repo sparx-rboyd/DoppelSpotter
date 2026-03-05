@@ -235,16 +235,19 @@ to push **one item per organic result** instead of one item per page.
       `"BrandName scam"`, or `site:` restricted searches.
 - [ ] **No country/language set** — defaults to US (`google.com`). For European brands
       this may miss results on `.co.uk`, `.de` etc. Consider parameterising `countryCode`.
-- [ ] **One finding per page** — the current architecture means the LLM classifies whole
-      SERP pages. Restructuring the scraper output to emit one item per organic result
-      would give the LLM a cleaner, narrower scope and likely improve quality.
-- [ ] **`relatedQueries` are valuable signals** — titles like "brand scam" or "brand fake"
-      in `relatedQueries` can indicate reputation attacks even when organic results look
-      clean. These are currently included in the raw blob sent to the LLM, but the LLM
-      prompt doesn't specifically direct attention to them.
-- [ ] **Paid results (`paidResults`)** — competitors bidding on the brand name is a
-      legitimate brand protection concern. The current prompt doesn't specifically surface
-      this as a finding type.
+- [x] **One finding per page → now one finding per run → now one finding per result** — the
+      Google Search actor now uses `analysisMode: 'batch'`. All SERP pages are combined into
+      a single LLM call via `BATCH_SYSTEM_PROMPT` + `buildBatchAnalysisPrompt()`. The LLM
+      returns an `items` array with one assessment per individual organic/paid result across
+      all pages. One Firestore Finding is written per assessed result. The full set of raw
+      SERP pages is stored as `{ pages: [...], pageCount: N }` on every Finding's `rawData`
+      field so the complete raw dataset is always accessible for debugging.
+- [x] **`relatedQueries` are valuable signals** — `BATCH_SYSTEM_PROMPT` now explicitly
+      instructs the LLM to review `relatedQueries` across all pages and include suspicious
+      terms as `suggestedSearches` for deep-search follow-up.
+- [x] **Paid results (`paidResults`)** — `BATCH_SYSTEM_PROMPT` now explicitly asks the LLM
+      to assess both `organicResults` and `paidResults`, surfacing competitors bidding on
+      the brand name as individual findings.
 
 ---
 
@@ -264,16 +267,19 @@ POST /api/scan
 Apify calls POST /api/webhooks/apify on SUCCEEDED / FAILED / ABORTED
   └─ validates X-Apify-Webhook-Secret header
   └─ fetches up to 50 items from the Apify dataset (MAX_ITEMS_PER_RUN = 50)
-  └─ for each item → analyseItem() → LLM call → write Finding to Firestore
+  └─ checks actor's analysisMode ('per-item' | 'batch')
+       ├─ 'per-item': for each item → analyseItem() → LLM call → write Finding
+       └─ 'batch':    all items combined → analyseItemBatch() → one LLM call → write one consolidated Finding
   └─ marks actor run complete; once all runs done → marks scan complete
 ```
 
 ### When is the LLM triggered?
 
-- Triggered inside `analyseItem()` in `app/src/app/api/webhooks/apify/route.ts`
-- Once per dataset item, sequentially (not in parallel — to avoid OpenRouter rate limits)
+- Triggered inside `analyseItem()` or `analyseItemBatch()` in `app/src/app/api/webhooks/apify/route.ts`
 - Only on `ACTOR.RUN.SUCCEEDED` events (failed/aborted runs skip analysis)
 - Items are capped at 50 per run (`MAX_ITEMS_PER_RUN`)
+- For `per-item` actors: one sequential LLM call per item (avoids OpenRouter rate limits)
+- For `batch` actors (e.g. Google Search): one LLM call for all items combined → one Finding
 
 ### LLM Provider & Model
 

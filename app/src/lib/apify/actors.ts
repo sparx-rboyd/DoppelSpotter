@@ -1,11 +1,26 @@
 import type { FindingSource } from '@/lib/types';
 
+/**
+ * Controls how dataset items from an actor run are sent to the LLM.
+ * - 'per-item'  (default): one LLM call per dataset item → one Finding per item
+ * - 'batch':    all items combined into one LLM call → one consolidated Finding per run
+ *
+ * Use 'batch' when actor items are pages/slices of the same query (e.g. Google Search SERP
+ * pages) so the LLM sees the full picture rather than analysing each slice in isolation.
+ */
+export type ActorAnalysisMode = 'per-item' | 'batch';
+
 export interface ActorConfig {
   actorId: string;
   source: FindingSource;
   displayName: string;
   /** Whether this actor is enabled by default in a core scan */
   enabledByDefault: boolean;
+  /**
+   * How to group dataset items before sending to the LLM.
+   * Defaults to 'per-item' when omitted.
+   */
+  analysisMode?: ActorAnalysisMode;
 }
 
 /**
@@ -28,6 +43,9 @@ export const ACTOR_REGISTRY: ActorConfig[] = [
     source: 'google',
     displayName: 'Google Search',
     enabledByDefault: true,
+    // Each dataset item is one SERP page — batch all pages into a single LLM call
+    // so the model sees the full set of results rather than analysing each page in isolation.
+    analysisMode: 'batch',
   },
   {
     actorId: 'apify/instagram-search-scraper',

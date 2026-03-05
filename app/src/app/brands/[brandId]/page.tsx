@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Play, AlertCircle, Shield, CheckCircle2, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Play, AlertCircle, Shield, CheckCircle2, Loader2, ChevronDown, ChevronRight, Pencil, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
@@ -27,6 +27,8 @@ export default function BrandDetailPage() {
   const [activeScan, setActiveScan] = useState<Scan | null>(null);
   const [scanComplete, setScanComplete] = useState(false);
   const [error, setError] = useState('');
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -144,10 +146,104 @@ export default function BrandDetailPage() {
     }
   }
 
+  async function clearHistory() {
+    setClearing(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/brands/${brandId}/findings`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? 'Failed to clear history');
+      }
+      setFindings([]);
+      setNonHits([]);
+      setScanComplete(false);
+      setActiveScan(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to clear history');
+    } finally {
+      setClearing(false);
+      setConfirmClear(false);
+    }
+  }
+
   const highCount = findings.filter((f) => f.severity === 'high').length;
-  const completedRuns = activeScan?.completedRunCount ?? 0;
-  const totalRuns = activeScan?.actorRunIds?.length ?? activeScan?.actorIds?.length ?? 0;
-  const progressPct = totalRuns > 0 ? Math.round((completedRuns / totalRuns) * 100) : 0;
+
+  // All actor runs for the active scan
+  const allRuns = activeScan?.actorRuns ? Object.values(activeScan.actorRuns) : [];
+  const inFlightRuns = allRuns.filter(
+    (r) => r.status === 'running' || r.status === 'fetching_dataset' || r.status === 'analysing',
+  );
+
+  // Prefer showing a deep-search run's status when one is active; fall back to any in-flight run
+  const activeRun =
+    inFlightRuns.find((r) => (r.searchDepth ?? 0) > 0) ??
+    inFlightRuns[0] ??
+    allRuns[0];
+
+  const runStatus = activeRun?.status;
+  const analysedCount = activeRun?.analysedCount ?? 0;
+  const itemCount = activeRun?.itemCount ?? 0;
+  const isDeepSearchActive = inFlightRuns.some((r) => (r.searchDepth ?? 0) > 0);
+  const deepSearchCount = inFlightRuns.filter((r) => (r.searchDepth ?? 0) > 0).length;
+
+  function getScanStatusLabel(): string {
+    if (!activeRun) return 'Starting scan…';
+
+    if (isDeepSearchActive) {
+      const query = activeRun.searchQuery;
+      switch (runStatus) {
+        case 'fetching_dataset':
+          return query
+            ? `Fetching deeper results for "${query}"…`
+            : `Fetching deeper results (${deepSearchCount} quer${deepSearchCount !== 1 ? 'ies' : 'y'})…`;
+        case 'analysing':
+          return query
+            ? `Analysing deeper results for "${query}"…`
+            : `Analysing deeper results with AI…`;
+        default:
+          return deepSearchCount > 1
+            ? `Investigating ${deepSearchCount} related queries…`
+            : query
+              ? `Investigating related query: "${query}"…`
+              : 'Running deeper investigation…';
+      }
+    }
+
+    switch (runStatus) {
+      case 'fetching_dataset': return 'Fetching results from Apify…';
+      case 'analysing':
+        return itemCount > 0
+          ? `Analysing with AI (${analysedCount} / ${itemCount})…`
+          : 'Analysing results with AI…';
+      default: return 'Waiting for web search to complete…';
+    }
+  }
+
+  function getScanProgressPct(): number {
+    if (!activeRun) return 0;
+
+    if (isDeepSearchActive) {
+      // Deep-search phase: 70–98 %
+      if (runStatus === 'fetching_dataset') return 72;
+      if (runStatus === 'analysing') {
+        if (itemCount === 0) return 76;
+        return Math.round(76 + 22 * (analysedCount / itemCount));
+      }
+      return 70; // 'running'
+    }
+
+    if (runStatus === 'fetching_dataset') return 35;
+    if (runStatus === 'analysing') {
+      if (itemCount === 0) return 40;
+      // Initial analysis caps at 65 % to leave headroom for the deep-search phase
+      return Math.round(40 + 25 * (analysedCount / itemCount));
+    }
+    return 10; // 'running' — actor executing on Apify
+  }
 
   return (
     <AuthGuard>
@@ -156,15 +252,25 @@ export default function BrandDetailPage() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
 
           {/* Back link */}
-          <div className="flex items-center gap-3 mb-8">
-            <Link href="/brands" className="text-gray-500 hover:text-gray-900 transition">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
+          <div className="flex items-center justify-between gap-3 mb-8">
+            <div className="flex items-center gap-3">
+              <Link href="/brands" className="text-gray-500 hover:text-gray-900 transition">
+                <ArrowLeft className="w-5 h-5" />
+              </Link>
+              {brand && (
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">{brand.name}</h1>
+                  <p className="text-sm text-gray-500 mt-0.5">Brand profile · created {formatDate(brand.createdAt)}</p>
+                </div>
+              )}
+            </div>
             {brand && (
-              <div>
-                <h1 className="text-2xl font-bold text-gray-900">{brand.name}</h1>
-                <p className="text-sm text-gray-500 mt-0.5">Brand profile · created {formatDate(brand.createdAt)}</p>
-              </div>
+              <Link href={`/brands/${brandId}/edit`}>
+                <Button variant="secondary" size="sm">
+                  <Pencil className="w-4 h-4" />
+                  Edit
+                </Button>
+              </Link>
             )}
           </div>
 
@@ -183,7 +289,7 @@ export default function BrandDetailPage() {
           {brand && !loading && (
             <>
               {/* Brand meta */}
-              <div className="grid sm:grid-cols-2 gap-4 mb-8">
+              <div className="grid sm:grid-cols-3 gap-4 mb-8">
                 <Card>
                   <CardContent className="py-4">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Keywords</p>
@@ -204,36 +310,45 @@ export default function BrandDetailPage() {
                     </div>
                   </CardContent>
                 </Card>
+                <Card>
+                  <CardContent className="py-4">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Watch Words</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {(brand.watchWords ?? []).length > 0
+                        ? (brand.watchWords ?? []).map((w) => <Badge key={w} variant="warning">{w}</Badge>)
+                        : <span className="text-sm text-gray-400">None set</span>}
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
 
               {/* Scan progress banner */}
-              {scanning && activeScan && (
+              {scanning && (
                 <div className="mb-6 bg-brand-50 border border-brand-200 rounded-xl px-5 py-4">
                   <div className="flex items-center justify-between gap-4 mb-3">
-                    <div className="flex items-center gap-2">
-                      <Loader2 className="w-4 h-4 text-brand-600 animate-spin" />
-                      <span className="text-sm font-medium text-brand-800">
-                        Scanning across {totalRuns} source{totalRuns !== 1 ? 's' : ''}…
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
+                      <span className="text-sm font-medium text-brand-800 truncate">
+                        {getScanStatusLabel()}
                       </span>
+                      {isDeepSearchActive && (
+                        <span className="flex-shrink-0 inline-flex items-center gap-1 bg-brand-100 text-brand-700 text-xs font-medium px-2 py-0.5 rounded-full">
+                          Deep search
+                        </span>
+                      )}
                     </div>
-                    <span className="text-xs text-brand-600 tabular-nums">
-                      {completedRuns} / {totalRuns} completed
-                    </span>
+                    {runStatus === 'analysing' && itemCount > 0 && (
+                      <span className="text-xs text-brand-600 tabular-nums flex-shrink-0">
+                        {analysedCount} / {itemCount}
+                      </span>
+                    )}
                   </div>
                   <div className="h-1.5 bg-brand-100 rounded-full overflow-hidden">
                     <div
                       className="h-full bg-brand-600 rounded-full transition-all duration-500"
-                      style={{ width: `${progressPct}%` }}
+                      style={{ width: `${getScanProgressPct()}%` }}
                     />
                   </div>
-                </div>
-              )}
-
-              {/* Scan in progress but no active scan data yet (just started) */}
-              {scanning && !activeScan && (
-                <div className="mb-6 bg-brand-50 border border-brand-200 rounded-xl px-5 py-4 flex items-center gap-2">
-                  <Loader2 className="w-4 h-4 text-brand-600 animate-spin" />
-                  <span className="text-sm font-medium text-brand-800">Starting scan…</span>
                 </div>
               )}
 
@@ -263,11 +378,43 @@ export default function BrandDetailPage() {
                       </Badge>
                     )}
                   </div>
-                  <Button size="sm" onClick={triggerScan} loading={scanning} disabled={scanning}>
-                    <Play className="w-4 h-4" />
-                    Run scan
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    {(findings.length > 0 || nonHits.length > 0) && !confirmClear && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setConfirmClear(true)}
+                        disabled={scanning || clearing}
+                        className="text-gray-400 hover:text-red-600"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Clear history
+                      </Button>
+                    )}
+                    <Button size="sm" onClick={triggerScan} loading={scanning} disabled={scanning || clearing || confirmClear}>
+                      <Play className="w-4 h-4" />
+                      Run scan
+                    </Button>
+                  </div>
                 </div>
+
+                {/* Inline clear confirmation */}
+                {confirmClear && (
+                  <div className="px-5 py-4 bg-red-50 border-b border-red-100 flex items-center justify-between gap-4">
+                    <p className="text-sm text-red-800">
+                      Permanently delete all {findings.length + nonHits.length} finding{findings.length + nonHits.length !== 1 ? 's' : ''} and scan history? This cannot be undone.
+                    </p>
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <Button variant="secondary" size="sm" onClick={() => setConfirmClear(false)} disabled={clearing}>
+                        Cancel
+                      </Button>
+                      <Button variant="danger" size="sm" onClick={clearHistory} loading={clearing} disabled={clearing}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Clear all
+                      </Button>
+                    </div>
+                  </div>
+                )}
 
                 <div className="p-4 sm:p-6">
                   {findings.length === 0 ? (
