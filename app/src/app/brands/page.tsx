@@ -7,10 +7,10 @@ import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import type { BrandProfile } from '@/lib/types';
+import type { BrandSummary } from '@/lib/types';
 
 export default function BrandsPage() {
-  const [brands, setBrands] = useState<BrandProfile[]>([]);
+  const [brands, setBrands] = useState<BrandSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -94,7 +94,7 @@ export default function BrandsPage() {
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-gray-900 truncate">{brand.name}</h3>
                         <p className="text-xs text-gray-500 mt-0.5">
-                          {brand.keywords.length} keyword{brand.keywords.length !== 1 ? 's' : ''} · {brand.officialDomains.length} domain{brand.officialDomains.length !== 1 ? 's' : ''}
+                          {brand.keywordCount} keyword{brand.keywordCount !== 1 ? 's' : ''} · {brand.officialDomainCount} domain{brand.officialDomainCount !== 1 ? 's' : ''}
                         </p>
                       </div>
                       <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />

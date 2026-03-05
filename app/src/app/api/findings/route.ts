@@ -1,3 +1,4 @@
+import { type QueryDocumentSnapshot } from '@google-cloud/firestore';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth } from '@/lib/api-utils';
@@ -14,8 +15,7 @@ export async function GET(request: NextRequest) {
   const limitParam = request.nextUrl.searchParams.get('limit');
   const limit = Math.min(parseInt(limitParam ?? '20', 10) || 20, 100);
   const nonHitsOnly = request.nextUrl.searchParams.get('nonHitsOnly') === 'true';
-
-  const snapshot = await db
+  const query = db
     .collection('findings')
     .where('userId', '==', uid)
     .select(
@@ -30,22 +30,42 @@ export async function GET(request: NextRequest) {
       'isIgnored',
       'createdAt',
     )
-    .orderBy('createdAt', 'desc')
-    .limit(limit * 4)
-    .get();
+    .orderBy('createdAt', 'desc');
 
-  if (snapshot.empty) {
-    return NextResponse.json({ data: [] });
+  // Fetch the minimum number of pages needed to fill the requested limit,
+  // rather than always overfetching by a fixed multiple and filtering in memory.
+  const findings: FindingSummary[] = [];
+  let cursor: QueryDocumentSnapshot | undefined;
+  const pageSize = Math.min(Math.max(limit, 20), 100);
+
+  while (findings.length < limit) {
+    let pageQuery = query.limit(pageSize);
+    if (cursor) {
+      pageQuery = pageQuery.startAfter(cursor);
+    }
+
+    const snapshot = await pageQuery.get();
+    if (snapshot.empty) break;
+
+    for (const doc of snapshot.docs) {
+      const finding = {
+        id: doc.id,
+        ...(doc.data() as Omit<FindingSummary, 'id'>),
+      } satisfies FindingSummary;
+
+      const isMatch = nonHitsOnly
+        ? finding.isFalsePositive === true
+        : finding.isFalsePositive !== true;
+
+      if (isMatch) {
+        findings.push(finding);
+        if (findings.length >= limit) break;
+      }
+    }
+
+    cursor = snapshot.docs[snapshot.docs.length - 1];
+    if (snapshot.size < pageSize) break;
   }
-
-  const all: FindingSummary[] = snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...(doc.data() as Omit<FindingSummary, 'id'>),
-  }));
-
-  const findings = nonHitsOnly
-    ? all.filter((f) => f.isFalsePositive === true).slice(0, limit)
-    : all.filter((f) => !f.isFalsePositive).slice(0, limit);
 
   return NextResponse.json({ data: findings });
 }

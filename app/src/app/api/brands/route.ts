@@ -2,23 +2,31 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
-import type { BrandProfile, BrandProfileCreateInput } from '@/lib/types';
+import type { BrandProfile, BrandProfileCreateInput, BrandSummary } from '@/lib/types';
 
 // GET /api/brands — list all brands for the authenticated user
 export async function GET(request: NextRequest) {
   const { uid, error } = requireAuth(request);
   if (error) return error;
+  void request;
 
   const snapshot = await db
     .collection('brands')
     .where('userId', '==', uid)
+    .select('name', 'keywords', 'officialDomains', 'createdAt')
     .orderBy('createdAt', 'desc')
     .get();
 
-  const brands: BrandProfile[] = snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...(doc.data() as Omit<BrandProfile, 'id'>),
-  }));
+  const brands: BrandSummary[] = snapshot.docs.map((doc) => {
+    const data = doc.data() as Pick<BrandProfile, 'name' | 'keywords' | 'officialDomains' | 'createdAt'>;
+    return {
+      id: doc.id,
+      name: data.name,
+      keywordCount: data.keywords.length,
+      officialDomainCount: data.officialDomains.length,
+      createdAt: data.createdAt,
+    };
+  });
 
   return NextResponse.json({ data: brands });
 }

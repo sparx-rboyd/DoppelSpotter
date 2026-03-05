@@ -27,6 +27,14 @@ export interface BrandProfile {
 
 export type BrandProfileCreateInput = Omit<BrandProfile, 'id' | 'userId' | 'createdAt' | 'updatedAt'>;
 
+export interface BrandSummary {
+  id: string;
+  name: string;
+  keywordCount: number;
+  officialDomainCount: number;
+  createdAt: Timestamp;
+}
+
 // ─── Findings ──────────────────────────────────────────────────────────────
 
 export type Severity = 'high' | 'medium' | 'low';

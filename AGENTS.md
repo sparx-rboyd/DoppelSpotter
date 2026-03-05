@@ -231,12 +231,14 @@ Script: `app/scripts/backfill-scan-counts.ts`.
 
 The findings API is optimised to minimise Firestore reads and HTTP round-trips on the brand page:
 
+- **Lightweight brand list payloads** — `GET /api/brands` returns a compact `BrandSummary` shape (`id`, `name`, `keywordCount`, `officialDomainCount`, `createdAt`) rather than full `BrandProfile` documents. The brands list page only renders these summary fields.
 - **Denormalized counts on scan documents** — `highCount`, `mediumCount`, `lowCount`, `nonHitCount`, `ignoredCount` are written by the webhook at scan-completion time and kept in sync by the PATCH handler on every ignore/un-ignore. The scans list endpoint (`GET /api/brands/[brandId]/scans`) reads these directly — no findings query needed.
 - **Lazy-loaded findings** — the brand page fetches findings for a scan in 3 separate stages, each only triggered on demand:
   1. **Hits** — fetched when the scan row is first expanded
   2. **Non-hits** — fetched when the user first opens the "Non-hits" sub-section
   3. **Ignored** — fetched when the user first opens the "Ignored" sub-section
 - **Lightweight list payloads** — the findings list endpoints (`GET /api/brands/[brandId]/findings` and `GET /api/findings`) return a compact `FindingSummary` shape via Firestore `.select(...)`, excluding `rawData`, `rawLlmResponse`, and other fields not needed for normal rendering. This avoids repeatedly shipping the full SERP batch payload on every finding card.
+- **Incremental dashboard fetch** — `GET /api/findings` pages through the newest findings until it has filled the requested limit, instead of always fetching a fixed `limit * 4` window and filtering in memory. This keeps dashboard reads closer to the actual number of cards rendered.
 - **Debug details fetched on demand** — `FindingCard` fetches `GET /api/brands/[brandId]/findings/[findingId]` only when a debug section is opened (`?debug=true`). Normal list views never load raw actor data or raw AI responses.
 - **No redundant brand ownership checks on per-scan findings** — the `GET /api/brands/[brandId]/findings` route relies solely on `userId == uid` in the Firestore query for authorization (no extra brand doc read per request). The PATCH (ignore/un-ignore) route similarly skips the brand doc read, verifying ownership via the finding document itself.
 
