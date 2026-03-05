@@ -115,7 +115,7 @@ async function handleSucceededRun({
   scan: Scan;
   webhookUrl: string;
 }) {
-  // Fetch the brand profile for context in the LLM prompt
+  // Fetch the brand profile for context in the AI analysis prompt
   const brandDoc = await db.collection('brands').doc(scan.brandId).get();
   if (!brandDoc.exists) {
     console.error(`[webhook] Brand ${scan.brandId} not found for scan ${scanDoc.id}`);

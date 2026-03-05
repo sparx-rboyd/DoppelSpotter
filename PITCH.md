@@ -63,7 +63,7 @@ This is the gap a rules-based system cannot fill: understanding *context* at sca
 |---|---|---|
 | **Reddit** | `crawlerbros/reddit-keywords` | Surfaces customer-reported fakes and scam discussions before the brand is aware |
 | **Website screenshot** | `apify/screenshot-url` | Timestamped visual evidence of infringing pages — preserves content before it disappears |
-| **Web content extraction** | `apify/website-content-crawler` | Scrapes suspicious URLs and feeds content to the LLM: *"does this site appear to impersonate brand X?"* |
+| **Web content extraction** | `apify/website-content-crawler` | Scrapes suspicious URLs and feeds content to AI analysis: *"does this site appear to impersonate brand X?"* |
 | **WHOIS enrichment** | `salman_bareesh/whois-scraper` | Enriches flagged domains with registrant details, registration date, and registrar — enabling AI-generated risk assessments |
 
 ## Challenge Alignment (Apify Track)
@@ -72,7 +72,7 @@ DoppelSpotter addresses two of the three challenge pathways:
 
 | Pathway | How DoppelSpotter Addresses It |
 |---|---|
-| **Path 1 — AI Agent** | An autonomous pipeline that scrapes live web data, analyses findings with an LLM, and delivers ranked, plain-language infringement alerts — no human in the loop |
+| **Path 1 — AI Agent** | An autonomous pipeline that scrapes live web data, analyses findings with AI analysis, and delivers ranked, plain-language infringement alerts — no human in the loop |
 | **Path 3 — Build an Apify Actor** | The WhoisXML Brand Alert wrapper is published to the Apify Store as a standalone, reusable Actor (`doppelspotter/whoisxml-brand-alert`) — usable independently by any developer building brand protection or domain monitoring tools |
 
 | Success Metric | How DoppelSpotter Addresses It |
@@ -88,7 +88,7 @@ DoppelSpotter addresses two of the three challenge pathways:
 ## Differentiators
 
 1. **Cost** — existing tools are enterprise-priced; DoppelSpotter is built for smaller brands
-2. **AI depth** — contextual, LLM-powered analysis that understands the difference between legitimate mentions and genuine infringement — not just keyword alerts
+2. **AI depth** — contextual, AI-powered analysis that understands the difference between legitimate mentions and genuine infringement — not just keyword alerts
 
 ---
 
