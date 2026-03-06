@@ -49,6 +49,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     lowCount: scan.lowCount ?? 0,
     nonHitCount: scan.nonHitCount ?? 0,
     ignoredCount: scan.ignoredCount ?? 0,
+    skippedCount: scan.skippedCount ?? 0,
   }));
 
   return NextResponse.json({ data: summaries });

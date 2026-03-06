@@ -105,6 +105,8 @@ export interface ActorRunInfo {
   itemCount?: number;
   /** Number of items that have completed AI analysis so far. */
   analysedCount?: number;
+  /** Number of URLs skipped because they already appeared in previous scans for this brand. */
+  skippedDuplicateCount?: number;
   /**
    * 0 = initial scan run; 1 = AI-requested deep follow-up.
    * Deep searches are never spawned from depth > 0 (loop guard).
@@ -139,6 +141,8 @@ export interface Scan {
   lowCount?: number;
   nonHitCount?: number;
   ignoredCount?: number;
+  /** Number of duplicate URLs skipped because they already appeared in previous scans. */
+  skippedCount?: number;
   errorMessage?: string;
   startedAt: Timestamp;
   completedAt?: Timestamp;
@@ -157,6 +161,7 @@ export interface ScanSummary {
   lowCount: number;
   nonHitCount: number;
   ignoredCount: number;
+  skippedCount: number;
 }
 
 // ─── AI Analysis ───────────────────────────────────────────────────────────

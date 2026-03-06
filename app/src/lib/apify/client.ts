@@ -103,15 +103,7 @@ export async function startDeepSearchRun(
   googleResultsLimit?: number,
 ): Promise<{ runId: string }> {
   const client = getClient();
-  const initialPageCount = getGoogleResultsPageCount(googleResultsLimit);
   const deepSearchPageCount = getDeepSearchGooglePageCount(googleResultsLimit);
-
-  console.log('[apify] Starting deep search run', {
-    query,
-    googleResultsLimit: googleResultsLimit ?? null,
-    initialPageCount,
-    deepSearchPageCount,
-  });
 
   const run = await client.actor('apify/google-search-scraper').start(
     { queries: query, maxPagesPerQuery: deepSearchPageCount },

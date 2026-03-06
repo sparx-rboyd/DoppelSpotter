@@ -47,10 +47,6 @@ const TRACKING_QUERY_PARAM_NAMES = new Set([
   'msclkid',
 ]);
 
-function logGoogleDebug(event: string, details: Record<string, unknown>) {
-  console.log(`[webhook][google] ${event}`, details);
-}
-
 /**
  * POST /api/webhooks/apify
  *
@@ -247,6 +243,10 @@ async function handleSucceededRun({
   const actorId = actorRunInfo?.actorId ?? 'unknown';
   const searchDepth = actorRunInfo?.searchDepth ?? 0;
   const searchQuery = actorRunInfo?.searchQuery;
+  const actorConfig = getActorConfig(actorId);
+  const analysisMode = actorConfig?.analysisMode ?? 'per-item';
+  const shouldSkipPreviouslySeenUrls =
+    analysisMode === 'batch' || source === 'google' || actorId === 'apify/google-search-scraper';
 
   // Fetch all URLs that the user has previously ignored for this brand so that
   // AI analysis can skip them rather than re-reporting them on every scan.
@@ -260,6 +260,13 @@ async function handleSucceededRun({
   const ignoredUrls = ignoredSnap.docs
     .map((d) => (d.data() as { url?: string }).url)
     .filter((u): u is string => typeof u === 'string' && u.length > 0);
+  const previousFindingUrls = shouldSkipPreviouslySeenUrls
+    ? await loadPreviousFindingUrls({
+      brandId: scan.brandId,
+      userId: scan.userId,
+      currentScanId: scan.id ?? scanDoc.id,
+    })
+    : new Set<string>();
 
   // Fetch raw scraping results from Apify's dataset
   let items: Record<string, unknown>[];
@@ -290,34 +297,16 @@ async function handleSucceededRun({
     [`actorRuns.${runId}.status`]: 'analysing',
     [`actorRuns.${runId}.itemCount`]: itemsToAnalyse.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
+    [`actorRuns.${runId}.skippedDuplicateCount`]: 0,
   });
 
-  const actorConfig = getActorConfig(actorId);
-  const analysisMode = actorConfig?.analysisMode ?? 'per-item';
-
-  if (analysisMode === 'batch' || source === 'google' || actorId === 'apify/google-search-scraper') {
-    logGoogleDebug('run-start', {
-      scanId: scanDoc.id,
-      runId,
-      actorId,
-      source,
-      searchDepth,
-      searchQuery: searchQuery ?? null,
-      datasetId,
-      fetchedItemCount: items.length,
-      analysedItemCount: itemsToAnalyse.length,
-      ignoredUrlCount: ignoredUrls.length,
-      allowAiDeepSearches: normalizeAllowAiDeepSearches(brand.allowAiDeepSearches),
-      googleResultsLimit: brand.googleResultsLimit ?? null,
-    });
-  }
-
   let newFindingCount = 0;
+  let skippedDuplicateCount = 0;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
 
   if (analysisMode === 'batch') {
     // Send all SERP pages to AI analysis in one call → one Finding per individual search result
-    const { findingCount, suggestedSearches, counts: batchCounts } = await analyseAndWriteBatch({
+    const { findingCount, suggestedSearches, counts: batchCounts, skippedDuplicateCount: batchSkippedDuplicateCount } = await analyseAndWriteBatch({
       scanDoc,
       scan,
       brand,
@@ -329,8 +318,10 @@ async function handleSucceededRun({
       searchDepth,
       searchQuery,
       ignoredUrls,
+      previousFindingUrls,
     });
     newFindingCount = findingCount;
+    skippedDuplicateCount = batchSkippedDuplicateCount;
     counts.high = batchCounts.high;
     counts.medium = batchCounts.medium;
     counts.low = batchCounts.low;
@@ -360,14 +351,6 @@ async function handleSucceededRun({
           actorId: 'apify/google-search-scraper',
         });
       }
-    } else if (analysisMode === 'batch' || source === 'google' || actorId === 'apify/google-search-scraper') {
-      logGoogleDebug('deep-search-not-triggered', {
-        scanId: scanDoc.id,
-        runId,
-        searchDepth,
-        allowAiDeepSearches: normalizeAllowAiDeepSearches(brand.allowAiDeepSearches),
-        suggestedSearches: suggestedSearches ?? [],
-      });
     }
   } else {
     // Analyse each item sequentially to avoid rate-limiting OpenRouter
@@ -438,10 +421,10 @@ async function handleSucceededRun({
   }
 
   console.log(
-    `[webhook] Actor ${actorId} (run ${runId}, depth ${searchDepth}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items (mode: ${analysisMode})`,
+    `[webhook] Actor ${actorId} (run ${runId}, depth ${searchDepth}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items, ${skippedDuplicateCount} skipped as previous duplicates (mode: ${analysisMode})`,
   );
 
-  await markActorRunComplete(scanDoc, runId, 'succeeded', newFindingCount, counts);
+  await markActorRunComplete(scanDoc, runId, 'succeeded', newFindingCount, counts, skippedDuplicateCount);
 }
 
 async function recoverFromSucceededRunError({
@@ -461,8 +444,41 @@ async function recoverFromSucceededRunError({
     'failed',
     0,
     { high: 0, medium: 0, low: 0, nonHit: 0 },
+    0,
     { reconcilePersistedCounts: true },
   );
+}
+
+async function loadPreviousFindingUrls({
+  brandId,
+  userId,
+  currentScanId,
+}: {
+  brandId: string;
+  userId: string;
+  currentScanId: string;
+}): Promise<Set<string>> {
+  const previousFindingsSnap = await db
+    .collection('findings')
+    .where('brandId', '==', brandId)
+    .where('userId', '==', userId)
+    .select('scanId', 'url')
+    .get();
+
+  const urls = new Set<string>();
+  for (const doc of previousFindingsSnap.docs) {
+    const data = doc.data() as { scanId?: string; url?: string };
+    if (data.scanId === currentScanId || typeof data.url !== 'string' || data.url.trim().length === 0) {
+      continue;
+    }
+
+    const normalizedUrl = normalizeUrlForFinding(data.url);
+    if (normalizedUrl) {
+      urls.add(normalizedUrl);
+    }
+  }
+
+  return urls;
 }
 
 /**
@@ -482,6 +498,7 @@ async function analyseAndWriteBatch({
   searchDepth,
   searchQuery,
   ignoredUrls,
+  previousFindingUrls,
 }: {
   scanDoc: QueryDocumentSnapshot;
   scan: Scan;
@@ -494,7 +511,13 @@ async function analyseAndWriteBatch({
   searchDepth: number;
   searchQuery?: string;
   ignoredUrls?: string[];
-}): Promise<{ findingCount: number; suggestedSearches?: string[]; counts: { high: number; medium: number; low: number; nonHit: number } }> {
+  previousFindingUrls?: ReadonlySet<string>;
+}): Promise<{
+  findingCount: number;
+  suggestedSearches?: string[];
+  counts: { high: number; medium: number; low: number; nonHit: number };
+  skippedDuplicateCount: number;
+}> {
   let findingCount = 0;
   let suggestedSearches: string[] | undefined;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
@@ -506,44 +529,28 @@ async function analyseAndWriteBatch({
     searchQuery,
     items,
   });
-
-  logGoogleDebug('normalized-run', {
-    scanId: scanDoc.id,
-    runId,
-    searchDepth,
-    searchQuery: searchQuery ?? null,
-    candidateCount: normalizedRun.candidates.length,
-    chunkCount: Math.ceil(normalizedRun.candidates.length / GOOGLE_ANALYSIS_CHUNK_SIZE),
-    chunkConcurrency: GOOGLE_ANALYSIS_CONCURRENCY,
-    sourceQueries: normalizedRun.runContext.sourceQueries,
-    relatedQueryCount: normalizedRun.runContext.relatedQueries.length,
-    relatedQueriesSample: normalizedRun.runContext.relatedQueries.slice(0, 5),
-    peopleAlsoAskCount: normalizedRun.runContext.peopleAlsoAsk.length,
-    peopleAlsoAskSample: normalizedRun.runContext.peopleAlsoAsk.slice(0, 5),
-    canSuggestSearches,
-  });
+  const candidatesToAnalyse = normalizedRun.candidates.filter(
+    (candidate) => !previousFindingUrls?.has(candidate.normalizedUrl),
+  );
+  const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
 
   await scanDoc.ref.update({
-    [`actorRuns.${runId}.itemCount`]: normalizedRun.candidates.length,
+    [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
+    [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
   });
+
+  if (candidatesToAnalyse.length === 0) {
+    return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
+  }
 
   const outcomes = new Map<string, { candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>();
   const suggestionScores = new Map<string, SuggestedSearchScore>();
-  const chunks = chunkArray(normalizedRun.candidates, GOOGLE_ANALYSIS_CHUNK_SIZE);
+  const chunks = chunkArray(candidatesToAnalyse, GOOGLE_ANALYSIS_CHUNK_SIZE);
   const chunkResults = await mapWithConcurrency(
     chunks,
     GOOGLE_ANALYSIS_CONCURRENCY,
     async (chunk, chunkIndex): Promise<GoogleChunkAnalysisResult> => {
-      logGoogleDebug('chunk-start', {
-        scanId: scanDoc.id,
-        runId,
-        chunkIndex: chunkIndex + 1,
-        chunkCount: chunks.length,
-        candidateCount: chunk.length,
-        candidateUrls: chunk.map((candidate) => candidate.normalizedUrl).slice(0, 10),
-      });
-
       try {
         const chunkResult = await analyseGoogleChunk({
           brand,
@@ -552,15 +559,6 @@ async function analyseAndWriteBatch({
           runContext: normalizedRun.runContext,
           ignoredUrls,
           canSuggestSearches,
-        });
-
-        logGoogleDebug('chunk-complete', {
-          scanId: scanDoc.id,
-          runId,
-          chunkIndex: chunkIndex + 1,
-          chunkCount: chunks.length,
-          counts: summarizeGoogleOutcomeCounts(chunkResult.outcomes.values()),
-          suggestedSearches: chunkResult.suggestedSearches ?? [],
         });
 
         return chunkResult;
@@ -574,14 +572,6 @@ async function analyseAndWriteBatch({
             outcome: buildGoogleFallbackOutcome('AI analysis failed for this chunk. Raw data is preserved for manual review.'),
           });
         }
-
-        logGoogleDebug('chunk-failed', {
-          scanId: scanDoc.id,
-          runId,
-          chunkIndex: chunkIndex + 1,
-          chunkCount: chunks.length,
-          fallbackCandidateUrls: chunk.map((candidate) => candidate.normalizedUrl).slice(0, 10),
-        });
 
         return {
           outcomes: fallbackOutcomes,
@@ -610,17 +600,6 @@ async function analyseAndWriteBatch({
   }
 
   const chunkRankedSuggestions = canSuggestSearches ? rankSuggestedSearches(suggestionScores) : undefined;
-  if (canSuggestSearches) {
-    logGoogleDebug('chunk-suggestions-ranked', {
-      scanId: scanDoc.id,
-      runId,
-      rankedSuggestions: chunkRankedSuggestions ?? [],
-      suggestionScores: Array.from(suggestionScores.values())
-        .sort((left, right) => right.score - left.score || right.mentionCount - left.mentionCount)
-        .slice(0, 10),
-    });
-  }
-
   if (canSuggestSearches && (hasGoogleSuggestionSignals(normalizedRun.runContext) || (chunkRankedSuggestions?.length ?? 0) > 0)) {
     try {
       const aggregateSuggestedSearches = await analyseGoogleSuggestions({
@@ -629,12 +608,6 @@ async function analyseAndWriteBatch({
         runContext: normalizedRun.runContext,
         notableCandidates: buildGoogleSuggestionNotableCandidates(outcomes.values()),
         chunkSuggestedSearches: chunkRankedSuggestions,
-      });
-
-      logGoogleDebug('aggregate-suggestions', {
-        scanId: scanDoc.id,
-        runId,
-        aggregateSuggestedSearches: aggregateSuggestedSearches ?? [],
       });
 
       if (aggregateSuggestedSearches && aggregateSuggestedSearches.length > 0) {
@@ -648,22 +621,10 @@ async function analyseAndWriteBatch({
     } catch (err) {
       console.error(`[webhook] Google aggregate suggestion analysis failed for dataset ${datasetId}:`, err);
     }
-  } else if (canSuggestSearches) {
-    logGoogleDebug('aggregate-suggestions-skipped', {
-      scanId: scanDoc.id,
-      runId,
-      hasRunContextSignals: hasGoogleSuggestionSignals(normalizedRun.runContext),
-      chunkSuggestionCount: chunkRankedSuggestions?.length ?? 0,
-    });
   }
 
   if (canSuggestSearches) {
     suggestedSearches = rankSuggestedSearches(suggestionScores);
-    logGoogleDebug('final-suggestions', {
-      scanId: scanDoc.id,
-      runId,
-      suggestedSearches: suggestedSearches ?? [],
-    });
   }
 
   for (const { candidate, outcome } of outcomes.values()) {
@@ -687,15 +648,7 @@ async function analyseAndWriteBatch({
     counts.nonHit += delta.counts.nonHit;
   }
 
-  logGoogleDebug('batch-complete', {
-    scanId: scanDoc.id,
-    runId,
-    findingCount,
-    counts,
-    suggestedSearches: suggestedSearches ?? [],
-  });
-
-  return { findingCount, suggestedSearches, counts };
+  return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
 }
 
 type GoogleFindingOutcome = {
@@ -731,6 +684,7 @@ type ScanFindingTotals = {
   lowCount: number;
   nonHitCount: number;
   ignoredCount: number;
+  skippedCount: number;
 };
 
 type MarkActorRunCompleteOptions = {
@@ -1058,14 +1012,6 @@ async function reserveSuggestedSearches({
       .filter((query) => !existingQueries.has(query.toLowerCase()))
       .slice(0, MAX_SUGGESTED_SEARCHES);
 
-    logGoogleDebug('reserve-suggestions', {
-      scanId: scanDoc.id,
-      runId,
-      requestedSuggestions: suggestedSearches,
-      existingQueries: Array.from(existingQueries),
-      reservedSuggestions: reserved,
-    });
-
     const updates: Record<string, unknown> = {
       [`actorRuns.${runId}.deepSearchSuggestionsProcessed`]: true,
     };
@@ -1102,13 +1048,6 @@ async function triggerDeepSearches({
   actorId: string;
 }) {
   const queries = suggestedSearches.slice(0, MAX_SUGGESTED_SEARCHES);
-  logGoogleDebug('trigger-deep-searches', {
-    scanId: scanDoc.id,
-    brandId: scan.brandId,
-    googleResultsLimit: brand.googleResultsLimit ?? null,
-    queryCount: queries.length,
-    queries,
-  });
 
   const newRunIds: string[] = [];
   const newActorRuns: Record<string, ActorRunInfo> = {};
@@ -1121,14 +1060,10 @@ async function triggerDeepSearches({
         actorId,
         source,
         status: 'running',
+        skippedDuplicateCount: 0,
         searchDepth: 1,
         searchQuery: query,
       };
-      logGoogleDebug('deep-search-started', {
-        scanId: scanDoc.id,
-        query,
-        runId,
-      });
     } catch (err) {
       console.error(`[webhook] Failed to start deep search for "${query}":`, err);
     }
@@ -1407,6 +1342,7 @@ function buildScanFindingTotals(findings: Iterable<Pick<Finding, 'severity' | 'i
     lowCount: 0,
     nonHitCount: 0,
     ignoredCount: 0,
+    skippedCount: 0,
   };
 
   for (const finding of findings) {
@@ -1434,6 +1370,7 @@ function getNextScanFindingTotals(
   scan: Scan,
   newFindingCount: number,
   newCounts: { high: number; medium: number; low: number; nonHit: number },
+  newSkippedCount: number,
 ): ScanFindingTotals {
   return {
     findingCount: (scan.findingCount ?? 0) + newFindingCount,
@@ -1442,31 +1379,21 @@ function getNextScanFindingTotals(
     lowCount: (scan.lowCount ?? 0) + newCounts.low,
     nonHitCount: (scan.nonHitCount ?? 0) + newCounts.nonHit,
     ignoredCount: scan.ignoredCount ?? 0,
+    skippedCount: (scan.skippedCount ?? 0) + newSkippedCount,
   };
 }
 
 function hasPersistedScanResults(totals: ScanFindingTotals): boolean {
-  return totals.findingCount > 0 || totals.nonHitCount > 0;
+  return totals.findingCount > 0 || totals.nonHitCount > 0 || totals.skippedCount > 0;
+}
+
+function getSkippedDuplicateCount(actorRuns?: Record<string, ActorRunInfo>): number {
+  if (!actorRuns) return 0;
+  return Object.values(actorRuns).reduce((sum, run) => sum + (run.skippedDuplicateCount ?? 0), 0);
 }
 
 function hasGoogleSuggestionSignals(runContext: GoogleRunContext): boolean {
   return runContext.relatedQueries.length > 0 || runContext.peopleAlsoAsk.length > 0;
-}
-
-function summarizeGoogleOutcomeCounts(
-  values: Iterable<{ candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>,
-) {
-  const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
-  for (const { outcome } of values) {
-    if (outcome.isFalsePositive) {
-      counts.nonHit++;
-      continue;
-    }
-    if (outcome.severity === 'high') counts.high++;
-    else if (outcome.severity === 'medium') counts.medium++;
-    else counts.low++;
-  }
-  return counts;
 }
 
 function buildGoogleSuggestionNotableCandidates(
@@ -1707,6 +1634,7 @@ async function markActorRunComplete(
   runStatus: 'succeeded' | 'failed',
   newFindingCount = 0,
   newCounts: { high: number; medium: number; low: number; nonHit: number } = { high: 0, medium: 0, low: 0, nonHit: 0 },
+  newSkippedCount = 0,
   options: MarkActorRunCompleteOptions = {},
 ) {
   await db.runTransaction(async (tx) => {
@@ -1732,7 +1660,8 @@ async function markActorRunComplete(
     const updatedCompletedCount = (fresh.completedRunCount ?? 0) + 1;
     const allDone = updatedCompletedCount >= totalRunCount;
     const reconciledTotals = options.reconcilePersistedCounts
-      ? buildScanFindingTotals(
+      ? {
+        ...buildScanFindingTotals(
         (
           await tx.get(
             db
@@ -1743,9 +1672,11 @@ async function markActorRunComplete(
               .select('severity', 'isFalsePositive', 'isIgnored'),
           )
         ).docs.map((doc) => doc.data() as Pick<Finding, 'severity' | 'isFalsePositive' | 'isIgnored'>),
-      )
+        ),
+        skippedCount: getSkippedDuplicateCount(fresh.actorRuns),
+      }
       : null;
-    const nextTotals = reconciledTotals ?? getNextScanFindingTotals(fresh, newFindingCount, newCounts);
+    const nextTotals = reconciledTotals ?? getNextScanFindingTotals(fresh, newFindingCount, newCounts, newSkippedCount);
 
     const updates: Record<string, unknown> = {
       [`actorRuns.${runId}.status`]: runStatus,
@@ -1758,6 +1689,7 @@ async function markActorRunComplete(
           lowCount: reconciledTotals.lowCount,
           nonHitCount: reconciledTotals.nonHitCount,
           ignoredCount: reconciledTotals.ignoredCount,
+          skippedCount: reconciledTotals.skippedCount,
         }
         : {
           findingCount: FieldValue.increment(newFindingCount),
@@ -1765,6 +1697,7 @@ async function markActorRunComplete(
           mediumCount: FieldValue.increment(newCounts.medium),
           lowCount: FieldValue.increment(newCounts.low),
           nonHitCount: FieldValue.increment(newCounts.nonHit),
+          skippedCount: FieldValue.increment(newSkippedCount),
         }),
     };
 

@@ -95,7 +95,7 @@ GET /api/brands/[brandId]/active-scan
 
 GET /api/brands/[brandId]/scans
  └─ returns all terminal scans (completed|cancelled|failed) ordered newest-first
- └─ computes per-scan severity counts (high/medium/low/nonHit) from findings in memory
+ └─ returns denormalized per-scan counts (high/medium/low/nonHit/ignored/skipped) from the scan document
  └─ returns ScanSummary[] — lightweight shape used by the brand page to render per-scan result sets
 
 DELETE /api/brands/[brandId]/scans/[scanId]
@@ -114,6 +114,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ batch mode (Google Search): normalize SERP pages into compact organic-result candidates
       └─ excludes ads from AI analysis; keeps `relatedQueries` + `peopleAlsoAsk` as run-level context
       └─ dedupes repeated URLs within the run before analysis
+      └─ skips normalized URLs that already appeared in previous scans for the same brand before any LLM analysis
       └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
       └─ each chunk may return grounded `suggestedSearches` based on its suspicious results + SERP context
       └─ webhook combines, dedupes, and ranks chunk suggestions
@@ -125,8 +126,8 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
       └─ each deep-search Google run uses at least 3 SERP pages, even when the initial scan is configured for fewer
       └─ `actorRuns.*.analysedCount` increments as chunks finish so the UI can show meaningful `X / N` AI-analysis progress
+      └─ `actorRuns.*.skippedDuplicateCount` tracks how many previous-scan duplicate URLs were filtered out for progress UI + scan summaries
       └─ unexpected processing errors after partial finding writes reconcile scan counts from persisted findings, mark the affected run terminal, and let the scan complete normally when useful results already exist
-      └─ detailed debug logging records claim/skip decisions, normalization, chunk outcomes, suggestion ranking, reservations, and deep-search launches
       └─ deep-search runs complete via the same webhook, depth 1 — no further recursion
  └─ marks actor run complete; if all runs done → marks scan complete and clears `brands.activeScanId`
 ```
@@ -159,6 +160,8 @@ Each actor in the registry declares how its dataset items should be sent to AI a
 SERP pages), so the webhook can normalize and dedupe repeated URLs before AI analysis. Google
 findings now store a compact normalized debug payload (`kind: 'google-normalized'`) with
 candidate metadata, merged sightings, and SERP context instead of the full page blobs.
+Normalized Google URLs that already appeared in previous scans for the same brand are filtered out
+before chunking, so repeat results do not trigger new LLM calls.
 
 See `REVIEW.md` for full prompt text and AI analysis pipeline details.
 
@@ -230,7 +233,7 @@ Users can manually dismiss (ignore) any non-false-positive finding at the indivi
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **googleResultsLimit?**, **allowAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, createdAt, updatedAt |
-| `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{}, completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount** (denormalized — written by webhook, updated on ignore/un-ignore), startedAt, completedAt |
+| `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, skippedCount** (denormalized — written by webhook, updated on ignore/un-ignore / duplicate-skip tracking), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, rawLlmResponse?, createdAt |
 
 ---

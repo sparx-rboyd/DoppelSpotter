@@ -56,6 +56,7 @@ export async function POST(request: NextRequest) {
     actorRuns: {},
     completedRunCount: 0,
     findingCount: 0,
+    skippedCount: 0,
     startedAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
   };
 
@@ -136,6 +137,7 @@ export async function POST(request: NextRequest) {
         actorId,
         source: actorConfig.source,
         status: 'running',
+        skippedDuplicateCount: 0,
       };
       successCount++;
       console.log(`[scan] Started actor ${actorId} → runId=${runId}`);
