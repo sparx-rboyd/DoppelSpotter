@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Loader2,
-  ChevronDown, ChevronRight, Pencil, Trash2, X, EyeOff,
+  ChevronDown, ChevronRight, Pencil, Trash2, X, EyeOff, Bookmark,
 } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
@@ -13,11 +13,19 @@ import { Navbar } from '@/components/navbar';
 import { FindingCard } from '@/components/finding-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { InfoTooltip } from '@/components/ui/tooltip';
+import { InfoTooltip, Tooltip } from '@/components/ui/tooltip';
 import { cn, formatScanDate } from '@/lib/utils';
 import type { ActorRunInfo, BrandProfile, FindingSummary, Scan, ScanSummary } from '@/lib/types';
 
 const POLL_INTERVAL_MS = 5_000;
+const ACTIVE_SCAN_DELETE_TOOLTIP =
+  "Scan history can't be changed while a scan is running because current results are compared against previous findings.";
+const CLEARING_HISTORY_DELETE_TOOLTIP = 'Please wait while scan history is being deleted.';
+
+type BookmarkUpdate = {
+  isBookmarked?: boolean;
+  bookmarkNote?: string | null;
+};
 
 // ---------------------------------------------------------------------------
 // localStorage helpers — persist active scan ID across page reloads
@@ -87,10 +95,12 @@ function SeverityGroup({
   severity,
   findings,
   onIgnoreToggle,
+  onBookmarkUpdate,
 }: {
   severity: 'high' | 'medium' | 'low';
   findings: FindingSummary[];
   onIgnoreToggle?: (finding: FindingSummary, isIgnored: boolean) => Promise<void>;
+  onBookmarkUpdate?: (finding: FindingSummary, updates: BookmarkUpdate) => Promise<void>;
 }) {
   const [isExpanded, setIsExpanded] = useState(severity === 'high');
   const [ignoringAll, setIgnoringAll] = useState(false);
@@ -151,6 +161,7 @@ function SeverityGroup({
               key={finding.id}
               finding={finding}
               onIgnoreToggle={onIgnoreToggle}
+              onBookmarkUpdate={onBookmarkUpdate}
             />
           ))}
         </div>
@@ -175,6 +186,8 @@ export default function BrandDetailPage() {
   const [loadingScanIds, setLoadingScanIds] = useState<string[]>([]);
   const [showNonHitsByScanId, setShowNonHitsByScanId] = useState<Record<string, boolean>>({});
   const [showIgnoredByScanId, setShowIgnoredByScanId] = useState<Record<string, boolean>>({});
+  const [allBookmarkedFindings, setAllBookmarkedFindings] = useState<FindingSummary[]>([]);
+  const [showAllBookmarked, setShowAllBookmarked] = useState(false);
   const [allIgnoredFindings, setAllIgnoredFindings] = useState<FindingSummary[]>([]);
   const [showAllIgnored, setShowAllIgnored] = useState(false);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
@@ -283,6 +296,18 @@ export default function BrandDetailPage() {
     }
   }
 
+  async function loadAllBookmarkedFindings() {
+    try {
+      const res = await fetch(`/api/brands/${brandId}/findings?bookmarkedOnly=true`, { credentials: 'same-origin' });
+      if (res.ok) {
+        const json = await res.json();
+        setAllBookmarkedFindings(json.data ?? []);
+      }
+    } catch {
+      // Non-critical
+    }
+  }
+
   async function fetchLiveFindings(scanId: string) {
     try {
       const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}`, { credentials: 'same-origin' });
@@ -293,6 +318,35 @@ export default function BrandDetailPage() {
     } catch {
       // Non-critical — polling will retry
     }
+  }
+
+  function updateFindingList(
+    findings: FindingSummary[],
+    findingId: string,
+    updater: (finding: FindingSummary) => FindingSummary,
+  ) {
+    let changed = false;
+    const next = findings.map((finding) => {
+      if (finding.id !== findingId) return finding;
+      changed = true;
+      return updater(finding);
+    });
+    return changed ? next : findings;
+  }
+
+  function updateFindingMap(
+    record: Record<string, FindingSummary[]>,
+    findingId: string,
+    updater: (finding: FindingSummary) => FindingSummary,
+  ) {
+    let changed = false;
+    const next: Record<string, FindingSummary[]> = {};
+    for (const [key, findings] of Object.entries(record)) {
+      const updated = updateFindingList(findings, findingId, updater);
+      next[key] = updated;
+      if (updated !== findings) changed = true;
+    }
+    return changed ? next : record;
   }
 
   function attachToActiveScan(scan: Scan, options?: { collapseExpandedScans?: boolean }) {
@@ -336,6 +390,49 @@ export default function BrandDetailPage() {
   // ---------------------------------------------------------------------------
   // Ignore / un-ignore a finding
   // ---------------------------------------------------------------------------
+
+  async function handleBookmarkUpdate(triggerFinding: FindingSummary, updates: BookmarkUpdate) {
+    const res = await fetch(`/api/brands/${brandId}/findings/${triggerFinding.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(updates),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error ?? 'Failed to update bookmark');
+    }
+
+    const json = await res.json().catch(() => ({}));
+    const responseData = (json.data ?? {}) as {
+      isBookmarked?: boolean;
+      bookmarkNote?: string | null;
+    };
+    const isBookmarked = responseData.isBookmarked ?? triggerFinding.isBookmarked ?? false;
+    const bookmarkNote = responseData.bookmarkNote ?? null;
+
+    const applyBookmarkUpdate = (finding: FindingSummary): FindingSummary => ({
+      ...finding,
+      isBookmarked,
+      bookmarkedAt: isBookmarked ? finding.bookmarkedAt : undefined,
+      bookmarkNote: bookmarkNote ?? undefined,
+    });
+
+    setScanFindings((prev) => updateFindingMap(prev, triggerFinding.id, applyBookmarkUpdate));
+    setScanNonHits((prev) => updateFindingMap(prev, triggerFinding.id, applyBookmarkUpdate));
+    setScanIgnored((prev) => updateFindingMap(prev, triggerFinding.id, applyBookmarkUpdate));
+    setLiveScanFindings((prev) => updateFindingList(prev, triggerFinding.id, applyBookmarkUpdate));
+    setAllIgnoredFindings((prev) => updateFindingList(prev, triggerFinding.id, applyBookmarkUpdate));
+    setAllBookmarkedFindings((prev) => {
+      if (!isBookmarked) {
+        return prev.filter((finding) => finding.id !== triggerFinding.id);
+      }
+
+      const existing = prev.find((finding) => finding.id === triggerFinding.id);
+      const updatedFinding = applyBookmarkUpdate(existing ?? triggerFinding);
+      return [updatedFinding, ...prev.filter((finding) => finding.id !== triggerFinding.id)];
+    });
+  }
 
   async function handleIgnoreToggle(triggerFinding: FindingSummary, isIgnored: boolean) {
     const res = await fetch(`/api/brands/${brandId}/findings/${triggerFinding.id}`, {
@@ -567,6 +664,7 @@ export default function BrandDetailPage() {
       setLoading(true);
 
       // Fire non-critical loads immediately so they run in parallel with brand + scans fetches
+      void loadAllBookmarkedFindings();
       void loadAllIgnoredFindings();
 
       try {
@@ -762,6 +860,7 @@ export default function BrandDetailPage() {
       // Evict from caches and UI
       setScanFindings((prev) => { const n = { ...prev }; delete n[scanId]; return n; });
       setScanNonHits((prev) => { const n = { ...prev }; delete n[scanId]; return n; });
+      setAllBookmarkedFindings((prev) => prev.filter((finding) => finding.scanId !== scanId));
       setScanIgnored((prev) => {
         const removed = prev[scanId] ?? [];
         const n = { ...prev };
@@ -803,6 +902,7 @@ export default function BrandDetailPage() {
       setScanFindings({});
       setScanNonHits({});
       setScanIgnored({});
+      setAllBookmarkedFindings([]);
       setAllIgnoredFindings([]);
       setExpandedScanIds([]);
       setActiveScan(null);
@@ -992,6 +1092,13 @@ export default function BrandDetailPage() {
   const totalNonHits = scans.reduce((sum, s) => sum + s.nonHitCount, 0);
   const totalIgnored = scans.reduce((sum, s) => sum + (s.ignoredCount ?? 0), 0);
   const totalSkipped = scans.reduce((sum, s) => sum + (s.skippedCount ?? 0), 0);
+  const bookmarkedHits = allBookmarkedFindings.filter((finding) => !finding.isFalsePositive);
+  const bookmarkedNonHits = sortBySeverity(allBookmarkedFindings.filter((finding) => finding.isFalsePositive));
+  const clearHistoryDisabledReason = scanning
+    ? ACTIVE_SCAN_DELETE_TOOLTIP
+    : clearing
+      ? CLEARING_HISTORY_DELETE_TOOLTIP
+      : null;
 
   // ---------------------------------------------------------------------------
   // Render
@@ -1201,16 +1308,32 @@ export default function BrandDetailPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     {(totalFindings > 0 || totalNonHits > 0) && !confirmClear && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setConfirmClear(true)}
-                        disabled={scanning || clearing}
-                        className="text-gray-400 hover:text-red-600"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Clear history
-                      </Button>
+                      clearHistoryDisabledReason ? (
+                        <Tooltip content={clearHistoryDisabledReason} align="end">
+                          <button
+                            type="button"
+                            aria-disabled="true"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            className="inline-flex items-center justify-center gap-2 rounded-full font-medium px-3 py-1.5 text-xs bg-transparent text-gray-400 opacity-45 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            Clear history
+                          </button>
+                        </Tooltip>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setConfirmClear(true)}
+                          className="text-gray-400 hover:text-red-600"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Clear history
+                        </Button>
+                      )
                     )}
                     <Button size="sm" onClick={triggerScan} loading={scanning} disabled={scanning || clearing || confirmClear}>
                       <Play className="w-4 h-4" />
@@ -1234,6 +1357,72 @@ export default function BrandDetailPage() {
                         Clear all
                       </Button>
                     </div>
+                  </div>
+                )}
+
+                {allBookmarkedFindings.length > 0 && (
+                  <div className="border-b border-gray-100">
+                    <button
+                      type="button"
+                      onClick={() => setShowAllBookmarked((v) => !v)}
+                      className={cn(
+                        "w-full px-6 py-5 flex items-center gap-3 transition text-left bg-amber-50",
+                        showAllBookmarked ? "border-b border-amber-100" : "hover:bg-amber-100/70",
+                      )}
+                      aria-expanded={showAllBookmarked}
+                    >
+                      {showAllBookmarked
+                        ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                        : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                      <Bookmark className="w-4 h-4 text-amber-600 flex-shrink-0" />
+                      <div>
+                        <h2 className="text-base font-semibold text-gray-900">Bookmarked findings</h2>
+                        <p className="text-xs text-gray-500">
+                          {allBookmarkedFindings.length} bookmarked finding{allBookmarkedFindings.length !== 1 ? 's' : ''} saved for follow-up
+                        </p>
+                      </div>
+                    </button>
+
+                    {showAllBookmarked && (
+                      <div className="bg-gray-50 px-4 sm:px-6 py-5">
+                        <div className="space-y-3">
+                          {(['high', 'medium', 'low'] as const)
+                            .filter((sev) => bookmarkedHits.some((finding) => finding.severity === sev))
+                            .map((sev) => (
+                              <SeverityGroup
+                                key={`bookmarked-${sev}`}
+                                severity={sev}
+                                findings={bookmarkedHits.filter((finding) => finding.severity === sev)}
+                                onBookmarkUpdate={handleBookmarkUpdate}
+                              />
+                            ))}
+
+                          {bookmarkedNonHits.length > 0 && (
+                            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                              <div className="px-4 py-3 flex items-center gap-2 bg-gray-50 border-b border-gray-100">
+                                <Bookmark className="w-3.5 h-3.5 text-gray-400" />
+                                <span className="text-sm font-medium text-gray-500">
+                                  Non-hits
+                                  <span className="ml-1.5 text-xs font-normal text-gray-400">
+                                    ({bookmarkedNonHits.length})
+                                  </span>
+                                </span>
+                                <span className="text-xs text-gray-400">· bookmarked despite AI classifying them as false positives</span>
+                              </div>
+                              <div className="border-t border-gray-100 p-4 space-y-4">
+                                {bookmarkedNonHits.map((finding) => (
+                                  <FindingCard
+                                    key={finding.id}
+                                    finding={finding}
+                                    onBookmarkUpdate={handleBookmarkUpdate}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1274,6 +1463,7 @@ export default function BrandDetailPage() {
                                   key={`live-${sev}`}
                                   severity={sev}
                                   findings={liveScanFindings.filter((f) => f.severity === sev)}
+                                  onBookmarkUpdate={handleBookmarkUpdate}
                                 />
                               ))}
                           </div>
@@ -1301,6 +1491,11 @@ export default function BrandDetailPage() {
                       const isConfirmingDelete = confirmDeleteScanId === scan.id;
                       const isDeleting = deletingScanId === scan.id;
                       const hasFindings = scan.highCount + scan.mediumCount + scan.lowCount > 0;
+                      const deleteDisabledReason = scanning
+                        ? ACTIVE_SCAN_DELETE_TOOLTIP
+                        : clearing
+                          ? CLEARING_HISTORY_DELETE_TOOLTIP
+                          : null;
 
                       return (
                         <div key={scan.id}>
@@ -1385,18 +1580,33 @@ export default function BrandDetailPage() {
                               </button>
 
                               {/* Delete button */}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setConfirmDeleteScanId(scan.id);
-                                  setConfirmClear(false);
-                                }}
-                                disabled={scanning || clearing}
-                                className="flex-shrink-0 p-1.5 rounded-md text-gray-300 hover:text-red-500 hover:bg-red-50 transition opacity-0 group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed"
-                                aria-label="Delete scan"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
+                              {deleteDisabledReason ? (
+                                <Tooltip content={deleteDisabledReason} align="end" triggerClassName="flex-shrink-0">
+                                  <button
+                                    type="button"
+                                    aria-disabled="true"
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                    }}
+                                    className="inline-flex items-center justify-center p-1.5 rounded-md text-gray-300 opacity-40 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </Tooltip>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setConfirmDeleteScanId(scan.id);
+                                    setConfirmClear(false);
+                                  }}
+                                  className="flex-shrink-0 p-1.5 rounded-md text-gray-300 hover:text-red-500 hover:bg-red-50 transition opacity-0 group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed"
+                                  aria-label="Delete scan"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
                             </div>
                           )}
 
@@ -1430,6 +1640,7 @@ export default function BrandDetailPage() {
                                             severity={sev}
                                             findings={hits.filter((f) => f.severity === sev)}
                                             onIgnoreToggle={handleIgnoreToggle}
+                                            onBookmarkUpdate={handleBookmarkUpdate}
                                           />
                                         ))}
                                     </div>
@@ -1474,6 +1685,7 @@ export default function BrandDetailPage() {
                                                 key={finding.id}
                                                 finding={finding}
                                                 onIgnoreToggle={handleIgnoreToggle}
+                                                onBookmarkUpdate={handleBookmarkUpdate}
                                               />
                                             ))
                                           )}
@@ -1522,6 +1734,7 @@ export default function BrandDetailPage() {
                                                 key={finding.id}
                                                 finding={finding}
                                                 onIgnoreToggle={handleIgnoreToggle}
+                                                onBookmarkUpdate={handleBookmarkUpdate}
                                               />
                                             ))
                                           )}
@@ -1569,6 +1782,7 @@ export default function BrandDetailPage() {
                           key={finding.id}
                           finding={finding}
                           onIgnoreToggle={handleIgnoreToggle}
+                          onBookmarkUpdate={handleBookmarkUpdate}
                         />
                       ))}
                     </div>

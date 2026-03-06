@@ -70,6 +70,12 @@ export interface FindingSummary {
   isFalsePositive?: boolean;
   /** Set to true when the user manually dismisses this finding. */
   isIgnored?: boolean;
+  /** Set to true when the user bookmarks the finding for follow-up. */
+  isBookmarked?: boolean;
+  /** Timestamp when the finding was bookmarked by the user. */
+  bookmarkedAt?: Timestamp;
+  /** Optional reminder note attached to a bookmarked finding. */
+  bookmarkNote?: string;
   createdAt: Timestamp;
 }
 

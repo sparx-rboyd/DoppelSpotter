@@ -7,9 +7,10 @@ type Params = { params: Promise<{ brandId: string }> };
 
 // GET /api/brands/[brandId]/findings
 // Query params:
-//   nonHitsOnly  (optional) — when "true", returns only AI-classified false-positives (non-ignored)
-//   ignoredOnly  (optional) — when "true", returns only user-ignored findings (across all scans if no scanId)
-//   scanId       (optional) — when provided, filters findings to a specific scan
+//   nonHitsOnly    (optional) — when "true", returns only AI-classified false-positives
+//   ignoredOnly    (optional) — when "true", returns only user-ignored findings (across all scans if no scanId)
+//   bookmarkedOnly (optional) — when "true", returns only bookmarked findings (across all scans if no scanId)
+//   scanId         (optional) — when provided, filters findings to a specific scan
 export async function GET(request: NextRequest, { params }: Params) {
   const { uid, error } = requireAuth(request);
   if (error) return error;
@@ -17,13 +18,14 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { brandId } = await params;
   const nonHitsOnly = request.nextUrl.searchParams.get('nonHitsOnly') === 'true';
   const ignoredOnly = request.nextUrl.searchParams.get('ignoredOnly') === 'true';
+  const bookmarkedOnly = request.nextUrl.searchParams.get('bookmarkedOnly') === 'true';
   const scanId = request.nextUrl.searchParams.get('scanId');
 
   // Authorization is enforced by the userId filter in every Firestore query below —
   // a user can only retrieve findings that belong to them. We still verify brand
   // existence for the cross-scan ignoredOnly path to return a proper 404, but skip
   // it for per-scan queries where an empty result is a sufficient response.
-  if (ignoredOnly && !scanId) {
+  if ((ignoredOnly || bookmarkedOnly) && !scanId) {
     const brandDoc = await db.collection('brands').doc(brandId).get();
     if (!brandDoc.exists) return errorResponse('Brand not found', 404);
     if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
@@ -38,11 +40,16 @@ export async function GET(request: NextRequest, { params }: Params) {
     query = query.where('scanId', '==', scanId);
   }
 
-  // For cross-scan ignoredOnly queries, filter at the Firestore level so we only
-  // fetch the small number of ignored documents rather than all findings for the brand.
-  // Requires a composite index: brandId ASC, userId ASC, isIgnored ASC, createdAt DESC.
+  // For cross-scan ignored/bookmarked queries, filter at the Firestore level so we only
+  // fetch the small number of matching documents rather than all findings for the brand.
+  // Requires composite indexes:
+  // - brandId ASC, userId ASC, isIgnored ASC, createdAt DESC
+  // - brandId ASC, userId ASC, isBookmarked ASC, bookmarkedAt DESC
   if (ignoredOnly && !scanId) {
     query = query.where('isIgnored', '==', true);
+  }
+  if (bookmarkedOnly) {
+    query = query.where('isBookmarked', '==', true);
   }
 
   const snapshot = await query
@@ -56,9 +63,12 @@ export async function GET(request: NextRequest, { params }: Params) {
       'url',
       'isFalsePositive',
       'isIgnored',
+      'isBookmarked',
+      'bookmarkNote',
+      'bookmarkedAt',
       'createdAt',
     )
-    .orderBy('createdAt', 'desc')
+    .orderBy(bookmarkedOnly ? 'bookmarkedAt' : 'createdAt', 'desc')
     .limit(200)
     .get();
 
@@ -68,7 +78,9 @@ export async function GET(request: NextRequest, { params }: Params) {
   }));
 
   let findings: FindingSummary[];
-  if (ignoredOnly) {
+  if (bookmarkedOnly) {
+    findings = all.filter((f) => f.isBookmarked === true);
+  } else if (ignoredOnly) {
     // Only user-manually-ignored real findings (not auto-ignored AI false positives —
     // those have their own non-hits section).
     findings = all.filter((f) => f.isIgnored === true && !f.isFalsePositive);

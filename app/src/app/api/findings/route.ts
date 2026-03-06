@@ -28,6 +28,9 @@ export async function GET(request: NextRequest) {
       'url',
       'isFalsePositive',
       'isIgnored',
+      'isBookmarked',
+      'bookmarkNote',
+      'bookmarkedAt',
       'createdAt',
     )
     .orderBy('createdAt', 'desc');

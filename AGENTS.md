@@ -210,6 +210,24 @@ Users can manually dismiss (ignore) any non-false-positive finding at the indivi
 
 ---
 
+## Bookmarked Findings
+
+Users can bookmark any finding they want to follow up on, including AI-classified non-hits. Bookmark state is stored directly on the finding document with `isBookmarked`, `bookmarkedAt`, and optional `bookmarkNote`.
+
+**Behaviour:**
+- Bookmarks are per finding document, not URL-scoped like ignore/un-ignore
+- Bookmark notes are optional and can be added, edited, or deleted after bookmarking
+- The brand page loads a cross-scan "Bookmarked findings" panel above the scan result sets; it is hidden when empty and collapsed by default
+- The bookmark panel groups bookmarked items into `high`, `medium`, `low`, and `Non-hits`, while still showing any existing ignored/non-hit badges on the cards themselves
+- Users can unbookmark findings both from their original location and from the bookmark panel
+- Because bookmark state lives on the finding document, deleting a scan automatically removes any bookmarks attached to findings from that scan
+
+**API:**
+- `PATCH /api/brands/[brandId]/findings/[findingId]` — body may include `{ isBookmarked: boolean, bookmarkNote?: string | null }`
+- `GET /api/brands/[brandId]/findings?bookmarkedOnly=true` — returns bookmarked findings across all scans for the brand
+
+---
+
 ## Environment Variables
 
 | Variable | Purpose |
@@ -234,7 +252,7 @@ Users can manually dismiss (ignore) any non-false-positive finding at the indivi
 | `users` | id, email, passwordHash, createdAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **googleResultsLimit?**, **allowAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, skippedCount** (denormalized — written by webhook, updated on ignore/un-ignore / duplicate-skip tracking), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, rawLlmResponse?, createdAt |
+| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?**, rawLlmResponse?, createdAt |
 
 ---
 
@@ -271,6 +289,7 @@ The findings API is optimised to minimise Firestore reads and HTTP round-trips o
   1. **Hits** — fetched when the scan row is first expanded
   2. **Non-hits** — fetched when the user first opens the "Non-hits" sub-section
   3. **Ignored** — fetched when the user first opens the "Ignored" sub-section
+- **Eager cross-scan bookmark fetch** — the brand page separately loads `GET /api/brands/[brandId]/findings?bookmarkedOnly=true` on mount so the bookmark follow-up panel is immediately available without expanding individual scans
 - **Lightweight list payloads** — the findings list endpoints (`GET /api/brands/[brandId]/findings` and `GET /api/findings`) return a compact `FindingSummary` shape via Firestore `.select(...)`, excluding `rawData`, `rawLlmResponse`, and other fields not needed for normal rendering. This avoids repeatedly shipping the full SERP batch payload on every finding card.
 - **Incremental dashboard fetch** — `GET /api/findings` pages through the newest findings until it has filled the requested limit, instead of always fetching a fixed `limit * 4` window and filtering in memory. This keeps dashboard reads closer to the actual number of cards rendered.
 - **Debug details fetched on demand** — `FindingCard` fetches `GET /api/brands/[brandId]/findings/[findingId]` only when a debug section is opened (`?debug=true`). Normal list views never load raw actor data or raw AI responses.
