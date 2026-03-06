@@ -71,11 +71,11 @@ export interface GoogleChunkAnalysisItem {
  */
 export interface GoogleChunkAnalysisOutput {
   items: GoogleChunkAnalysisItem[];
-  suggestedSearches?: string[];
 }
 
 /**
- * The structured JSON output expected from the aggregate Google suggestion pass.
+ * The structured JSON output expected from the final Google deep-search
+ * selection pass.
  */
 export interface GoogleSuggestionOutput {
   suggestedSearches?: string[];
@@ -106,8 +106,8 @@ export interface GoogleStoredFindingRawData extends Record<string, unknown> {
   };
 }
 
-/** Maximum follow-up queries AI analysis may request per batch run */
-export const MAX_SUGGESTED_SEARCHES = 3;
+/** Maximum follow-up deep-search queries AI analysis may request per Google batch run */
+export const MAX_SUGGESTED_SEARCHES = 5;
 
 /**
  * Parse and validate the raw JSON string returned by AI analysis.
@@ -191,7 +191,6 @@ export function parseGoogleChunkAnalysisOutput(
 
     return {
       items,
-      suggestedSearches: normalizeSuggestedSearches(parsed.suggestedSearches),
     };
   } catch {
     return null;
@@ -199,16 +198,16 @@ export function parseGoogleChunkAnalysisOutput(
 }
 
 /**
- * Parse and validate the raw JSON string returned by the aggregate Google
- * suggestion pass. Invalid or empty results collapse to an empty suggestion set.
+ * Parse and validate the raw JSON string returned by the Google deep-search
+ * selection pass. Invalid or empty results collapse to an empty suggestion set.
  */
-export function parseGoogleSuggestionOutput(raw: string): GoogleSuggestionOutput | null {
+export function parseGoogleSuggestionOutput(raw: string, maxSuggestedSearches = MAX_SUGGESTED_SEARCHES): GoogleSuggestionOutput | null {
   try {
     const stripped = stripJsonFences(raw);
     const parsed = JSON.parse(stripped);
 
     return {
-      suggestedSearches: normalizeSuggestedSearches(parsed.suggestedSearches),
+      suggestedSearches: normalizeSuggestedSearches(parsed.suggestedSearches, maxSuggestedSearches),
     };
   } catch {
     return null;
@@ -219,7 +218,7 @@ function stripJsonFences(raw: string): string {
   return raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 }
 
-function normalizeSuggestedSearches(value: unknown): string[] | undefined {
+function normalizeSuggestedSearches(value: unknown, maxSuggestedSearches: number): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
 
   const seen = new Set<string>();
@@ -232,7 +231,7 @@ function normalizeSuggestedSearches(value: unknown): string[] | undefined {
       seen.add(key);
       return true;
     })
-    .slice(0, MAX_SUGGESTED_SEARCHES);
+    .slice(0, maxSuggestedSearches);
 
   return suggestedSearches.length > 0 ? suggestedSearches : undefined;
 }

@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
-  ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Loader2,
+  ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
   ChevronDown, ChevronRight, Pencil, Trash2, X, EyeOff, Bookmark,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -13,7 +13,9 @@ import { Navbar } from '@/components/navbar';
 import { FindingCard } from '@/components/finding-card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { InfoTooltip, Tooltip } from '@/components/ui/tooltip';
+import { normalizeAllowAiDeepSearches } from '@/lib/brands';
 import { cn, formatScanDate } from '@/lib/utils';
 import type { ActorRunInfo, BrandProfile, FindingSummary, Scan, ScanSummary } from '@/lib/types';
 
@@ -21,6 +23,7 @@ const POLL_INTERVAL_MS = 5_000;
 const ACTIVE_SCAN_DELETE_TOOLTIP =
   "Scan history can't be changed while a scan is running because current results are compared against previous findings.";
 const CLEARING_HISTORY_DELETE_TOOLTIP = 'Please wait while scan history is being deleted.';
+const ANALYSIS_PROGRESS_BUCKET_SIZE = 10;
 
 type BookmarkUpdate = {
   isBookmarked?: boolean;
@@ -86,9 +89,9 @@ function SeverityPills({ high, medium, low }: { high: number; medium: number; lo
 // ---------------------------------------------------------------------------
 
 const SEVERITY_GROUP_CONFIG = {
-  high:   { variant: 'danger'  as const, label: 'High',   icon: AlertCircle,   headerBg: 'bg-red-50',   headerBorder: 'border-red-100',   hoverBg: 'hover:bg-red-50' },
-  medium: { variant: 'warning' as const, label: 'Medium', icon: AlertTriangle, headerBg: 'bg-amber-50', headerBorder: 'border-amber-100', hoverBg: 'hover:bg-amber-50' },
-  low:    { variant: 'success' as const, label: 'Low',    icon: Info,          headerBg: 'bg-green-50', headerBorder: 'border-green-100', hoverBg: 'hover:bg-green-50' },
+  high:   { variant: 'danger'  as const, label: 'High',   icon: AlertCircle,   headerBg: 'bg-red-50',   headerBorder: 'border-red-100',   hoverBg: 'hover:bg-red-100' },
+  medium: { variant: 'warning' as const, label: 'Medium', icon: AlertTriangle, headerBg: 'bg-amber-50', headerBorder: 'border-amber-100', hoverBg: 'hover:bg-amber-100' },
+  low:    { variant: 'success' as const, label: 'Low',    icon: Info,          headerBg: 'bg-green-50', headerBorder: 'border-green-100', hoverBg: 'hover:bg-green-100' },
 };
 
 function SeverityGroup({
@@ -96,16 +99,21 @@ function SeverityGroup({
   findings,
   onIgnoreToggle,
   onBookmarkUpdate,
+  forceExpanded = false,
+  highlightQuery,
 }: {
   severity: 'high' | 'medium' | 'low';
   findings: FindingSummary[];
   onIgnoreToggle?: (finding: FindingSummary, isIgnored: boolean) => Promise<void>;
   onBookmarkUpdate?: (finding: FindingSummary, updates: BookmarkUpdate) => Promise<void>;
+  forceExpanded?: boolean;
+  highlightQuery?: string;
 }) {
   const [isExpanded, setIsExpanded] = useState(severity === 'high');
   const [ignoringAll, setIgnoringAll] = useState(false);
 
   const { variant, label, icon: Icon, headerBg, headerBorder, hoverBg } = SEVERITY_GROUP_CONFIG[severity];
+  const expanded = forceExpanded || isExpanded;
 
   async function handleIgnoreAll(e: React.MouseEvent) {
     e.stopPropagation();
@@ -122,14 +130,17 @@ function SeverityGroup({
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className={cn("flex items-center transition border-b", isExpanded ? `${headerBg} ${headerBorder}` : `border-transparent ${hoverBg}`)}>
+      <div className={cn("flex items-center transition border-b", headerBg, headerBorder, !forceExpanded && hoverBg)}>
         <button
           type="button"
-          onClick={() => setIsExpanded((v) => !v)}
+          onClick={() => {
+            if (forceExpanded) return;
+            setIsExpanded((v) => !v);
+          }}
           className="flex items-center gap-2 flex-1 px-4 py-3 text-left min-w-0"
-          aria-expanded={isExpanded}
+          aria-expanded={expanded}
         >
-          {isExpanded
+          {expanded
             ? <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
             : <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />}
           <Badge variant={variant}>
@@ -154,12 +165,13 @@ function SeverityGroup({
           </button>
         )}
       </div>
-      {isExpanded && (
+      {expanded && (
         <div className="border-t border-gray-100 p-4 space-y-4">
           {findings.map((finding) => (
             <FindingCard
               key={finding.id}
               finding={finding}
+              highlightQuery={highlightQuery}
               onIgnoreToggle={onIgnoreToggle}
               onBookmarkUpdate={onBookmarkUpdate}
             />
@@ -168,6 +180,10 @@ function SeverityGroup({
       )}
     </div>
   );
+}
+
+function normalizeFindingsSearchText(value: string) {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -190,6 +206,8 @@ export default function BrandDetailPage() {
   const [showAllBookmarked, setShowAllBookmarked] = useState(false);
   const [allIgnoredFindings, setAllIgnoredFindings] = useState<FindingSummary[]>([]);
   const [showAllIgnored, setShowAllIgnored] = useState(false);
+  const [findingsSearchQuery, setFindingsSearchQuery] = useState('');
+  const [findingsSearchLoading, setFindingsSearchLoading] = useState(false);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
 
@@ -207,6 +225,9 @@ export default function BrandDetailPage() {
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const progressScanKeyRef = useRef<string | null>(null);
+  const pendingScanFindingsLoadsRef = useRef<Record<string, Promise<void>>>({});
+  const pendingScanNonHitsLoadsRef = useRef<Record<string, Promise<void>>>({});
+  const pendingScanIgnoredLoadsRef = useRef<Record<string, Promise<void>>>({});
   const [displayedScanProgressPct, setDisplayedScanProgressPct] = useState(0);
 
   function stopPolling() {
@@ -242,46 +263,77 @@ export default function BrandDetailPage() {
 
   async function loadScanFindings(scanId: string) {
     // Only loads hits — non-hits and ignored are lazy-loaded when those sections are first opened.
-    if (scanFindings[scanId] !== undefined || loadingScanIds.includes(scanId)) return;
+    if (scanFindings[scanId] !== undefined) return;
 
-    setLoadingScanIds((prev) => [...prev, scanId]);
-    try {
-      const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}`, { credentials: 'same-origin' });
-      if (res.ok) {
-        const json = await res.json();
-        setScanFindings((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
+    const pendingLoad = pendingScanFindingsLoadsRef.current[scanId];
+    if (pendingLoad) return pendingLoad;
+
+    const requestPromise = (async () => {
+      setLoadingScanIds((prev) => (prev.includes(scanId) ? prev : [...prev, scanId]));
+      try {
+        const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}`, { credentials: 'same-origin' });
+        if (res.ok) {
+          const json = await res.json();
+          setScanFindings((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
+        }
+      } catch {
+        // Non-critical
+      } finally {
+        delete pendingScanFindingsLoadsRef.current[scanId];
+        setLoadingScanIds((prev) => prev.filter((id) => id !== scanId));
       }
-    } catch {
-      // Non-critical
-    } finally {
-      setLoadingScanIds((prev) => prev.filter((id) => id !== scanId));
-    }
+    })();
+
+    pendingScanFindingsLoadsRef.current[scanId] = requestPromise;
+    return requestPromise;
   }
 
   async function loadScanNonHits(scanId: string) {
     if (scanNonHits[scanId] !== undefined) return;
-    try {
-      const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}&nonHitsOnly=true`, { credentials: 'same-origin' });
-      if (res.ok) {
-        const json = await res.json();
-        setScanNonHits((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
+
+    const pendingLoad = pendingScanNonHitsLoadsRef.current[scanId];
+    if (pendingLoad) return pendingLoad;
+
+    const requestPromise = (async () => {
+      try {
+        const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}&nonHitsOnly=true`, { credentials: 'same-origin' });
+        if (res.ok) {
+          const json = await res.json();
+          setScanNonHits((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
+        }
+      } catch {
+        // Non-critical
+      } finally {
+        delete pendingScanNonHitsLoadsRef.current[scanId];
       }
-    } catch {
-      // Non-critical
-    }
+    })();
+
+    pendingScanNonHitsLoadsRef.current[scanId] = requestPromise;
+    return requestPromise;
   }
 
   async function loadScanIgnored(scanId: string) {
     if (scanIgnored[scanId] !== undefined) return;
-    try {
-      const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}&ignoredOnly=true`, { credentials: 'same-origin' });
-      if (res.ok) {
-        const json = await res.json();
-        setScanIgnored((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
+
+    const pendingLoad = pendingScanIgnoredLoadsRef.current[scanId];
+    if (pendingLoad) return pendingLoad;
+
+    const requestPromise = (async () => {
+      try {
+        const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}&ignoredOnly=true`, { credentials: 'same-origin' });
+        if (res.ok) {
+          const json = await res.json();
+          setScanIgnored((prev) => ({ ...prev, [scanId]: json.data ?? [] }));
+        }
+      } catch {
+        // Non-critical
+      } finally {
+        delete pendingScanIgnoredLoadsRef.current[scanId];
       }
-    } catch {
-      // Non-critical
-    }
+    })();
+
+    pendingScanIgnoredLoadsRef.current[scanId] = requestPromise;
+    return requestPromise;
   }
 
   async function loadAllIgnoredFindings() {
@@ -697,6 +749,58 @@ export default function BrandDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandId]);
 
+  useEffect(() => {
+    if (!normalizeFindingsSearchText(findingsSearchQuery)) {
+      setFindingsSearchLoading(false);
+      return;
+    }
+
+    const needsHydration = scans.some((scan) => {
+      const hitCount = scan.highCount + scan.mediumCount + scan.lowCount;
+      return (
+        (hitCount > 0 && scanFindings[scan.id] === undefined)
+        || (scan.nonHitCount > 0 && scanNonHits[scan.id] === undefined)
+        || ((scan.ignoredCount ?? 0) > 0 && scanIgnored[scan.id] === undefined)
+      );
+    });
+
+    if (!needsHydration) {
+      setFindingsSearchLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setFindingsSearchLoading(true);
+
+    void Promise.all(
+      scans.flatMap((scan) => {
+        const loads: Promise<void>[] = [];
+        const hitCount = scan.highCount + scan.mediumCount + scan.lowCount;
+
+        if (hitCount > 0 && scanFindings[scan.id] === undefined) {
+          loads.push(loadScanFindings(scan.id));
+        }
+        if (scan.nonHitCount > 0 && scanNonHits[scan.id] === undefined) {
+          loads.push(loadScanNonHits(scan.id));
+        }
+        if ((scan.ignoredCount ?? 0) > 0 && scanIgnored[scan.id] === undefined) {
+          loads.push(loadScanIgnored(scan.id));
+        }
+
+        return loads;
+      }),
+    ).finally(() => {
+      if (!cancelled) {
+        setFindingsSearchLoading(false);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findingsSearchQuery, scans, scanFindings, scanNonHits, scanIgnored]);
+
   // ---------------------------------------------------------------------------
   // Scan toggling
   // ---------------------------------------------------------------------------
@@ -928,9 +1032,18 @@ export default function BrandDetailPage() {
     allRuns[0];
 
   const runStatus = activeRun?.status;
+  const allDeepSearchRuns = allRuns.filter((r) => (r.searchDepth ?? 0) > 0);
   const isDeepSearchActive = inFlightRuns.some((r) => (r.searchDepth ?? 0) > 0);
-  const deepSearchCount = inFlightRuns.filter((r) => (r.searchDepth ?? 0) > 0).length;
+  const activeDeepSearchCount = inFlightRuns.filter((r) => (r.searchDepth ?? 0) > 0).length;
+  const identifiedDeepSearchCount = Math.max(
+    allDeepSearchRuns.length,
+    allRuns.reduce((max, run) => Math.max(max, (run.searchDepth ?? 0) === 0 ? run.suggestedSearches?.length ?? 0 : 0), 0),
+  );
+  const completedDeepSearchCount = allDeepSearchRuns.filter(
+    (r) => r.status === 'succeeded' || r.status === 'failed',
+  ).length;
   const skippedDuplicateCount = allRuns.reduce((sum, run) => sum + (run.skippedDuplicateCount ?? 0), 0);
+  const isAiDeepSearchEnabled = normalizeAllowAiDeepSearches(brand?.allowAiDeepSearches);
 
   function getRunAnalysisCounts(run?: ActorRunInfo): { completed: number; total: number } | null {
     if (!run || run.status !== 'analysing') return null;
@@ -940,13 +1053,27 @@ export default function BrandDetailPage() {
     return { completed, total };
   }
 
+  function formatAnalysisProgressRange(completed: number, total: number): string {
+    if (total <= ANALYSIS_PROGRESS_BUCKET_SIZE + 1) {
+      return `0 - ${total}`;
+    }
+    if (completed >= total) return `${total} out of ${total}`;
+    if (completed <= ANALYSIS_PROGRESS_BUCKET_SIZE) {
+      return `0 - ${Math.min(total, ANALYSIS_PROGRESS_BUCKET_SIZE)} out of ${total}`;
+    }
+
+    const rangeStart = Math.floor((completed - 1) / ANALYSIS_PROGRESS_BUCKET_SIZE) * ANALYSIS_PROGRESS_BUCKET_SIZE + 1;
+    const rangeEnd = Math.min(total, rangeStart + ANALYSIS_PROGRESS_BUCKET_SIZE - 1);
+    return `${rangeStart} - ${rangeEnd} out of ${total}`;
+  }
+
   function withAnalysisCounts(inProgressLabel: string, finalisingLabel: string, run?: ActorRunInfo): string {
     const counts = getRunAnalysisCounts(run);
-    if (!counts) return `${inProgressLabel}…`;
+    if (!counts) return inProgressLabel;
     if (counts.completed >= counts.total) {
-      return `${finalisingLabel} (${counts.total}/${counts.total})…`;
+      return `${finalisingLabel} (${formatAnalysisProgressRange(counts.total, counts.total)})`;
     }
-    return `${inProgressLabel} (${counts.completed}/${counts.total})…`;
+    return `${inProgressLabel} (${formatAnalysisProgressRange(counts.completed, counts.total)})`;
   }
 
   function formatDeepSearchQueryForDisplay(query: string): string {
@@ -960,14 +1087,16 @@ export default function BrandDetailPage() {
     return formatted || query.trim();
   }
 
-  function renderDeepSearchQueryLabel(prefix: string, query: string, suffix = '…'): ReactNode {
+  function renderDeepSearchQueryLabel(prefix: string, query: string, suffix = ''): ReactNode {
     const displayQuery = formatDeepSearchQueryForDisplay(query);
 
     return (
       <>
         {prefix}
         {' '}
-        <em>{displayQuery}</em>
+        <span className="align-bottom" title={displayQuery}>
+          <em>{displayQuery}</em>
+        </span>
         {suffix}
       </>
     );
@@ -982,13 +1111,18 @@ export default function BrandDetailPage() {
     const prefix = counts.completed >= counts.total
       ? 'Finalising deep search results for'
       : 'Analysing deep search results for';
-    const progress = ` (${counts.completed >= counts.total ? counts.total : counts.completed}/${counts.total})…`;
+    const progress = ` (${formatAnalysisProgressRange(counts.completed, counts.total)})`;
 
     return renderDeepSearchQueryLabel(prefix, query, progress);
   }
 
+  function getDeepSearchSelectionAnnouncement(): string | null {
+    if (identifiedDeepSearchCount <= 0) return null;
+    return `AI analysis identified ${identifiedDeepSearchCount} follow up search${identifiedDeepSearchCount !== 1 ? 'es' : ''}.`;
+  }
+
   function getScanStatusLabel(): ReactNode {
-    if (!activeRun) return 'Starting scan…';
+    if (!activeRun) return 'Starting scan';
 
     if (isDeepSearchActive) {
       const query = activeRun.searchQuery;
@@ -996,24 +1130,24 @@ export default function BrandDetailPage() {
         case 'fetching_dataset':
           return query
             ? renderDeepSearchQueryLabel('Fetching deeper results for', query)
-            : `Fetching deeper results (${deepSearchCount} quer${deepSearchCount !== 1 ? 'ies' : 'y'})…`;
+            : `Investigating ${activeDeepSearchCount} more related quer${activeDeepSearchCount !== 1 ? 'ies' : 'y'}`;
         case 'analysing':
           return query
             ? renderDeepSearchAnalysisLabel(query, activeRun)
-            : withAnalysisCounts('Analysing deep search results with AI', 'Finalising deep search results AI analysis', activeRun);
+            : withAnalysisCounts('Analysing deep search results with AI', 'Finalising deep search results with AI', activeRun);
         default:
-          return deepSearchCount > 1
-            ? `Investigating ${deepSearchCount} related queries…`
+          return activeDeepSearchCount > 1
+            ? `Investigating ${activeDeepSearchCount} more related queries`
             : query
               ? renderDeepSearchQueryLabel('Investigating related query:', query)
-              : 'Running deeper investigation…';
+              : 'Running deeper investigation';
       }
     }
 
     switch (runStatus) {
-      case 'fetching_dataset': return 'Fetching results from Apify…';
-      case 'analysing': return withAnalysisCounts('Analysing results with AI', 'Finalising results with AI', activeRun);
-      default: return 'Waiting for web search to complete…';
+      case 'fetching_dataset': return 'Fetching initial search results from Apify';
+      case 'analysing': return withAnalysisCounts('Analysing initial search results with AI', 'Finalising initial search results with AI', activeRun);
+      default: return 'Waiting for web search to complete';
     }
   }
 
@@ -1023,6 +1157,13 @@ export default function BrandDetailPage() {
       return '1 result is being skipped because it duplicates previous findings.';
     }
     return `${skippedDuplicateCount} results are being skipped because they duplicate previous findings.`;
+  }
+
+  function getDeepSearchProgressSubtext(): string | null {
+    const announcement = getDeepSearchSelectionAnnouncement();
+    if (!announcement) return null;
+    if (allDeepSearchRuns.length === 0) return announcement;
+    return `${announcement} ${completedDeepSearchCount}/${identifiedDeepSearchCount} follow up search${identifiedDeepSearchCount !== 1 ? 'es' : ''} complete.`;
   }
 
   function getRunProgressFraction(run: ActorRunInfo): number {
@@ -1052,6 +1193,14 @@ export default function BrandDetailPage() {
 
     const totalFraction =
       allRuns.reduce((sum, run) => sum + getRunProgressFraction(run), 0) / allRuns.length;
+
+    if (isAiDeepSearchEnabled && identifiedDeepSearchCount === 0) {
+      const initialRun = allRuns.find((run) => (run.searchDepth ?? 0) === 0) ?? activeRun;
+      const initialFraction = initialRun ? getRunProgressFraction(initialRun) : totalFraction;
+      // Reserve more visible headroom while the initial pass is still deciding
+      // whether any AI deep-search follow-ups will be launched.
+      return Math.round(8 + 70 * initialFraction);
+    }
 
     // Leave visible headroom so late-discovered deep-search runs do not imply the
     // scan is effectively complete before the backend has finished all work.
@@ -1088,12 +1237,47 @@ export default function BrandDetailPage() {
     );
   }
 
+  const normalizedFindingsSearchQuery = normalizeFindingsSearchText(findingsSearchQuery);
+  const isFindingsSearchActive = normalizedFindingsSearchQuery.length > 0;
+  const activeHighlightQuery = isFindingsSearchActive ? findingsSearchQuery : undefined;
+
+  function matchesFindingsSearch(finding: FindingSummary) {
+    if (!isFindingsSearchActive) return true;
+
+    return normalizeFindingsSearchText(
+      `${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis}`,
+    ).includes(normalizedFindingsSearchQuery);
+  }
+
+  function filterFindingsForSearch(findings?: FindingSummary[]) {
+    if (!findings) return findings;
+    return isFindingsSearchActive ? findings.filter(matchesFindingsSearch) : findings;
+  }
+
   const totalFindings = scans.reduce((sum, s) => sum + s.highCount + s.mediumCount + s.lowCount, 0);
   const totalNonHits = scans.reduce((sum, s) => sum + s.nonHitCount, 0);
   const totalIgnored = scans.reduce((sum, s) => sum + (s.ignoredCount ?? 0), 0);
   const totalSkipped = scans.reduce((sum, s) => sum + (s.skippedCount ?? 0), 0);
-  const bookmarkedHits = allBookmarkedFindings.filter((finding) => !finding.isFalsePositive);
-  const bookmarkedNonHits = sortBySeverity(allBookmarkedFindings.filter((finding) => finding.isFalsePositive));
+  const visibleBookmarkedFindings = filterFindingsForSearch(allBookmarkedFindings) ?? [];
+  const bookmarkedHits = visibleBookmarkedFindings.filter((finding) => !finding.isFalsePositive);
+  const bookmarkedNonHits = sortBySeverity(visibleBookmarkedFindings.filter((finding) => finding.isFalsePositive));
+  const visibleIgnoredFindings = filterFindingsForSearch(allIgnoredFindings) ?? [];
+  const visibleLiveScanFindings = filterFindingsForSearch(liveScanFindings) ?? [];
+  const scansToRender = isFindingsSearchActive
+    ? scans.filter((scan) => {
+        const hits = filterFindingsForSearch(scanFindings[scan.id]) ?? [];
+        const nonHits = filterFindingsForSearch(scanNonHits[scan.id]) ?? [];
+        const ignored = filterFindingsForSearch(scanIgnored[scan.id]) ?? [];
+        return hits.length > 0 || nonHits.length > 0 || ignored.length > 0;
+      })
+    : scans;
+  const hasAnyVisibleSearchMatches = (
+    visibleLiveScanFindings.length > 0
+    || bookmarkedHits.length > 0
+    || bookmarkedNonHits.length > 0
+    || visibleIgnoredFindings.length > 0
+    || scansToRender.length > 0
+  );
   const clearHistoryDisabledReason = scanning
     ? ACTIVE_SCAN_DELETE_TOOLTIP
     : clearing
@@ -1256,8 +1440,8 @@ export default function BrandDetailPage() {
                   <div className="flex items-center justify-between gap-4 mb-3">
                     <div className="flex items-center gap-2 min-w-0">
                       <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
-                      <span className="text-sm font-medium text-brand-800 truncate">
-                        {cancelling ? 'Cancelling scan…' : getScanStatusLabel()}
+                      <span className="text-sm font-medium text-brand-700 truncate">
+                        {cancelling ? 'Cancelling scan' : getScanStatusLabel()}
                       </span>
                       {isDeepSearchActive && !cancelling && (
                         <span className="flex-shrink-0 inline-flex items-center gap-1 bg-brand-100 text-brand-700 text-xs font-medium px-2 py-0.5 rounded-full">
@@ -1283,6 +1467,11 @@ export default function BrandDetailPage() {
                       style={{ width: `${displayedScanProgressPct}%` }}
                     />
                   </div>
+                  {!cancelling && getDeepSearchProgressSubtext() && (
+                    <p className="mt-3 text-xs text-brand-700/80">
+                      {getDeepSearchProgressSubtext()}
+                    </p>
+                  )}
                   {!cancelling && getSkippedDuplicateSubtext() && (
                     <p className="mt-2 text-xs text-brand-700/80">
                       {getSkippedDuplicateSubtext()}
@@ -1295,11 +1484,11 @@ export default function BrandDetailPage() {
               {/* Findings panel */}
               <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
                 {/* Panel header */}
-                <div className="px-6 py-5 border-b border-brand-100 flex items-center justify-between gap-4 bg-brand-50">
+                <div className="px-6 py-5 border-b border-brand-700 flex items-center justify-between gap-4 bg-brand-600">
                   <div className="flex items-center gap-3">
                     <div>
-                      <h2 className="text-base font-semibold text-gray-900">Findings</h2>
-                      <p className="text-xs text-gray-500">
+                      <h2 className="text-base font-semibold text-white">Findings</h2>
+                      <p className="text-xs font-medium text-white/85">
                         {scans.length === 0
                           ? 'No scans yet'
                           : `${scans.length} scan${scans.length !== 1 ? 's' : ''} · ${totalFindings} finding${totalFindings !== 1 ? 's' : ''} detected`}
@@ -1317,7 +1506,7 @@ export default function BrandDetailPage() {
                               e.preventDefault();
                               e.stopPropagation();
                             }}
-                            className="inline-flex items-center justify-center gap-2 rounded-full font-medium px-3 py-1.5 text-xs bg-transparent text-gray-400 opacity-45 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                            className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 px-3 py-1.5 text-xs font-medium bg-white/5 text-white/50 opacity-70 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                             Clear history
@@ -1328,14 +1517,21 @@ export default function BrandDetailPage() {
                           variant="ghost"
                           size="sm"
                           onClick={() => setConfirmClear(true)}
-                          className="text-gray-400 hover:text-red-600"
+                          className="border border-white/15 text-white/90 hover:text-white hover:bg-white/10"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                           Clear history
                         </Button>
                       )
                     )}
-                    <Button size="sm" onClick={triggerScan} loading={scanning} disabled={scanning || clearing || confirmClear}>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={triggerScan}
+                      loading={scanning}
+                      disabled={scanning || clearing || confirmClear}
+                      className="border-white/20 bg-white !text-brand-700 hover:bg-brand-50 hover:border-white/30 disabled:hover:bg-white"
+                    >
                       <Play className="w-4 h-4" />
                       Run scan
                     </Button>
@@ -1360,30 +1556,63 @@ export default function BrandDetailPage() {
                   </div>
                 )}
 
-                {allBookmarkedFindings.length > 0 && (
+                <div className="px-6 py-4 border-b border-gray-100 bg-white">
+                  <div className="relative max-w-xl">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      value={findingsSearchQuery}
+                      onChange={(e) => setFindingsSearchQuery(e.target.value)}
+                      placeholder="Search finding titles, URLs, and analyses"
+                      aria-label="Search findings"
+                      className="pl-9 pr-10"
+                    />
+                    {isFindingsSearchActive && (
+                      <button
+                        type="button"
+                        onClick={() => setFindingsSearchQuery('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition"
+                        aria-label="Clear findings search"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  {isFindingsSearchActive && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      {findingsSearchLoading
+                        ? 'Searching across hits, non-hits, ignored, and bookmarked findings...'
+                        : 'Showing only findings that match this search.'}
+                    </p>
+                  )}
+                </div>
+
+                {(isFindingsSearchActive ? visibleBookmarkedFindings.length > 0 : allBookmarkedFindings.length > 0) && (
                   <div className="border-b border-gray-100">
                     <button
                       type="button"
-                      onClick={() => setShowAllBookmarked((v) => !v)}
+                      onClick={() => {
+                        if (isFindingsSearchActive) return;
+                        setShowAllBookmarked((v) => !v);
+                      }}
                       className={cn(
                         "w-full px-6 py-5 flex items-center gap-3 transition text-left bg-amber-50",
-                        showAllBookmarked ? "border-b border-amber-100" : "hover:bg-amber-100/70",
+                        (isFindingsSearchActive || showAllBookmarked) ? "border-b border-amber-100" : "hover:bg-amber-100/70",
                       )}
-                      aria-expanded={showAllBookmarked}
+                      aria-expanded={isFindingsSearchActive || showAllBookmarked}
                     >
-                      {showAllBookmarked
+                      {(isFindingsSearchActive || showAllBookmarked)
                         ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
                         : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
                       <Bookmark className="w-4 h-4 text-amber-600 flex-shrink-0" />
                       <div>
                         <h2 className="text-base font-semibold text-gray-900">Bookmarked findings</h2>
                         <p className="text-xs text-gray-500">
-                          {allBookmarkedFindings.length} bookmarked finding{allBookmarkedFindings.length !== 1 ? 's' : ''} saved for follow-up
+                          {(isFindingsSearchActive ? visibleBookmarkedFindings.length : allBookmarkedFindings.length)} bookmarked finding{(isFindingsSearchActive ? visibleBookmarkedFindings.length : allBookmarkedFindings.length) !== 1 ? 's' : ''} saved for follow-up
                         </p>
                       </div>
                     </button>
 
-                    {showAllBookmarked && (
+                    {(isFindingsSearchActive || showAllBookmarked) && (
                       <div className="bg-gray-50 px-4 sm:px-6 py-5">
                         <div className="space-y-3">
                           {(['high', 'medium', 'low'] as const)
@@ -1394,6 +1623,8 @@ export default function BrandDetailPage() {
                                 severity={sev}
                                 findings={bookmarkedHits.filter((finding) => finding.severity === sev)}
                                 onBookmarkUpdate={handleBookmarkUpdate}
+                                forceExpanded={isFindingsSearchActive}
+                                highlightQuery={activeHighlightQuery}
                               />
                             ))}
 
@@ -1414,6 +1645,7 @@ export default function BrandDetailPage() {
                                   <FindingCard
                                     key={finding.id}
                                     finding={finding}
+                                    highlightQuery={activeHighlightQuery}
                                     onBookmarkUpdate={handleBookmarkUpdate}
                                   />
                                 ))}
@@ -1429,7 +1661,7 @@ export default function BrandDetailPage() {
                 {/* Scan result sets */}
                 <div className="divide-y divide-gray-100">
                   {/* Live findings — shown while a scan is in progress */}
-                  {scanning && (
+                  {scanning && (!isFindingsSearchActive || visibleLiveScanFindings.length > 0) && (
                     <div className="bg-brand-50/40">
                       {/* Live row header */}
                       <div className="flex items-center gap-4 px-6 py-4">
@@ -1438,32 +1670,36 @@ export default function BrandDetailPage() {
                           <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
                             Scan in progress
                           </span>
-                          {liveScanFindings.length > 0 && (
+                          {visibleLiveScanFindings.length > 0 && (
                             <SeverityPills
-                              high={liveScanFindings.filter((f) => f.severity === 'high').length}
-                              medium={liveScanFindings.filter((f) => f.severity === 'medium').length}
-                              low={liveScanFindings.filter((f) => f.severity === 'low').length}
+                              high={visibleLiveScanFindings.filter((f) => f.severity === 'high').length}
+                              medium={visibleLiveScanFindings.filter((f) => f.severity === 'medium').length}
+                              low={visibleLiveScanFindings.filter((f) => f.severity === 'low').length}
                             />
                           )}
                         </div>
                       </div>
                       {/* Live row body */}
                       <div className="border-t border-brand-100 px-4 sm:px-6 py-5 bg-brand-50/30">
-                        {liveScanFindings.length === 0 ? (
+                        {visibleLiveScanFindings.length === 0 ? (
                           <div className="flex items-center justify-center py-8 gap-2 text-gray-400">
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            <span className="text-sm">Waiting for first results…</span>
+                            <span className="text-sm">
+                              {isFindingsSearchActive ? 'No live findings match this search yet.' : 'Waiting for first results…'}
+                            </span>
                           </div>
                         ) : (
                           <div className="space-y-3">
                             {(['high', 'medium', 'low'] as const)
-                              .filter((sev) => liveScanFindings.some((f) => f.severity === sev))
+                              .filter((sev) => visibleLiveScanFindings.some((f) => f.severity === sev))
                               .map((sev) => (
                                 <SeverityGroup
                                   key={`live-${sev}`}
                                   severity={sev}
-                                  findings={liveScanFindings.filter((f) => f.severity === sev)}
+                                  findings={visibleLiveScanFindings.filter((f) => f.severity === sev)}
                                   onBookmarkUpdate={handleBookmarkUpdate}
+                                  forceExpanded={isFindingsSearchActive}
+                                  highlightQuery={activeHighlightQuery}
                                 />
                               ))}
                           </div>
@@ -1472,7 +1708,19 @@ export default function BrandDetailPage() {
                     </div>
                   )}
 
-                  {scans.length === 0 && !scanning ? (
+                  {isFindingsSearchActive && findingsSearchLoading ? (
+                    <div className="flex items-center justify-center py-12 gap-2 text-gray-400">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span className="text-sm">Searching across all findings…</span>
+                    </div>
+                  ) : isFindingsSearchActive && !hasAnyVisibleSearchMatches ? (
+                    <div className="flex flex-col items-center justify-center py-12 gap-3">
+                      <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
+                        <Search className="w-5 h-5 text-brand-600" />
+                      </div>
+                      <p className="text-sm text-gray-500">No findings match this search.</p>
+                    </div>
+                  ) : !isFindingsSearchActive && scansToRender.length === 0 && !scanning ? (
                     <div className="flex flex-col items-center justify-center py-12 gap-3">
                       <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
                         <Shield className="w-5 h-5 text-brand-600" />
@@ -1480,17 +1728,43 @@ export default function BrandDetailPage() {
                       <p className="text-sm text-gray-500">No findings yet. Run a scan to start monitoring.</p>
                     </div>
                   ) : (
-                    scans.map((scan) => {
-                      const isExpanded = expandedScanIds.includes(scan.id);
+                    scansToRender.map((scan) => {
+                      const hits = filterFindingsForSearch(scanFindings[scan.id]);
+                      const nonHits = filterFindingsForSearch(scanNonHits[scan.id]);
+                      const ignored = filterFindingsForSearch(scanIgnored[scan.id]);
+                      const matchingHitCount = hits?.length ?? 0;
+                      const matchingNonHitCount = nonHits?.length ?? 0;
+                      const matchingIgnoredCount = ignored?.length ?? 0;
+                      const isExpanded = isFindingsSearchActive
+                        ? matchingHitCount + matchingNonHitCount + matchingIgnoredCount > 0
+                        : expandedScanIds.includes(scan.id);
                       const isLoading = loadingScanIds.includes(scan.id);
-                      const hits = scanFindings[scan.id];
-                      const nonHits = scanNonHits[scan.id];
-                      const ignored = scanIgnored[scan.id];
-                      const showNonHits = showNonHitsByScanId[scan.id] ?? false;
-                      const showIgnored = showIgnoredByScanId[scan.id] ?? false;
+                      const showNonHits = isFindingsSearchActive
+                        ? matchingNonHitCount > 0
+                        : showNonHitsByScanId[scan.id] ?? false;
+                      const showIgnored = isFindingsSearchActive
+                        ? matchingIgnoredCount > 0
+                        : showIgnoredByScanId[scan.id] ?? false;
                       const isConfirmingDelete = confirmDeleteScanId === scan.id;
                       const isDeleting = deletingScanId === scan.id;
-                      const hasFindings = scan.highCount + scan.mediumCount + scan.lowCount > 0;
+                      const hasFindings = isFindingsSearchActive
+                        ? matchingHitCount > 0
+                        : scan.highCount + scan.mediumCount + scan.lowCount > 0;
+                      const displayedHighCount = isFindingsSearchActive
+                        ? hits?.filter((f) => f.severity === 'high').length ?? 0
+                        : scan.highCount;
+                      const displayedMediumCount = isFindingsSearchActive
+                        ? hits?.filter((f) => f.severity === 'medium').length ?? 0
+                        : scan.mediumCount;
+                      const displayedLowCount = isFindingsSearchActive
+                        ? hits?.filter((f) => f.severity === 'low').length ?? 0
+                        : scan.lowCount;
+                      const displayedNonHitCount = isFindingsSearchActive
+                        ? matchingNonHitCount
+                        : scan.nonHitCount;
+                      const displayedIgnoredCount = isFindingsSearchActive
+                        ? matchingIgnoredCount
+                        : (scan.ignoredCount ?? 0);
                       const deleteDisabledReason = scanning
                         ? ACTIVE_SCAN_DELETE_TOOLTIP
                         : clearing
@@ -1531,7 +1805,10 @@ export default function BrandDetailPage() {
                       {/* Expand toggle */}
                       <button
                         type="button"
-                        onClick={() => toggleScanExpand(scan.id)}
+                        onClick={() => {
+                          if (isFindingsSearchActive) return;
+                          toggleScanExpand(scan.id);
+                        }}
                         className="flex items-center gap-4 flex-1 min-w-0 text-left"
                         aria-expanded={isExpanded}
                       >
@@ -1544,21 +1821,21 @@ export default function BrandDetailPage() {
                                 <span className="flex items-center gap-1.5 flex-wrap min-w-0">
                                   {hasFindings ? (
                                     <SeverityPills
-                                      high={scan.highCount}
-                                      medium={scan.mediumCount}
-                                      low={scan.lowCount}
+                                      high={displayedHighCount}
+                                      medium={displayedMediumCount}
+                                      low={displayedLowCount}
                                     />
                                   ) : (
                                     <span className="text-xs text-gray-400">No findings</span>
                                   )}
-                                  {scan.nonHitCount > 0 && (
+                                  {displayedNonHitCount > 0 && (
                                     <span className="text-xs text-gray-400">
-                                      · {scan.nonHitCount} non-hit{scan.nonHitCount !== 1 ? 's' : ''}
+                                      · {displayedNonHitCount} non-hit{displayedNonHitCount !== 1 ? 's' : ''}
                                     </span>
                                   )}
-                                  {(scan.ignoredCount ?? 0) > 0 && (
+                                  {displayedIgnoredCount > 0 && (
                                     <span className="text-xs text-gray-400">
-                                      · {scan.ignoredCount} ignored
+                                      · {displayedIgnoredCount} ignored
                                     </span>
                                   )}
                                   {(scan.skippedCount ?? 0) > 0 && (
@@ -1622,14 +1899,16 @@ export default function BrandDetailPage() {
                                 <>
                                   {/* Real findings grouped by severity */}
                                   {!hits || hits.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center py-8 gap-2">
-                                      <Shield className="w-5 h-5 text-brand-300" />
-                                      <p className="text-sm text-gray-400">
-                                        {scan.skippedCount > 0
-                                          ? 'No new findings detected in this scan.'
-                                          : 'No findings detected in this scan.'}
-                                      </p>
-                                    </div>
+                                    !isFindingsSearchActive && (
+                                      <div className="flex flex-col items-center justify-center py-8 gap-2">
+                                        <Shield className="w-5 h-5 text-brand-300" />
+                                        <p className="text-sm text-gray-400">
+                                          {scan.skippedCount > 0
+                                            ? 'No new findings detected in this scan.'
+                                            : 'No findings detected in this scan.'}
+                                        </p>
+                                      </div>
+                                    )
                                   ) : (
                                     <div className="space-y-3">
                                       {(['high', 'medium', 'low'] as const)
@@ -1641,17 +1920,20 @@ export default function BrandDetailPage() {
                                             findings={hits.filter((f) => f.severity === sev)}
                                             onIgnoreToggle={handleIgnoreToggle}
                                             onBookmarkUpdate={handleBookmarkUpdate}
+                                            forceExpanded={isFindingsSearchActive}
+                                            highlightQuery={activeHighlightQuery}
                                           />
                                         ))}
                                     </div>
                                   )}
 
                                   {/* Non-hits sub-section */}
-                                  {scan.nonHitCount > 0 && (
+                                  {displayedNonHitCount > 0 && (
                                     <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
                                       <button
                                         type="button"
                                         onClick={() => {
+                                          if (isFindingsSearchActive) return;
                                           const next = !showNonHitsByScanId[scan.id];
                                           setShowNonHitsByScanId((prev) => ({ ...prev, [scan.id]: next }));
                                           if (next) loadScanNonHits(scan.id);
@@ -1667,7 +1949,7 @@ export default function BrandDetailPage() {
                                         <span className="text-sm font-medium text-gray-500">
                                           Non-hits
                                           <span className="ml-1.5 text-xs font-normal text-gray-400">
-                                            ({nonHits ? nonHits.length : scan.nonHitCount})
+                                            ({nonHits ? nonHits.length : displayedNonHitCount})
                                           </span>
                                         </span>
                                         <span className="text-xs text-gray-400">· classified as false positives by AI</span>
@@ -1684,6 +1966,7 @@ export default function BrandDetailPage() {
                                               <FindingCard
                                                 key={finding.id}
                                                 finding={finding}
+                                                highlightQuery={activeHighlightQuery}
                                                 onIgnoreToggle={handleIgnoreToggle}
                                                 onBookmarkUpdate={handleBookmarkUpdate}
                                               />
@@ -1695,11 +1978,12 @@ export default function BrandDetailPage() {
                                   )}
 
                                   {/* Ignored sub-section */}
-                                  {(scan.ignoredCount ?? 0) > 0 && (
+                                  {displayedIgnoredCount > 0 && (
                                     <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
                                       <button
                                         type="button"
                                         onClick={() => {
+                                          if (isFindingsSearchActive) return;
                                           const next = !showIgnoredByScanId[scan.id];
                                           setShowIgnoredByScanId((prev) => ({ ...prev, [scan.id]: next }));
                                           if (next) loadScanIgnored(scan.id);
@@ -1716,7 +2000,7 @@ export default function BrandDetailPage() {
                                         <span className="text-sm font-medium text-gray-500">
                                           Ignored
                                           <span className="ml-1.5 text-xs font-normal text-gray-400">
-                                            ({ignored ? ignored.length : (scan.ignoredCount ?? 0)})
+                                            ({ignored ? ignored.length : displayedIgnoredCount})
                                           </span>
                                         </span>
                                         <span className="text-xs text-gray-400">· manually dismissed</span>
@@ -1733,6 +2017,7 @@ export default function BrandDetailPage() {
                                               <FindingCard
                                                 key={finding.id}
                                                 finding={finding}
+                                                highlightQuery={activeHighlightQuery}
                                                 onIgnoreToggle={handleIgnoreToggle}
                                                 onBookmarkUpdate={handleBookmarkUpdate}
                                               />
@@ -1753,34 +2038,38 @@ export default function BrandDetailPage() {
                 </div>
               </div>
               {/* Brand-level ignored URLs panel */}
-              {allIgnoredFindings.length > 0 && (
+              {(isFindingsSearchActive ? visibleIgnoredFindings.length > 0 : allIgnoredFindings.length > 0) && (
                 <div className="mt-6 bg-white rounded-2xl border border-gray-200 overflow-hidden">
                   <button
                     type="button"
-                    onClick={() => setShowAllIgnored((v) => !v)}
+                    onClick={() => {
+                      if (isFindingsSearchActive) return;
+                      setShowAllIgnored((v) => !v);
+                    }}
                     className={cn(
                       "w-full px-6 py-5 flex items-center gap-3 transition text-left bg-brand-50",
-                      showAllIgnored ? "border-b border-brand-100" : "hover:bg-brand-100"
+                      (isFindingsSearchActive || showAllIgnored) ? "border-b border-brand-100" : "hover:bg-brand-100"
                     )}
-                    aria-expanded={showAllIgnored}
+                    aria-expanded={isFindingsSearchActive || showAllIgnored}
                   >
-                    {showAllIgnored
+                    {(isFindingsSearchActive || showAllIgnored)
                       ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
                       : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
                     <EyeOff className="w-4 h-4 text-gray-400 flex-shrink-0" />
                     <div>
                       <h2 className="text-base font-semibold text-gray-900">Ignored URLs</h2>
                       <p className="text-xs text-gray-500">
-                        {allIgnoredFindings.length} URL{allIgnoredFindings.length !== 1 ? 's' : ''} manually dismissed · AI analysis will skip these in future scans
+                        {(isFindingsSearchActive ? visibleIgnoredFindings.length : allIgnoredFindings.length)} URL{(isFindingsSearchActive ? visibleIgnoredFindings.length : allIgnoredFindings.length) !== 1 ? 's' : ''} manually dismissed · AI analysis will skip these in future scans
                       </p>
                     </div>
                   </button>
-                  {showAllIgnored && (
+                  {(isFindingsSearchActive || showAllIgnored) && (
                     <div className="border-t border-gray-100 p-4 sm:p-5 space-y-4">
-                      {allIgnoredFindings.map((finding) => (
+                      {visibleIgnoredFindings.map((finding) => (
                         <FindingCard
                           key={finding.id}
                           finding={finding}
+                          highlightQuery={activeHighlightQuery}
                           onIgnoreToggle={handleIgnoreToggle}
                           onBookmarkUpdate={handleBookmarkUpdate}
                         />

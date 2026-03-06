@@ -1,32 +1,29 @@
-export const GOOGLE_RESULTS_STEP = 10;
-export const MIN_GOOGLE_RESULTS_LIMIT = 10;
-export const MAX_GOOGLE_RESULTS_LIMIT = 100;
-export const DEFAULT_GOOGLE_RESULTS_LIMIT = 10;
-export const GOOGLE_SERP_RESULTS_PER_PAGE = 10;
+export const FIXED_INITIAL_GOOGLE_PAGE_COUNT = 3;
 export const DEFAULT_ALLOW_AI_DEEP_SEARCHES = true;
+export const MIN_AI_DEEP_SEARCHES = 1;
+export const MAX_AI_DEEP_SEARCHES = 10;
+export const DEFAULT_MAX_AI_DEEP_SEARCHES = 5;
 export const MIN_DEEP_SEARCH_PAGE_COUNT = 1;
-export const MAX_DEEP_SEARCH_PAGE_COUNT = 3;
+export const MAX_DEEP_SEARCH_PAGE_COUNT = 2;
 
-export function isValidGoogleResultsLimit(value: unknown): value is number {
+export function isValidMaxAiDeepSearches(value: unknown): value is number {
   return (
     typeof value === 'number' &&
     Number.isInteger(value) &&
-    value >= MIN_GOOGLE_RESULTS_LIMIT &&
-    value <= MAX_GOOGLE_RESULTS_LIMIT &&
-    value % GOOGLE_RESULTS_STEP === 0
+    value >= MIN_AI_DEEP_SEARCHES &&
+    value <= MAX_AI_DEEP_SEARCHES
   );
 }
 
-export function normalizeGoogleResultsLimit(value: unknown): number {
-  return isValidGoogleResultsLimit(value) ? value : DEFAULT_GOOGLE_RESULTS_LIMIT;
+export function normalizeMaxAiDeepSearches(value: unknown): number {
+  return isValidMaxAiDeepSearches(value) ? value : DEFAULT_MAX_AI_DEEP_SEARCHES;
 }
 
-export function getGoogleResultsPageCount(value: unknown): number {
-  return Math.ceil(normalizeGoogleResultsLimit(value) / GOOGLE_SERP_RESULTS_PER_PAGE);
+export function getInitialGooglePageCount(): number {
+  return FIXED_INITIAL_GOOGLE_PAGE_COUNT;
 }
 
-export function getDeepSearchGooglePageCount(value: unknown): number {
-  void value;
+export function getDeepSearchGooglePageCount(): number {
   return MAX_DEEP_SEARCH_PAGE_COUNT;
 }
 

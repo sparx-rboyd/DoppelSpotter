@@ -56,7 +56,7 @@ primaryQuery = searchTerms.join(' OR ')
 
 | Actor | Input |
 |---|---|
-| `apify/google-search-scraper` | `{ queries: primaryQuery, maxPagesPerQuery: Math.ceil(googleResultsLimit / 10) }` |
+| `apify/google-search-scraper` | `{ queries: primaryQuery, maxPagesPerQuery: 3 }` |
 | `apify/instagram-search-scraper` | `{ searchQueries: searchTerms, maxResults: 20 }` |
 | `data-slayer/twitter-search` | `{ searchTerms: searchTerms, maxTweets: 50 }` |
 | `apify/facebook-search-scraper` | `{ queries: searchTerms, maxResults: 20 }` |
@@ -86,8 +86,8 @@ push one dataset item per result — so 30 results → 30 items. It doesn't work
 
 Instead, the actor pushes **one dataset item per _page_ of Google results**. Each item
 is a single large JSON object that contains _all_ the results from that page bundled
-together inside an `organicResults` array. So if a brand is configured for 30 Google
-results (`googleResultsLimit: 30` → `maxPagesPerQuery: 3`, ~10 results per page) we get:
+together inside an `organicResults` array. Our initial Google scan is now fixed at
+**3 SERP pages** (~30 organic results total, assuming ~10 per page), so we get:
 
 ```
 Dataset item 1  →  SERP page 1  →  organicResults[0..9]  (results #1–10)
@@ -112,12 +112,12 @@ Defined in `app/src/lib/apify/client.ts` → `buildActorInput()`:
 ```typescript
 // searchTerms = [brand.name, ...brand.keywords]
 // primaryQuery = searchTerms.join(' OR ')
-// googleResultsLimit is a per-brand setting: 10, 20, ... 100
+// initial Google scan breadth is fixed
 
-{ queries: primaryQuery, maxPagesPerQuery: Math.ceil(googleResultsLimit / 10) }
+{ queries: primaryQuery, maxPagesPerQuery: 3 }
 ```
 
-**Example** — brand `Acme` with keywords `acme, acme-corp` and `googleResultsLimit: 30`:
+**Example** — brand `Acme` with keywords `acme, acme-corp`:
 ```
 queries: "Acme OR acme OR acme-corp"
 maxPagesPerQuery: 3
@@ -131,8 +131,8 @@ organic results — ~30 organic results total per scan.
 | Parameter | Type | Our value | Description |
 |---|---|---|---|
 | `queries` | string | `"brand OR kw1 OR kw2"` | Newline-separated search terms or Google URLs. We pass a single `OR`-joined string. |
-| `maxPagesPerQuery` | integer | `Math.ceil(googleResultsLimit / 10)` | Number of SERP pages to scrape per query. Each page ≈ 10 organic results. |
-| `resultsPerPage` | integer | _(not sent)_ | Google hard-caps SERPs at ~10 results, so we derive page count from the brand's `googleResultsLimit` instead. |
+| `maxPagesPerQuery` | integer | `3` | Number of SERP pages to scrape per query for the initial search pass. Each page ≈ 10 organic results. |
+| `resultsPerPage` | integer | _(not sent)_ | Google hard-caps SERPs at ~10 results, so we rely on page count rather than a per-brand result-count setting. |
 | `countryCode` | string | _(unset — defaults to US)_ | Google domain / country for the search. |
 | `languageCode` | string | _(unset)_ | UI language (affects results on international queries). |
 | `mobileResults` | boolean | _(unset — defaults to false)_ | Desktop results returned by default. |
@@ -221,7 +221,7 @@ huge raw SERP blob to the model. Instead it:
 - classifies those candidates in **small chunks**, using stable `resultId`s instead of free-form URL matching
 - writes / upserts **one Firestore Finding per normalized URL per scan**
 - stores a compact normalized debug payload on each finding (`kind: 'google-normalized'`) with merged sightings and SERP context
-- runs a **separate** suggestion pass over deduped `relatedQueries` and `peopleAlsoAsk` to produce optional `suggestedSearches`
+- runs a **final** deep-search selection pass over deduped `relatedQueries` and `peopleAlsoAsk` to produce optional `suggestedSearches`
 
 ### Observations / tuning notes
 
@@ -237,11 +237,11 @@ huge raw SERP blob to the model. Instead it:
       canonical URL before AI analysis. Repeated appearances across SERP pages, chunks, or
       depth-1 deep-search runs merge into the same finding for that scan.
 - [x] **Chunked Google classification** — Google result candidates are classified in bounded
-      chunks rather than one giant prompt, which avoids context-limit failures at higher
-      `googleResultsLimit` values.
+      chunks rather than one giant prompt, which avoids context-limit failures at higher result
+      volumes.
 - [x] **`relatedQueries` + `peopleAlsoAsk` drive follow-up suggestioning** — Google now uses a
-      separate suggestion pass over deduped SERP signals to produce `suggestedSearches` without
-      coupling that logic to per-result classification.
+      single final deep-search selection pass over deduped SERP signals to produce
+      `suggestedSearches`, without coupling that logic to per-result classification.
 - [x] **Paid results (`paidResults`) are excluded from AI analysis** — the raw actor still returns
       them, but they are intentionally left out of the normalized prompt payload to keep Google
       analysis focused and bounded.
@@ -272,18 +272,18 @@ Apify calls POST /api/webhooks/apify on SUCCEEDED / FAILED / ABORTED
             ├─ normalize SERP pages into deduped organic result candidates
             ├─ classify candidates in chunks → one AI analysis call per chunk
             ├─ upsert one Finding per normalized URL per scan
-            └─ run a separate suggestion pass on relatedQueries + peopleAlsoAsk
+            └─ run a final deep-search selection pass on relatedQueries + peopleAlsoAsk
   └─ marks actor run complete; once all runs done → marks scan complete
 ```
 
 ### When is AI analysis triggered?
 
-- Triggered inside `analyseItem()`, `analyseGoogleChunk()`, and `analyseGoogleSuggestions()` in `app/src/app/api/webhooks/apify/route.ts`
+- Triggered inside `analyseItem()`, `analyseGoogleChunk()`, and `analyseGoogleFinalSelection()` in `app/src/app/api/webhooks/apify/route.ts`
 - Only on `ACTOR.RUN.SUCCEEDED` events (failed/aborted runs skip analysis)
 - Items are capped at 50 per run (`MAX_ITEMS_PER_RUN`)
 - For `per-item` actors: one sequential AI analysis call per item (avoids OpenRouter rate limits)
 - For Google batch mode: raw SERP pages are normalized into compact organic-result candidates, deduped by URL, classified in chunks, and upserted one-finding-per-URL-per-scan
-- A separate Google suggestion pass inspects deduped `relatedQueries` and `peopleAlsoAsk` signals to produce optional `suggestedSearches` for depth-0 runs
+- A final Google deep-search selection pass inspects deduped `relatedQueries` and `peopleAlsoAsk` signals to produce optional `suggestedSearches` for depth-0 runs
 - Ignored URLs for the brand are fetched from Firestore at webhook time and injected into both `buildAnalysisPrompt()` and `buildGoogleChunkAnalysisPrompt()` — AI analysis is instructed to mark any matching URL as `isFalsePositive: true`
 
 ### AI Analysis Provider & Model
@@ -361,11 +361,13 @@ Rules for "items":
 - Each "analysis" must be fully standalone — do NOT reference other items in the list.
 ```
 
-### System Prompt (Google suggestion pass)
+### System Prompt (Google final deep-search selection)
 
-**Defined in:** `app/src/lib/analysis/prompts.ts` → `GOOGLE_SUGGESTION_SYSTEM_PROMPT`
+**Defined in:** `app/src/lib/analysis/prompts.ts` → `buildGoogleFinalSelectionSystemPrompt()`
 
-Runs separately from Google result classification. Returns a `GoogleSuggestionOutput` with up to 3 follow-up queries derived from `relatedQueries` and `peopleAlsoAsk`.
+Runs after Google result classification. Returns a `GoogleSuggestionOutput` with up to the
+brand's configured `maxAiDeepSearches` follow-up queries derived from `relatedQueries` and
+`peopleAlsoAsk`.
 
 ### User Prompt Template (per-item mode)
 
@@ -417,26 +419,26 @@ Result candidates (N):
 <JSON.stringify(compactCandidates, null, 2)>
 ```
 
-### User Prompt Template (Google suggestion pass)
+### User Prompt Template (Google final deep-search selection)
 
-**Defined in:** `app/src/lib/analysis/prompts.ts` → `buildGoogleSuggestionPrompt()`
+**Defined in:** `app/src/lib/analysis/prompts.ts` → `buildGoogleFinalSelectionPrompt()`
 
 ```
 Brand being protected: "<brand.name>"
 Brand keywords: <keywords>
-Official domains: <officialDomains>
 [Watch words: ... (only if set)]
 [Safe words: ... (only if set)]
-Monitoring surface: <source>
-
-Current source queries:
+Original search query:
 - ...
 
-Related queries:
+Suggested related queries returned by Google for the above search:
 - ...
 
-People Also Ask:
+People Also Ask queries returned by Google for the above search:
 - ...
+
+Maximum number of follow-up Google searches you may suggest:
+- <brand.maxAiDeepSearches>
 ```
 
 ### Watch Words & Safe Words
@@ -449,7 +451,7 @@ brand create/edit form and stored in Firestore.
 | `watchWords` | "concerning terms the brand owner does NOT want associated with their brand — note any presence or implied association and use its discretion on severity impact" |
 | `safeWords` | "terms the brand owner is comfortable being associated with — treat results containing these with reduced caution unless there are strong warning signs elsewhere" |
 
-Both are passed to `buildAnalysisPrompt()`, `buildGoogleChunkAnalysisPrompt()`, and `buildGoogleSuggestionPrompt()` and are omitted from the prompt when not set.
+Both are passed to `buildAnalysisPrompt()`, `buildGoogleChunkAnalysisPrompt()`, and `buildGoogleFinalSelectionPrompt()` and are omitted from the prompt when not set.
 
 ### Expected AI Analysis Output Schema
 
@@ -477,7 +479,7 @@ interface GoogleChunkAnalysisOutput {
 }
 
 interface GoogleSuggestionOutput {
-  suggestedSearches?: string[];  // up to MAX_SUGGESTED_SEARCHES (3) queries
+  suggestedSearches?: string[];  // capped at the brand's configured maxAiDeepSearches (1-10)
 }
 ```
 
@@ -496,11 +498,11 @@ interface GoogleSuggestionOutput {
 4. Drops duplicate / invalid resultIds so only known candidates are accepted
 5. Returns `null` if `items` is empty or entirely invalid after filtering
 
-**`parseGoogleSuggestionOutput()`** in `app/src/lib/analysis/types.ts` (Google suggestion mode):
+**`parseGoogleSuggestionOutput()`** in `app/src/lib/analysis/types.ts` (Google final selection mode):
 1. Same code-fence stripping
 2. `JSON.parse()`s the result
 3. Filters `suggestedSearches` to unique non-empty strings
-4. Caps the final set at `MAX_SUGGESTED_SEARCHES` (3)
+4. Caps the final set at the runtime deep-search limit passed in by the webhook
 
 ### Fallback Behaviour
 
@@ -536,4 +538,4 @@ _(To be filled in as the review progresses.)_
 - [ ] Are the search queries (using `OR`) producing relevant results for brand monitoring?
 - [ ] How well does AI analysis classify Google Search results vs. other sources?
 - [ ] Is the false positive rate too high / too low?
-- [ ] Is the per-brand `googleResultsLimit` range of 10-100 results the right trade-off?
+- [ ] Is the fixed 3-page initial search plus configurable `maxAiDeepSearches` budget the right trade-off?

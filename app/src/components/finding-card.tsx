@@ -41,6 +41,7 @@ type BookmarkUpdate = {
 interface FindingCardProps {
   finding: FindingSummary;
   className?: string;
+  highlightQuery?: string;
   /**
    * Called when the user toggles the ignored state.
    * Receives the lightweight list item (which still includes the URL/scanId needed
@@ -51,6 +52,33 @@ interface FindingCardProps {
    * Called when the user bookmarks/unbookmarks a finding or updates its note.
    */
   onBookmarkUpdate?: (finding: FindingSummary, updates: BookmarkUpdate) => Promise<void>;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function renderHighlightedText(text: string, query?: string) {
+  const trimmedQuery = query?.trim();
+  if (!trimmedQuery) return text;
+
+  const matcher = new RegExp(`(${escapeRegExp(trimmedQuery)})`, 'gi');
+  const parts = text.split(matcher);
+
+  if (parts.length === 1) return text;
+
+  return parts.map((part, index) => (
+    part.toLowerCase() === trimmedQuery.toLowerCase()
+      ? (
+        <mark
+          key={`${part}-${index}`}
+          className="rounded-[2px] bg-yellow-200/80 text-inherit"
+        >
+          {part}
+        </mark>
+      )
+      : part
+  ));
 }
 
 const sourceConfig: Record<
@@ -200,6 +228,7 @@ function ExpandableSection({
 export function FindingCard({
   finding,
   className,
+  highlightQuery,
   onIgnoreToggle,
   onBookmarkUpdate,
 }: FindingCardProps) {
@@ -222,6 +251,11 @@ export function FindingCard({
   const [debugFinding, setDebugFinding] = useState<Finding | null>(null);
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugError, setDebugError] = useState('');
+  const shouldShowMatchedUrl = Boolean(
+    finding.url
+    && highlightQuery?.trim()
+    && finding.url.toLowerCase().includes(highlightQuery.trim().toLowerCase()),
+  );
 
   useEffect(() => {
     if (!editingBookmarkNote) {
@@ -336,7 +370,7 @@ export function FindingCard({
                 muted ? 'text-gray-500' : 'text-gray-900',
               )}
             >
-              {finding.title}
+              {renderHighlightedText(finding.title, highlightQuery)}
             </h4>
             {!isFalsePositive && (
               <Tooltip content={severityMeta.label}>
@@ -415,12 +449,27 @@ export function FindingCard({
             )}
           </div>
 
+          {finding.url && shouldShowMatchedUrl && (
+            <div className="mb-3 text-xs text-gray-500 break-all">
+              <span className="font-medium text-gray-600">URL:</span>{' '}
+              <a
+                href={finding.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline decoration-gray-300 underline-offset-2 hover:decoration-gray-500 transition"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {renderHighlightedText(finding.url, highlightQuery)}
+              </a>
+            </div>
+          )}
+
           {/* AI analysis box */}
           <div className="bg-gray-50 rounded-lg p-2 sm:p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2 mb-3">
             <Sparkles className="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0" />
             <p>
               <strong>AI analysis:</strong>{' '}
-              {finding.llmAnalysis}
+              {renderHighlightedText(finding.llmAnalysis, highlightQuery)}
             </p>
           </div>
 

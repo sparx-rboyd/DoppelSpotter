@@ -1,6 +1,6 @@
 import { ApifyClient } from 'apify-client';
 import type { BrandProfile } from '@/lib/types';
-import { getDeepSearchGooglePageCount, getGoogleResultsPageCount } from '@/lib/brands';
+import { getDeepSearchGooglePageCount, getInitialGooglePageCount } from '@/lib/brands';
 import type { ActorConfig } from './actors';
 
 let _client: ApifyClient | null = null;
@@ -29,7 +29,7 @@ export interface ActorRunResult {
 export function buildActorInput(actorId: string, brand: BrandProfile): Record<string, unknown> {
   const searchTerms = [brand.name, ...brand.keywords];
   const primaryQuery = searchTerms.join(' OR ');
-  const googlePageCount = getGoogleResultsPageCount(brand.googleResultsLimit);
+  const googlePageCount = getInitialGooglePageCount();
 
   // Actor-specific input mappings
   switch (actorId) {
@@ -100,10 +100,9 @@ export async function startActorRun(
 export async function startDeepSearchRun(
   query: string,
   webhookUrl: string,
-  googleResultsLimit?: number,
 ): Promise<{ runId: string }> {
   const client = getClient();
-  const deepSearchPageCount = getDeepSearchGooglePageCount(googleResultsLimit);
+  const deepSearchPageCount = getDeepSearchGooglePageCount();
 
   const run = await client.actor('apify/google-search-scraper').start(
     { queries: query, maxPagesPerQuery: deepSearchPageCount },

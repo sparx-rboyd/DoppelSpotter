@@ -8,16 +8,15 @@ import { chatCompletion } from '@/lib/analysis/openrouter';
 import {
   SYSTEM_PROMPT,
   GOOGLE_CLASSIFICATION_SYSTEM_PROMPT,
-  GOOGLE_SUGGESTION_SYSTEM_PROMPT,
   buildAnalysisPrompt,
+  buildGoogleFinalSelectionSystemPrompt,
+  buildGoogleFinalSelectionPrompt,
   buildGoogleChunkAnalysisPrompt,
-  buildGoogleSuggestionPrompt,
 } from '@/lib/analysis/prompts';
 import {
   parseAnalysisOutput,
   parseGoogleChunkAnalysisOutput,
   parseGoogleSuggestionOutput,
-  MAX_SUGGESTED_SEARCHES,
   type GoogleChunkAnalysisItem,
   type GoogleRunContext,
   type GoogleSearchCandidate,
@@ -25,15 +24,13 @@ import {
   type GoogleStoredFindingRawData,
 } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo } from '@/lib/types';
-import { normalizeAllowAiDeepSearches } from '@/lib/brands';
+import { normalizeAllowAiDeepSearches, normalizeMaxAiDeepSearches } from '@/lib/brands';
 import { clearBrandActiveScanIfMatches } from '@/lib/scans';
 
 /** Maximum items to analyse per actor run — caps AI analysis cost and latency */
 const MAX_ITEMS_PER_RUN = 50;
 const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
 const GOOGLE_ANALYSIS_CONCURRENCY = 3;
-const MAX_GOOGLE_CONTEXT_RELATED_QUERIES = 20;
-const MAX_GOOGLE_CONTEXT_PEOPLE_ALSO_ASK = 20;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';
 const GOOGLE_RAW_DATA_VERSION = 1;
@@ -243,6 +240,7 @@ async function handleSucceededRun({
   const actorId = actorRunInfo?.actorId ?? 'unknown';
   const searchDepth = actorRunInfo?.searchDepth ?? 0;
   const searchQuery = actorRunInfo?.searchQuery;
+  const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
   const actorConfig = getActorConfig(actorId);
   const analysisMode = actorConfig?.analysisMode ?? 'per-item';
   const shouldSkipPreviouslySeenUrls =
@@ -339,13 +337,14 @@ async function handleSucceededRun({
         scanDoc,
         runId,
         suggestedSearches,
+        maxSuggestedSearches,
       });
       if (reservedQueries.length > 0) {
         await triggerDeepSearches({
           scanDoc,
           scan,
-          brand,
           suggestedSearches: reservedQueries,
+          maxSuggestedSearches,
           webhookUrl,
           source,
           actorId: 'apify/google-search-scraper',
@@ -521,7 +520,8 @@ async function analyseAndWriteBatch({
   let findingCount = 0;
   let suggestedSearches: string[] | undefined;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
-  const canSuggestSearches = searchDepth === 0 && normalizeAllowAiDeepSearches(brand.allowAiDeepSearches);
+  const canRunDeepSearchSelection = searchDepth === 0 && normalizeAllowAiDeepSearches(brand.allowAiDeepSearches);
+  const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
 
   const normalizedRun = normalizeGoogleSerpRun({
     runId,
@@ -545,7 +545,6 @@ async function analyseAndWriteBatch({
   }
 
   const outcomes = new Map<string, { candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>();
-  const suggestionScores = new Map<string, SuggestedSearchScore>();
   const chunks = chunkArray(candidatesToAnalyse, GOOGLE_ANALYSIS_CHUNK_SIZE);
   const chunkResults = await mapWithConcurrency(
     chunks,
@@ -558,7 +557,6 @@ async function analyseAndWriteBatch({
           candidates: chunk,
           runContext: normalizedRun.runContext,
           ignoredUrls,
-          canSuggestSearches,
         });
 
         return chunkResult;
@@ -575,7 +573,6 @@ async function analyseAndWriteBatch({
 
         return {
           outcomes: fallbackOutcomes,
-          suggestedSearches: undefined,
         };
       } finally {
         await scanDoc.ref.update({
@@ -589,42 +586,14 @@ async function analyseAndWriteBatch({
     for (const [normalizedUrl, value] of chunkResult.outcomes.entries()) {
       outcomes.set(normalizedUrl, value);
     }
-    if (canSuggestSearches && chunkResult.suggestedSearches && chunkResult.suggestedSearches.length > 0) {
-      scoreSuggestedSearches({
-        scores: suggestionScores,
-        suggestedSearches: chunkResult.suggestedSearches,
-        chunkOutcomes: chunkResult.outcomes.values(),
-        sourceQueries: normalizedRun.runContext.sourceQueries,
-      });
-    }
   }
 
-  const chunkRankedSuggestions = canSuggestSearches ? rankSuggestedSearches(suggestionScores) : undefined;
-  if (canSuggestSearches && (hasGoogleSuggestionSignals(normalizedRun.runContext) || (chunkRankedSuggestions?.length ?? 0) > 0)) {
-    try {
-      const aggregateSuggestedSearches = await analyseGoogleSuggestions({
-        brand,
-        source,
-        runContext: normalizedRun.runContext,
-        notableCandidates: buildGoogleSuggestionNotableCandidates(outcomes.values()),
-        chunkSuggestedSearches: chunkRankedSuggestions,
-      });
-
-      if (aggregateSuggestedSearches && aggregateSuggestedSearches.length > 0) {
-        scoreSuggestedSearches({
-          scores: suggestionScores,
-          suggestedSearches: aggregateSuggestedSearches,
-          chunkOutcomes: outcomes.values(),
-          sourceQueries: normalizedRun.runContext.sourceQueries,
-        });
-      }
-    } catch (err) {
-      console.error(`[webhook] Google aggregate suggestion analysis failed for dataset ${datasetId}:`, err);
-    }
-  }
-
-  if (canSuggestSearches) {
-    suggestedSearches = rankSuggestedSearches(suggestionScores);
+  if (canRunDeepSearchSelection) {
+    suggestedSearches = await finalizeSuggestedSearches({
+      brand,
+      runContext: normalizedRun.runContext,
+      maxSuggestedSearches,
+    });
   }
 
   for (const { candidate, outcome } of outcomes.values()) {
@@ -662,14 +631,6 @@ type GoogleFindingOutcome = {
 
 type GoogleChunkAnalysisResult = {
   outcomes: Map<string, { candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>;
-  suggestedSearches?: string[];
-};
-
-type SuggestedSearchScore = {
-  query: string;
-  mentionCount: number;
-  score: number;
-  maxSeverityRank: number;
 };
 
 type FindingDelta = {
@@ -782,8 +743,8 @@ function normalizeGoogleSerpRun({
     candidates: Array.from(candidateMap.values()),
     runContext: {
       sourceQueries: uniqueStrings(Array.from(sourceQueries)).slice(0, MAX_GOOGLE_CONTEXT_SOURCE_QUERIES),
-      relatedQueries: uniqueStrings(Array.from(relatedQueries)).slice(0, MAX_GOOGLE_CONTEXT_RELATED_QUERIES),
-      peopleAlsoAsk: uniqueStrings(Array.from(peopleAlsoAsk)).slice(0, MAX_GOOGLE_CONTEXT_PEOPLE_ALSO_ASK),
+      relatedQueries: uniqueStrings(Array.from(relatedQueries)),
+      peopleAlsoAsk: uniqueStrings(Array.from(peopleAlsoAsk)),
     },
   };
 }
@@ -794,14 +755,12 @@ async function analyseGoogleChunk({
   candidates,
   runContext,
   ignoredUrls,
-  canSuggestSearches,
 }: {
   brand: BrandProfile;
   source: Finding['source'];
   candidates: GoogleSearchCandidate[];
   runContext: GoogleRunContext;
   ignoredUrls?: string[];
-  canSuggestSearches: boolean;
 }): Promise<GoogleChunkAnalysisResult> {
   const prompt = buildGoogleChunkAnalysisPrompt({
     brandName: brand.name,
@@ -813,7 +772,6 @@ async function analyseGoogleChunk({
     source,
     candidates,
     runContext,
-    canSuggestSearches,
   });
 
   const raw = await chatCompletion([
@@ -839,48 +797,79 @@ async function analyseGoogleChunk({
     });
   }
 
-  return {
-    outcomes,
-    suggestedSearches: canSuggestSearches ? parsed.suggestedSearches : undefined,
-  };
+  return { outcomes };
 }
 
-async function analyseGoogleSuggestions({
+async function analyseGoogleFinalSelection({
   brand,
-  source,
   runContext,
-  notableCandidates,
-  chunkSuggestedSearches,
+  maxSuggestedSearches,
 }: {
   brand: BrandProfile;
-  source: Finding['source'];
   runContext: GoogleRunContext;
-  notableCandidates: Array<Record<string, unknown>>;
-  chunkSuggestedSearches?: string[];
+  maxSuggestedSearches: number;
 }): Promise<string[] | undefined> {
-  const prompt = buildGoogleSuggestionPrompt({
+  const prompt = buildGoogleFinalSelectionPrompt({
     brandName: brand.name,
     keywords: brand.keywords,
-    officialDomains: brand.officialDomains,
     watchWords: brand.watchWords,
     safeWords: brand.safeWords,
-    source,
     runContext,
-    notableCandidates,
-    chunkSuggestedSearches,
+    maxSuggestedSearches,
   });
+  const systemPrompt = buildGoogleFinalSelectionSystemPrompt(maxSuggestedSearches);
 
   const raw = await chatCompletion([
-    { role: 'system', content: GOOGLE_SUGGESTION_SYSTEM_PROMPT },
+    { role: 'system', content: systemPrompt },
     { role: 'user', content: prompt },
   ]);
 
-  const parsed = parseGoogleSuggestionOutput(raw);
+  const parsed = parseGoogleSuggestionOutput(raw, maxSuggestedSearches);
   if (!parsed) {
-    throw new Error(`Failed to parse Google suggestion output: ${raw.slice(0, 200)}`);
+    throw new Error(`Failed to parse Google final selection output: ${raw.slice(0, 200)}`);
   }
 
   return parsed.suggestedSearches;
+}
+
+async function finalizeSuggestedSearches({
+  brand,
+  runContext,
+  maxSuggestedSearches,
+}: {
+  brand: BrandProfile;
+  runContext: GoogleRunContext;
+  maxSuggestedSearches: number;
+}): Promise<string[] | undefined> {
+  try {
+    const llmSuggestedSearches = await analyseGoogleFinalSelection({
+      brand,
+      runContext,
+      maxSuggestedSearches,
+    });
+
+    if (!llmSuggestedSearches || llmSuggestedSearches.length === 0) {
+      console.log(
+        `[webhook] Google deep-search final selection relatedQueries=${runContext.relatedQueries.length} peopleAlsoAsk=${runContext.peopleAlsoAsk.length} selected=[]`,
+      );
+      return undefined;
+    }
+
+    const sourceQueryKeys = new Set(runContext.sourceQueries.map(normalizeSuggestedSearchKey));
+    const filteredSuggestions = llmSuggestedSearches.filter((query) => !sourceQueryKeys.has(normalizeSuggestedSearchKey(query)));
+    if (filteredSuggestions.length === 0) {
+      console.warn('[webhook] Google final deep-search selection returned only source-query duplicates');
+      return undefined;
+    }
+
+    console.log(
+      `[webhook] Google deep-search final selection relatedQueries=${runContext.relatedQueries.length} peopleAlsoAsk=${runContext.peopleAlsoAsk.length} selected=${JSON.stringify(filteredSuggestions)}`,
+    );
+    return filteredSuggestions;
+  } catch (err) {
+    console.error('[webhook] Google final deep-search selection failed:', err);
+    return undefined;
+  }
 }
 
 async function upsertGoogleFinding({
@@ -989,10 +978,12 @@ async function reserveSuggestedSearches({
   scanDoc,
   runId,
   suggestedSearches,
+  maxSuggestedSearches,
 }: {
   scanDoc: QueryDocumentSnapshot;
   runId: string;
   suggestedSearches: string[];
+  maxSuggestedSearches: number;
 }): Promise<string[]> {
   return db.runTransaction(async (tx) => {
     const freshSnap = await tx.get(scanDoc.ref);
@@ -1010,7 +1001,7 @@ async function reserveSuggestedSearches({
 
     const reserved = uniqueStrings(suggestedSearches)
       .filter((query) => !existingQueries.has(query.toLowerCase()))
-      .slice(0, MAX_SUGGESTED_SEARCHES);
+      .slice(0, maxSuggestedSearches);
 
     const updates: Record<string, unknown> = {
       [`actorRuns.${runId}.deepSearchSuggestionsProcessed`]: true,
@@ -1026,35 +1017,35 @@ async function reserveSuggestedSearches({
 
 /**
  * Start follow-up Google Search actor runs for each query suggested by AI analysis.
- * Caps total deep searches at MAX_SUGGESTED_SEARCHES (enforced by the parser already,
+ * Caps total deep searches at the configured brand-specific deep-search limit,
  * but guarded here too). Adds the new runs to the scan document atomically so that
  * markActorRunComplete can correctly detect overall scan completion.
  */
 async function triggerDeepSearches({
   scanDoc,
   scan,
-  brand,
   suggestedSearches,
+  maxSuggestedSearches,
   webhookUrl,
   source,
   actorId,
 }: {
   scanDoc: QueryDocumentSnapshot;
   scan: Scan;
-  brand: BrandProfile;
   suggestedSearches: string[];
+  maxSuggestedSearches: number;
   webhookUrl: string;
   source: Finding['source'];
   actorId: string;
 }) {
-  const queries = suggestedSearches.slice(0, MAX_SUGGESTED_SEARCHES);
+  const queries = suggestedSearches.slice(0, maxSuggestedSearches);
 
   const newRunIds: string[] = [];
   const newActorRuns: Record<string, ActorRunInfo> = {};
 
   for (const query of queries) {
     try {
-      const { runId } = await startDeepSearchRun(query, webhookUrl, brand.googleResultsLimit);
+      const { runId } = await startDeepSearchRun(query, webhookUrl);
       newRunIds.push(runId);
       newActorRuns[runId] = {
         actorId,
@@ -1390,98 +1381,6 @@ function hasPersistedScanResults(totals: ScanFindingTotals): boolean {
 function getSkippedDuplicateCount(actorRuns?: Record<string, ActorRunInfo>): number {
   if (!actorRuns) return 0;
   return Object.values(actorRuns).reduce((sum, run) => sum + (run.skippedDuplicateCount ?? 0), 0);
-}
-
-function hasGoogleSuggestionSignals(runContext: GoogleRunContext): boolean {
-  return runContext.relatedQueries.length > 0 || runContext.peopleAlsoAsk.length > 0;
-}
-
-function buildGoogleSuggestionNotableCandidates(
-  values: Iterable<{ candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>,
-): Array<Record<string, unknown>> {
-  return Array.from(values)
-    .map(({ candidate, outcome }) => ({
-      resultId: candidate.resultId,
-      url: candidate.normalizedUrl,
-      title: candidate.title,
-      description: candidate.description,
-      pageNumbers: candidate.pageNumbers,
-      positions: candidate.positions,
-      appearanceCount: candidate.sightings.length,
-      severity: outcome.severity,
-      isFalsePositive: outcome.isFalsePositive,
-      analysis: outcome.analysis,
-    }))
-    .sort((left, right) =>
-      Number(Boolean(right.isFalsePositive === false)) - Number(Boolean(left.isFalsePositive === false))
-      || getSeverityRank(String(right.severity) as Finding['severity']) - getSeverityRank(String(left.severity) as Finding['severity'])
-      || String(left.url).localeCompare(String(right.url)),
-    )
-    .slice(0, 12);
-}
-
-function scoreSuggestedSearches({
-  scores,
-  suggestedSearches,
-  chunkOutcomes,
-  sourceQueries,
-}: {
-  scores: Map<string, SuggestedSearchScore>;
-  suggestedSearches: string[];
-  chunkOutcomes: Iterable<{ candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>;
-  sourceQueries: string[];
-}) {
-  const sourceQueryKeys = new Set(sourceQueries.map(normalizeSuggestedSearchKey));
-  const chunkSeverityRank = getChunkSuggestionSeverityRank(chunkOutcomes);
-  const chunkWeight = Math.max(chunkSeverityRank, 1);
-
-  for (const suggestedSearch of suggestedSearches) {
-    const normalizedQuery = suggestedSearch.trim().replace(/\s+/g, ' ');
-    if (!normalizedQuery) continue;
-
-    const key = normalizeSuggestedSearchKey(normalizedQuery);
-    if (!key || sourceQueryKeys.has(key)) continue;
-
-    const existing = scores.get(key);
-    if (existing) {
-      existing.mentionCount += 1;
-      existing.score += chunkWeight;
-      existing.maxSeverityRank = Math.max(existing.maxSeverityRank, chunkSeverityRank);
-      continue;
-    }
-
-    scores.set(key, {
-      query: normalizedQuery,
-      mentionCount: 1,
-      score: chunkWeight,
-      maxSeverityRank: chunkSeverityRank,
-    });
-  }
-}
-
-function rankSuggestedSearches(scores: Map<string, SuggestedSearchScore>): string[] | undefined {
-  const ranked = Array.from(scores.values())
-    .sort((left, right) =>
-      right.score - left.score
-      || right.mentionCount - left.mentionCount
-      || right.maxSeverityRank - left.maxSeverityRank
-      || left.query.localeCompare(right.query),
-    )
-    .slice(0, MAX_SUGGESTED_SEARCHES)
-    .map((entry) => entry.query);
-
-  return ranked.length > 0 ? ranked : undefined;
-}
-
-function getChunkSuggestionSeverityRank(
-  chunkOutcomes: Iterable<{ candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>,
-): number {
-  let maxRank = 0;
-  for (const { outcome } of chunkOutcomes) {
-    if (outcome.isFalsePositive) continue;
-    maxRank = Math.max(maxRank, getSeverityRank(outcome.severity));
-  }
-  return maxRank;
 }
 
 function normalizeSuggestedSearchKey(query: string): string {

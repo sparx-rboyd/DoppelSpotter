@@ -17,10 +17,10 @@ export interface BrandProfile {
   name: string;
   keywords: string[];
   officialDomains: string[];
-  /** Number of Google search results to include per scan, in increments of 10. */
-  googleResultsLimit?: number;
   /** Whether AI analysis may trigger Google deep-search follow-up runs for this brand. */
   allowAiDeepSearches?: boolean;
+  /** Maximum number of AI-requested Google follow-up searches allowed for this brand. */
+  maxAiDeepSearches?: number;
   /** Internal pointer to the currently active scan for this brand, if any. */
   activeScanId?: string;
   /** Terms AI analysis should flag if found associated with the brand in search results. */

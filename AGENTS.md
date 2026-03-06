@@ -77,7 +77,7 @@ POST /api/scan
  └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ reads CORE_ACTOR_IDS (or actorIds from request body)
- └─ derives Google Search `maxPagesPerQuery` from `brands.googleResultsLimit` (10-100, step 10; default 10)
+ └─ uses a fixed Google Search `maxPagesPerQuery` of 3 for the initial search pass
  └─ calls startActorRun() for each actor → registers Apify webhook
  └─ stores runId → scan document in Firestore
 
@@ -116,9 +116,9 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ dedupes repeated URLs within the run before analysis
       └─ skips normalized URLs that already appeared in previous scans for the same brand before any LLM analysis
       └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
-      └─ each chunk may return grounded `suggestedSearches` based on its suspicious results + SERP context
-      └─ webhook combines, dedupes, and ranks chunk suggestions
-      └─ aggregate suggestion fallback reviews SERP intent signals + notable candidate outcomes when chunk suggestions are weak or absent
+      └─ in the default `llm-final` mode, chunk calls do classification only — they do not propose deep-search queries
+      └─ the webhook collects the full deduped run-level `relatedQueries` + `peopleAlsoAsk` text signals (not URLs) and passes them to the final deep-search chooser without truncating them
+      └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
       └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
       └─ isFalsePositive: true findings are stored but excluded from default API responses
  └─ (batch mode, depth 0 only) if ranked chunk/fallback suggestions are present and the brand allows deep search → triggers deep-search runs
@@ -139,11 +139,11 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **File:** `app/src/lib/analysis/`
 - **When:** After each Apify actor run completes, inside the webhook handler
 - **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
-- **Prompts:** `SYSTEM_PROMPT` + `buildAnalysisPrompt()` for per-item mode; `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification and grounded deep-search suggestioning; `GOOGLE_SUGGESTION_SYSTEM_PROMPT` + `buildGoogleSuggestionPrompt()` for aggregate Google deep-search fallback suggestioning
+- **Prompts:** `SYSTEM_PROMPT` + `buildAnalysisPrompt()` for per-item mode; `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for the final deep-search query chooser
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
 - **Per-item output:** structured JSON `{ severity, title, llmAnalysis, isFalsePositive }`
-- **Google chunk output:** structured JSON `{ items: [{ resultId, title, severity, analysis, isFalsePositive }], suggestedSearches? }`
+- **Google chunk output:** structured JSON `{ items: [{ resultId, title, severity, analysis, isFalsePositive }] }`
 - **Raw AI response** string is stored on every finding as `rawLlmResponse` for debugging
 - **False positives** are written to Firestore with `isFalsePositive: true`; filtered from default API responses; visible in the brand page "Non-hits" section
 
@@ -167,13 +167,15 @@ See `REVIEW.md` for full prompt text and AI analysis pipeline details.
 
 ### Deep search (`suggestedSearches`)
 
-When the Google Search actor runs at depth 0 (initial scan), each chunked Google classification
-call may return a `suggestedSearches` array — up to 3 grounded follow-up queries based on the
-suspicious result candidates in that chunk plus its supporting `relatedQueries` / `peopleAlsoAsk`
-signals. The webhook combines, dedupes, and ranks those chunk-level suggestions, then runs an
-aggregate suggestion fallback over the run-level SERP intent signals plus the most notable
-candidate outcomes when it needs extra coverage. This is only enabled when the brand's
-`allowAiDeepSearches` setting is true.
+When the Google Search actor runs at depth 0 (initial scan), the webhook collects the full
+deduped run-level `relatedQueries` and `peopleAlsoAsk` text signals from every SERP page.
+Chunked Google classification assesses candidates only; it does not propose deep-search queries.
+The final deep-search chooser then sees that run-level intent context directly and synthesizes up
+to the brand's configured `maxAiDeepSearches` follow-up Google queries (1-10). Deep-search
+prompts treat that configured count as a hard cap rather than a target, and steer the model
+towards broader theme-led queries instead of narrow named websites, platforms, resources, books,
+or tools unless a named target is itself the key abuse vector. Deep search is only enabled when
+the brand's `allowAiDeepSearches` setting is true.
 
 The webhook handler calls `startDeepSearchRun()` for each suggested query, registers the new
 Apify run IDs on the scan document, and processes results via the same webhook pipeline at
@@ -183,8 +185,8 @@ Apify runs are started, so duplicate webhook callbacks do not fan out duplicate 
 `markActorRunComplete` always reads `actorRunIds.length` from a fresh Firestore snapshot inside
 its transaction, so dynamically-added runs are counted correctly for scan completion. Deep-search
 runs are skipped entirely when `allowAiDeepSearches` is false for the brand. When enabled, every
-deep-search Google run uses a fixed 3-page SERP budget, regardless of the brand's initial Google
-results limit, so follow-up searches retain enough depth to surface abusive result clusters.
+deep-search Google run uses a fixed 2-page SERP budget, while the initial Google scan always uses
+a fixed 3-page SERP budget.
 
 `ActorRunInfo` carries `searchDepth` (0 or 1) and `searchQuery` (the literal query string for
 depth-1 runs). The brand page progress indicator shows a "Deep search" badge and surfaces the
@@ -250,7 +252,7 @@ Users can bookmark any finding they want to follow up on, including AI-classifie
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **googleResultsLimit?**, **allowAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, createdAt, updatedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, skippedCount** (denormalized — written by webhook, updated on ignore/un-ignore / duplicate-skip tracking), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?**, rawLlmResponse?, createdAt |
 

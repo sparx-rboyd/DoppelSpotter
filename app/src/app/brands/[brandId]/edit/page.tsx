@@ -13,12 +13,11 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { InfoTooltip } from '@/components/ui/tooltip';
 import {
   DEFAULT_ALLOW_AI_DEEP_SEARCHES,
-  DEFAULT_GOOGLE_RESULTS_LIMIT,
-  MAX_GOOGLE_RESULTS_LIMIT,
-  MIN_GOOGLE_RESULTS_LIMIT,
-  GOOGLE_RESULTS_STEP,
   normalizeAllowAiDeepSearches,
-  normalizeGoogleResultsLimit,
+  normalizeMaxAiDeepSearches,
+  DEFAULT_MAX_AI_DEEP_SEARCHES,
+  MIN_AI_DEEP_SEARCHES,
+  MAX_AI_DEEP_SEARCHES,
 } from '@/lib/brands';
 import type { BrandProfile } from '@/lib/types';
 
@@ -39,8 +38,8 @@ export default function EditBrandPage() {
   const [watchWords, setWatchWords] = useState<string[]>([]);
   const [safeWordInput, setSafeWordInput] = useState('');
   const [safeWords, setSafeWords] = useState<string[]>([]);
-  const [googleResultsLimit, setGoogleResultsLimit] = useState(DEFAULT_GOOGLE_RESULTS_LIMIT);
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
+  const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
@@ -56,8 +55,8 @@ export default function EditBrandPage() {
         setName(brand.name);
         setKeywords(brand.keywords);
         setDomains(brand.officialDomains);
-        setGoogleResultsLimit(normalizeGoogleResultsLimit(brand.googleResultsLimit));
         setAllowAiDeepSearches(normalizeAllowAiDeepSearches(brand.allowAiDeepSearches));
+        setMaxAiDeepSearches(normalizeMaxAiDeepSearches(brand.maxAiDeepSearches));
         setWatchWords(brand.watchWords ?? []);
         setSafeWords(brand.safeWords ?? []);
       } catch (err) {
@@ -151,8 +150,8 @@ export default function EditBrandPage() {
           name: name.trim(),
           keywords,
           officialDomains: domains,
-          googleResultsLimit,
           allowAiDeepSearches,
+          maxAiDeepSearches,
           watchWords,
           safeWords,
         }),
@@ -288,40 +287,6 @@ export default function EditBrandPage() {
                     placeholder="Type a safe word and press enter..."
                   />
 
-                  <div className="flex flex-col gap-3">
-                    <label htmlFor="google-results-limit" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-                      Google search results
-                      <InfoTooltip content="How many Google results to include in each scan. More results will give you enhanced coverage, but scans will be slower." />
-                    </label>
-                    <div className="rounded-xl border border-gray-200 bg-white p-4">
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="min-w-0">
-                          <p className="text-sm text-gray-500">Fewer results</p>
-                          <p className="text-xs text-gray-400">Faster</p>
-                        </div>
-                        <span className="text-sm font-semibold text-gray-900">{googleResultsLimit} results</span>
-                        <div className="min-w-0 text-right">
-                          <p className="text-sm text-gray-500">More results</p>
-                          <p className="text-xs text-gray-400">Slower</p>
-                        </div>
-                      </div>
-                      <input
-                        id="google-results-limit"
-                        type="range"
-                        min={MIN_GOOGLE_RESULTS_LIMIT}
-                        max={MAX_GOOGLE_RESULTS_LIMIT}
-                        step={GOOGLE_RESULTS_STEP}
-                        value={googleResultsLimit}
-                        onChange={(e) => setGoogleResultsLimit(Number(e.target.value))}
-                        className="mt-4 w-full accent-brand-600"
-                      />
-                      <div className="mt-2 flex justify-between text-xs text-gray-500">
-                        <span>{MIN_GOOGLE_RESULTS_LIMIT}</span>
-                        <span>{MAX_GOOGLE_RESULTS_LIMIT}</span>
-                      </div>
-                    </div>
-                  </div>
-
                   <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4">
                     <div className="flex min-w-0 flex-col gap-1">
                       <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
@@ -354,6 +319,41 @@ export default function EditBrandPage() {
                         />
                       </span>
                     </button>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    <label htmlFor="max-ai-deep-searches" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                      AI deep searches
+                      <InfoTooltip content="The maximum number of follow-up Google searches that AI analysis is permitted to run. More searches increase coverage, but scans will be slower." />
+                    </label>
+                    <div className={`rounded-xl border border-gray-200 bg-white p-4 transition ${allowAiDeepSearches ? '' : 'opacity-60'}`}>
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <p className="text-sm text-gray-500">Fewer searches</p>
+                          <p className="text-xs text-gray-400">Faster</p>
+                        </div>
+                        <span className="text-sm font-semibold text-gray-900">{maxAiDeepSearches} searches</span>
+                        <div className="min-w-0 text-right">
+                          <p className="text-sm text-gray-500">More searches</p>
+                          <p className="text-xs text-gray-400">Slower</p>
+                        </div>
+                      </div>
+                      <input
+                        id="max-ai-deep-searches"
+                        type="range"
+                        min={MIN_AI_DEEP_SEARCHES}
+                        max={MAX_AI_DEEP_SEARCHES}
+                        step={1}
+                        value={maxAiDeepSearches}
+                        disabled={!allowAiDeepSearches}
+                        onChange={(e) => setMaxAiDeepSearches(Number(e.target.value))}
+                        className="mt-4 w-full accent-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      />
+                      <div className="mt-2 flex justify-between text-xs text-gray-500">
+                        <span>{MIN_AI_DEEP_SEARCHES}</span>
+                        <span>{MAX_AI_DEEP_SEARCHES}</span>
+                      </div>
+                    </div>
                   </div>
                 </CardContent>
               </Card>

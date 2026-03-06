@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
-import { isValidAllowAiDeepSearches, isValidGoogleResultsLimit } from '@/lib/brands';
+import { isValidAllowAiDeepSearches, isValidMaxAiDeepSearches } from '@/lib/brands';
 import type { BrandProfile } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
@@ -34,7 +34,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (!doc.exists) return errorResponse('Brand not found', 404);
   if ((doc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
 
-  let body: Partial<Pick<BrandProfile, 'name' | 'keywords' | 'officialDomains' | 'googleResultsLimit' | 'allowAiDeepSearches' | 'watchWords' | 'safeWords'>>;
+  let body: Partial<Pick<BrandProfile, 'name' | 'keywords' | 'officialDomains' | 'allowAiDeepSearches' | 'maxAiDeepSearches' | 'watchWords' | 'safeWords'>>;
   try {
     body = await request.json();
   } catch {
@@ -46,17 +46,17 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (body.name) updates.name = body.name.trim();
   if (body.keywords) updates.keywords = body.keywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
   if (body.officialDomains) updates.officialDomains = body.officialDomains.map((d) => d.trim().toLowerCase()).filter(Boolean);
-  if (body.googleResultsLimit !== undefined) {
-    if (!isValidGoogleResultsLimit(body.googleResultsLimit)) {
-      return errorResponse('googleResultsLimit must be a whole number from 10 to 100 in increments of 10');
-    }
-    updates.googleResultsLimit = body.googleResultsLimit;
-  }
   if (body.allowAiDeepSearches !== undefined) {
     if (!isValidAllowAiDeepSearches(body.allowAiDeepSearches)) {
       return errorResponse('allowAiDeepSearches must be a boolean');
     }
     updates.allowAiDeepSearches = body.allowAiDeepSearches;
+  }
+  if (body.maxAiDeepSearches !== undefined) {
+    if (!isValidMaxAiDeepSearches(body.maxAiDeepSearches)) {
+      return errorResponse('maxAiDeepSearches must be a whole number from 1 to 10');
+    }
+    updates.maxAiDeepSearches = body.maxAiDeepSearches;
   }
   if (body.watchWords !== undefined) updates.watchWords = body.watchWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
   if (body.safeWords !== undefined) updates.safeWords = body.safeWords.map((w) => w.trim().toLowerCase()).filter(Boolean);

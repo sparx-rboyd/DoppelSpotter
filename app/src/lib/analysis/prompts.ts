@@ -23,6 +23,10 @@ Severity guidelines:
 - "medium": Suspicious activity that warrants investigation but may have a legitimate explanation (e.g. fan accounts, resellers using brand name)
 - "low": Likely benign mention but worth logging (e.g. news articles, legitimate reviews)
 
+Rules:
+- Each indiviudal analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
+ - This applies to both the title and the analysis text
+
 Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).`;
 
 /**
@@ -48,8 +52,7 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
       "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
       "isFalsePositive": boolean
     }
-  ],
-  "suggestedSearches": ["query 1", "query 2"]
+  ]
 }
 
 Rules for "items":
@@ -58,15 +61,6 @@ Rules for "items":
 - Each item must have all five fields: resultId, title, severity, analysis, isFalsePositive.
 - Each "analysis" must be a fully standalone description — do NOT reference or compare to any other item in the list (e.g. avoid phrases like "this is another X", "similar to the above", "like the previous result"). A reader should be able to understand each analysis without seeing any other result.
 
-Rules for "suggestedSearches":
-- "suggestedSearches" is optional. Omit it entirely if no follow-up searches are warranted.
-- Suggest at most 3 follow-up Google queries.
-- Ground every suggested query in the suspicious result candidates and supporting context you were given for this chunk.
-- Use suggestions to expand likely impersonation, fraud, cheating/solver abuse, lookalike branding, or customer-confusion patterns that merit another Google search.
-- Do NOT suggest the original source query again or obvious paraphrases of it.
-- Do NOT suggest clearly legitimate or generic navigational queries.
-- Prefer concise Google-ready queries, not full sentences.
-
 Severity guidelines:
 - "high": Clear impersonation, phishing, counterfeit, or direct brand misuse posing immediate risk to customers or the brand
 - "medium": Suspicious activity that warrants investigation but may have a legitimate explanation (e.g. fan accounts, resellers using the brand name)
@@ -74,19 +68,14 @@ Severity guidelines:
 
 Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).`;
 
-/**
- * System prompt for run-level Google deep-search suggestioning.
- * This fallback pass sees SERP context plus notable candidate assessments and any
- * chunk-proposed queries, so it can recover when chunk-level suggestions are too strict.
- */
-export const GOOGLE_SUGGESTION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+export function buildGoogleFinalSelectionSystemPrompt(maxSuggestedSearches: number): string {
+  return `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
 
-You will receive:
-- run-level Google SERP context such as related queries and People Also Ask questions
-- a shortlist of notable result assessments from the current scan
-- any follow-up queries already suggested by chunk-level analysis
+You will receive metadata about a brand, an existing search term about the brand that has been executed, and suggested related searches as a result of this initial search.
 
-Your task is to decide which follow-up Google searches, if any, should be run next to investigate likely brand misuse.
+Your task is to identify up to ${maxSuggestedSearches} follow-up Google searches that could be performed, that are likely to surface further evidence of potential brand misuse.
+
+You will synthesise up to ${maxSuggestedSearches} entirely new queries based on the context that you're provided with, that you feel will help to surface the maximum number of potential threats to the brand.
 
 You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
 {
@@ -95,13 +84,31 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
 
 Rules:
 - "suggestedSearches" is optional. Omit it entirely if no follow-up queries are warranted.
-- Suggest at most 3 follow-up Google queries.
-- Use the SERP context and notable result assessments together. If current results are mostly benign but the SERP intent signals are suspicious, you may still suggest follow-up queries.
-- Prefer queries that could uncover impersonation, fraud, cheating/solver abuse, lookalike branding, customer confusion, or adjacent abusive behaviour.
-- You may refine or replace chunk-proposed queries if you can produce stronger, more targeted ones.
+- Suggest at most ${maxSuggestedSearches} follow-up Google queries
+- Quality over quantity: return fewer than ${maxSuggestedSearches} queries when only a small number of genuinely useful follow-up searches are warranted.
+- Prefer coverage across distinct brand misuse themes. Avoid spending multiple searches on near-duplicate variants of the same utheme when one broader query would cover them.
+- Avoid focusing searches on specific websites, apps, platforms, resources, books, or tools etc. Instead, consolidate them into a broader query.
+- Any newly synthesized query must stay grounded in the context that you're provided with.
 - Do NOT suggest the original source query again or obvious paraphrases of it.
 - Do NOT suggest clearly legitimate or generic navigational queries.
-- Prefer concise Google-ready queries, not full sentences.`;
+- Prefer concise Google-ready queries, not full sentences.
+- Make use of Google search operators in your queries where you feel it would enhance the quality/depth of relevant search results.
+
+For example: 
+
+| Operator | Succinct Description | Example |
+| :---- | :---- | :---- |
+| **\`" "\` (Quotes)** | Forces an exact, word-for-word match of the enclosed phrase. | \`"climate change effects"\` |
+| **\`-\` (Minus)** | Excludes specific words, phrases, or sites from the search results. | \`apple -fruit\` |
+| **\`OR\` / \`|\`** | Returns results containing either one of the search terms (must be capitalized). | \`olympics 2024 OR 2028\` |
+| **\`*\` (Asterisk)** | Acts as a wildcard to fill in missing words or phrases in a query. | \`the * of the rings\` |
+| **\`( )\` (Parentheses)** | Groups search terms and operators to control the logical execution order. | \`(ipad OR iphone) -case\` |
+| **\`intext:\`** | Returns pages containing the specified word in the body text of the page. | \`intext:algorithm\` |
+| **\`allintext:\`** | Returns pages containing *all* specified words in the body text. | \`allintext:how to tie a tie\` |
+| **\`#\`** | Searches for a specific hashtag across social platforms and websites. | \`#throwbackthursday\` |
+
+`;
+}
 
 /**
  * Build the user prompt for a specific finding.
@@ -154,9 +161,8 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   source: FindingSource;
   candidates: GoogleSearchCandidate[];
   runContext: GoogleRunContext;
-  canSuggestSearches: boolean;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, safeWords, ignoredUrls, source, candidates, runContext, canSuggestSearches } = params;
+  const { brandName, keywords, officialDomains, watchWords, safeWords, ignoredUrls, source, candidates, runContext } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that result): ${watchWords.join(', ')}`
@@ -182,10 +188,6 @@ export function buildGoogleChunkAnalysisPrompt(params: {
     appearanceCount: candidate.sightings.length,
   }));
 
-  const suggestionInstruction = canSuggestSearches
-    ? 'If this chunk reveals worthwhile next-step searches, include up to 3 grounded follow-up queries in "suggestedSearches".'
-    : 'Do NOT include "suggestedSearches" in your response for this run.';
-
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
@@ -198,65 +200,52 @@ Supporting SERP context (for extra caution only — do NOT assess these as findi
 
 Assess every result candidate below and return one item in the "items" array per resultId.
 Use British English in any human-readable text you generate.
-${suggestionInstruction}
 
 Result candidates (${compactCandidates.length}):
 ${JSON.stringify(compactCandidates, null, 2)}`;
 }
 
 /**
- * Build the user prompt for the aggregate Google suggestion fallback pass.
+ * Build the user prompt for the final Google deep-search selection pass.
  */
-export function buildGoogleSuggestionPrompt(params: {
+export function buildGoogleFinalSelectionPrompt(params: {
   brandName: string;
   keywords: string[];
-  officialDomains: string[];
   watchWords?: string[];
   safeWords?: string[];
-  source: FindingSource;
   runContext: GoogleRunContext;
-  notableCandidates: Array<Record<string, unknown>>;
-  chunkSuggestedSearches?: string[];
+  maxSuggestedSearches: number;
 }): string {
   const {
     brandName,
     keywords,
-    officialDomains,
     watchWords,
     safeWords,
-    source,
     runContext,
-    notableCandidates,
-    chunkSuggestedSearches,
+    maxSuggestedSearches,
   } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
-    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand): ${watchWords.join(', ')}`
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand; you can use slices or combinations of these in your suggested queries as you see appropriate): ${watchWords.join(', ')}`
     : null;
 
   const safeWordsLine = safeWords && safeWords.length > 0
-    ? `Safe words (terms the brand owner is comfortable being associated with): ${safeWords.join(', ')}`
+    ? `Safe words (terms the brand owner is comfortable being associated with; you can use these as negative keyword in your suggestion queries as you see appropriate): ${safeWords.join(', ')}`
     : null;
 
   return `Brand being protected: "${brandName}"
-Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
-Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}Monitoring surface: ${source}
 
-Current source queries:
+Brand keywords (keywords that the brand owner wants to monitor and protect; you can use slices or combinations of these in your suggested queries as you see appropriate): ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+
+${watchWordsLine ? `${watchWordsLine}\n\n` : ''}${safeWordsLine ? `${safeWordsLine}\n\n` : ''}Original search query:
 ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.map((query) => `- ${query}`).join('\n') : '- none'}
 
-Related queries:
+Suggested related queries returned by Google for the above search:
 ${runContext.relatedQueries.length > 0 ? runContext.relatedQueries.map((query) => `- ${query}`).join('\n') : '- none'}
 
-People Also Ask:
+People Also Ask queries returned by Google for the above search:
 ${runContext.peopleAlsoAsk.length > 0 ? runContext.peopleAlsoAsk.map((question) => `- ${question}`).join('\n') : '- none'}
 
-Chunk-proposed follow-up queries:
-${chunkSuggestedSearches && chunkSuggestedSearches.length > 0 ? chunkSuggestedSearches.map((query) => `- ${query}`).join('\n') : '- none'}
-
-Notable assessed candidates from this run:
-${JSON.stringify(notableCandidates, null, 2)}
-
-Return up to 3 follow-up Google search queries only if they would materially help investigate suspicious brand misuse.`;
+Maximum number of follow-up Google searches you may suggest:
+- ${maxSuggestedSearches}`;
 }
