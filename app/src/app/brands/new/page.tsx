@@ -163,7 +163,7 @@ export default function NewBrandPage() {
                 <Input
                   id="name"
                   label="Brand name"
-                  placeholder="e.g. Acme Corp"
+                  placeholder="Enter your primary brand name ..."
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required

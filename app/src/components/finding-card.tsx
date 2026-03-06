@@ -3,6 +3,8 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
+  AlertCircle,
+  AlertTriangle,
   Globe,
   Instagram,
   Twitter,
@@ -10,6 +12,7 @@ import {
   Search,
   Smartphone,
   BookMarked,
+  Info,
   Sparkles,
   ExternalLink,
   ChevronDown,
@@ -27,8 +30,8 @@ import {
   X,
 } from 'lucide-react';
 import { type Finding, type FindingSource, type FindingSummary } from '@/lib/types';
-import { SeverityBadge } from './severity-badge';
 import { cn } from '@/lib/utils';
+import { Tooltip } from './ui/tooltip';
 
 type BookmarkUpdate = {
   isBookmarked?: boolean;
@@ -116,6 +119,24 @@ const sourceConfig: Record<
   },
 };
 
+const severityConfig = {
+  high: {
+    label: 'High severity',
+    icon: AlertCircle,
+    className: 'text-red-600',
+  },
+  medium: {
+    label: 'Medium severity',
+    icon: AlertTriangle,
+    className: 'text-amber-600',
+  },
+  low: {
+    label: 'Low severity',
+    icon: Info,
+    className: 'text-emerald-600',
+  },
+} as const;
+
 function ExpandableSection({
   icon: Icon,
   label,
@@ -188,6 +209,8 @@ export function FindingCard({
   const isIgnored = finding.isIgnored === true;
   const isBookmarked = finding.isBookmarked === true;
   const muted = isFalsePositive || isIgnored;
+  const severityMeta = severityConfig[finding.severity];
+  const SeverityIcon = severityMeta.icon;
 
   const searchParams = useSearchParams();
   const showDebug = searchParams.get('debug') === 'true';
@@ -315,78 +338,80 @@ export function FindingCard({
             >
               {finding.title}
             </h4>
-            {isIgnored ? (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-500 border border-transparent">
-                <EyeOff className="w-3.5 h-3.5" />
-                Ignored
-              </span>
-            ) : isFalsePositive ? (
-              <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-semibold bg-gray-100 text-gray-500 border border-transparent">
-                Non-hit
-              </span>
-            ) : (
-              <SeverityBadge severity={finding.severity} />
-            )}
-            {isBookmarked && (
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-brand-50 text-brand-700 border border-brand-100">
-                <Bookmark className="w-3.5 h-3.5" />
-                Bookmarked
-              </span>
+            {!isFalsePositive && (
+              <Tooltip content={severityMeta.label}>
+                <span
+                  role="img"
+                  aria-label={severityMeta.label}
+                  className={cn(
+                    'inline-flex items-center justify-center rounded-md p-1',
+                    muted ? 'text-gray-400' : severityMeta.className,
+                  )}
+                >
+                  <SeverityIcon className="w-4 h-4" />
+                </span>
+              </Tooltip>
             )}
             {finding.url && (
-              <a
-                href={finding.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <ExternalLink className="w-3.5 h-3.5 text-gray-400" />
-                Visit
-              </a>
+              <Tooltip content="Visit">
+                <a
+                  href={finding.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Visit"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              </Tooltip>
             )}
             {/* Ignore / un-ignore button — shown for real findings and non-hits alike */}
             {onIgnoreToggle && (
-              <button
-                type="button"
-                onClick={handleIgnoreToggle}
-                disabled={ignoring}
-                className={cn(
-                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border transition',
-                  isIgnored
-                    ? 'bg-gray-900 text-white border-transparent hover:bg-black'
-                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900',
-                )}
-              >
-                {ignoring ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : isIgnored ? (
-                  <Eye className="w-3.5 h-3.5" />
-                ) : (
-                  <EyeOff className="w-3.5 h-3.5 text-gray-400" />
-                )}
-                {isIgnored ? 'Un-ignore' : 'Ignore'}
-              </button>
+              <Tooltip content={isIgnored ? 'Un-ignore' : 'Ignore'}>
+                <button
+                  type="button"
+                  onClick={handleIgnoreToggle}
+                  disabled={ignoring}
+                  aria-label={isIgnored ? 'Un-ignore' : 'Ignore'}
+                  className={cn(
+                    'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
+                    isIgnored
+                      ? 'bg-gray-900 text-white border-transparent hover:bg-black'
+                      : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
+                  )}
+                >
+                  {ignoring ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : isIgnored ? (
+                    <Eye className="w-3.5 h-3.5" />
+                  ) : (
+                    <EyeOff className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </Tooltip>
             )}
             {onBookmarkUpdate && (
-              <button
-                type="button"
-                onClick={handleBookmarkToggle}
-                disabled={bookmarking}
-                className={cn(
-                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold border transition',
-                  isBookmarked
-                    ? 'bg-brand-600 text-white border-transparent hover:bg-brand-700'
-                    : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50 hover:text-gray-900',
-                )}
-              >
-                {bookmarking ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                ) : (
-                  <Bookmark className={cn('w-3.5 h-3.5', isBookmarked ? '' : 'text-gray-400')} />
-                )}
-                {isBookmarked ? 'Unbookmark' : 'Bookmark'}
-              </button>
+              <Tooltip content={isBookmarked ? 'Unbookmark' : 'Bookmark'}>
+                <button
+                  type="button"
+                  onClick={handleBookmarkToggle}
+                  disabled={bookmarking}
+                  aria-label={isBookmarked ? 'Unbookmark' : 'Bookmark'}
+                  className={cn(
+                    'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
+                    isBookmarked
+                      ? 'bg-brand-600 text-white border-transparent hover:bg-brand-700'
+                      : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
+                  )}
+                >
+                  {bookmarking ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Bookmark className="w-3.5 h-3.5" />
+                  )}
+                </button>
+              </Tooltip>
             )}
           </div>
 

@@ -81,7 +81,7 @@ export function TagInput({
           onChange={(event) => onInputChange(event.target.value)}
           onKeyDown={handleKeyDown}
           placeholder={values.length === 0 ? placeholder : undefined}
-          className="min-w-[10rem] flex-1 border-0 bg-transparent p-0 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-0"
+          className="brand-form-input min-w-[10rem] flex-1 border-0 bg-transparent p-0 text-sm text-gray-900 focus:outline-none focus:ring-0"
           aria-invalid={Boolean(error)}
           disabled={disabled}
           {...props}
