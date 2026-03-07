@@ -1,6 +1,26 @@
 'use client';
 
-import { useMemo } from 'react';
+import {
+  type MutableRefObject,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
+import {
+  CalendarDays,
+  Check,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Clock3,
+  Search,
+} from 'lucide-react';
+import { DateTime } from 'luxon';
 import { InfoTooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
@@ -14,6 +34,61 @@ type BrandScanScheduleFieldsProps = {
   value: BrandScanScheduleInput;
   onChange: (nextValue: BrandScanScheduleInput) => void;
 };
+
+type SelectOption = {
+  value: string;
+  label: string;
+};
+
+type FloatingPanelProps = {
+  anchorRef: MutableRefObject<HTMLElement | null>;
+  isOpen: boolean;
+  onClose: () => void;
+  matchTriggerWidth?: boolean;
+  className?: string;
+  children: ReactNode;
+};
+
+type SelectFieldProps = {
+  id: string;
+  label: string;
+  tooltip: string;
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  buttonIcon?: ReactNode;
+};
+
+type DateFieldProps = {
+  id: string;
+  label: string;
+  tooltip: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+};
+
+type TimeFieldProps = {
+  id: string;
+  label: string;
+  tooltip: string;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+};
+
+const FLOATING_PANEL_GAP_PX = 8;
+const FLOATING_PANEL_VIEWPORT_MARGIN_PX = 12;
+const WEEKDAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+const FREQUENCY_OPTIONS: SelectOption[] = (['daily', 'weekly', 'fortnightly', 'monthly'] as const).map((frequency) => ({
+  value: frequency,
+  label: formatScanScheduleFrequency(frequency),
+}));
+const HOUR_OPTIONS = Array.from({ length: 24 }, (_, index) => String(index).padStart(2, '0'));
+const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, index) => String(index).padStart(2, '0'));
 
 function ordinalSuffix(value: number): string {
   const modulo = value % 100;
@@ -51,16 +126,535 @@ function buildScheduleSummary(value: BrandScanScheduleInput): string {
       return `Runs every ${start.toFormat('cccc')} at ${time} (${zone}).`;
     case 'fortnightly':
       return `Runs every second ${start.toFormat('cccc')} at ${time} (${zone}), anchored from the selected start date.`;
-    case 'monthly':
-      return `Runs on the ${start.day}${ordinalSuffix(start.day)} of each month at ${time} (${zone}). Shorter months use the last day.`;
+    case 'monthly': {
+      const fallbackNote = start.day >= 29 ? ' Shorter months use the last day.' : '';
+      return `Runs on the ${start.day}${ordinalSuffix(start.day)} of each month at ${time} (${zone}).${fallbackNote}`;
+    }
   }
+}
+
+function buildFieldLabel(id: string, label: string, tooltip: string) {
+  return (
+    <label htmlFor={id} className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+      {label}
+      <InfoTooltip content={tooltip} />
+    </label>
+  );
+}
+
+function buildTriggerButtonClassName(disabled?: boolean) {
+  return cn(
+    'brand-form-input flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm text-gray-900 transition',
+    'focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent',
+    'border-gray-300 bg-white',
+    disabled && 'cursor-not-allowed bg-gray-50 text-gray-400',
+  );
+}
+
+function FloatingPanel({
+  anchorRef,
+  isOpen,
+  onClose,
+  matchTriggerWidth = true,
+  className,
+  children,
+}: FloatingPanelProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  const [isMounted, setIsMounted] = useState(false);
+  const [position, setPosition] = useState({ top: 0, left: 0, width: 0, maxHeight: 0 });
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  const updatePosition = useCallback(() => {
+    const anchor = anchorRef.current;
+    if (!anchor) return;
+
+    const rect = anchor.getBoundingClientRect();
+    const panelRect = panelRef.current?.getBoundingClientRect();
+    const naturalPanelWidth = matchTriggerWidth
+      ? rect.width
+      : panelRef.current?.scrollWidth ?? panelRect?.width ?? rect.width;
+    const naturalPanelHeight = panelRef.current?.scrollHeight ?? panelRect?.height ?? 0;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const preferredTop = rect.bottom + FLOATING_PANEL_GAP_PX;
+    const maxLeft = Math.max(
+      FLOATING_PANEL_VIEWPORT_MARGIN_PX,
+      viewportWidth - naturalPanelWidth - FLOATING_PANEL_VIEWPORT_MARGIN_PX,
+    );
+    const left = Math.max(
+      FLOATING_PANEL_VIEWPORT_MARGIN_PX,
+      Math.min(rect.left, maxLeft),
+    );
+
+    const spaceBelow = viewportHeight - preferredTop - FLOATING_PANEL_VIEWPORT_MARGIN_PX;
+    const spaceAbove = rect.top - FLOATING_PANEL_GAP_PX - FLOATING_PANEL_VIEWPORT_MARGIN_PX;
+    const shouldRenderAbove =
+      naturalPanelHeight > 0 &&
+      spaceBelow < naturalPanelHeight &&
+      spaceAbove > spaceBelow;
+
+    const maxHeight = Math.max(
+      0,
+      shouldRenderAbove ? spaceAbove : spaceBelow,
+    );
+    const renderedPanelHeight = naturalPanelHeight > 0
+      ? Math.min(naturalPanelHeight, maxHeight)
+      : maxHeight;
+
+    const top = shouldRenderAbove
+      ? Math.max(
+          FLOATING_PANEL_VIEWPORT_MARGIN_PX,
+          rect.top - FLOATING_PANEL_GAP_PX - renderedPanelHeight,
+        )
+      : Math.max(
+          FLOATING_PANEL_VIEWPORT_MARGIN_PX,
+          Math.min(
+            preferredTop,
+            viewportHeight - FLOATING_PANEL_VIEWPORT_MARGIN_PX - renderedPanelHeight,
+          ),
+        );
+
+    setPosition((current) => {
+      const nextPosition = {
+        top,
+        left,
+        width: rect.width,
+        maxHeight,
+      };
+
+      if (
+        current.top === nextPosition.top &&
+        current.left === nextPosition.left &&
+        current.width === nextPosition.width &&
+        current.maxHeight === nextPosition.maxHeight
+      ) {
+        return current;
+      }
+
+      return nextPosition;
+    });
+  }, [anchorRef, matchTriggerWidth]);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+
+    updatePosition();
+    const frameId = window.requestAnimationFrame(updatePosition);
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (panelRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
+      onCloseRef.current();
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onCloseRef.current();
+      }
+    }
+
+    function handleViewportChange() {
+      updatePosition();
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('scroll', handleViewportChange, true);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('resize', handleViewportChange);
+      window.removeEventListener('scroll', handleViewportChange, true);
+    };
+  }, [anchorRef, isOpen, updatePosition]);
+
+  if (!isMounted || !isOpen) {
+    return null;
+  }
+
+  return createPortal(
+    <div
+      ref={panelRef}
+      className={cn(
+        'fixed z-[120] overflow-y-auto rounded-xl border border-gray-200 bg-white p-2 shadow-xl',
+        className,
+      )}
+      style={{
+        top: position.top,
+        left: position.left,
+        width: matchTriggerWidth ? position.width : undefined,
+        maxHeight: position.maxHeight,
+      }}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+function SelectField({
+  id,
+  label,
+  tooltip,
+  value,
+  options,
+  onChange,
+  disabled,
+  searchable = false,
+  searchPlaceholder = 'Search…',
+  buttonIcon,
+}: SelectFieldProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+
+  const selectedOption = options.find((option) => option.value === value) ?? options[0];
+  const filteredOptions = useMemo(() => {
+    if (!searchable || !query.trim()) return options;
+
+    const normalizedQuery = query.trim().toLowerCase();
+    return options.filter((option) => option.label.toLowerCase().includes(normalizedQuery));
+  }, [options, query, searchable]);
+
+  useEffect(() => {
+    if (disabled) {
+      setIsOpen(false);
+    }
+  }, [disabled]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setQuery('');
+    }
+  }, [isOpen]);
+
+  return (
+    <div className="flex flex-col gap-1">
+      {buildFieldLabel(id, label, tooltip)}
+      <button
+        ref={triggerRef}
+        id={id}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (!disabled) setIsOpen((current) => !current);
+        }}
+        className={buildTriggerButtonClassName(disabled)}
+      >
+        {buttonIcon}
+        <span className="min-w-0 flex-1 truncate text-left">
+          {selectedOption?.label ?? value}
+        </span>
+        <ChevronDown className={cn('h-4 w-4 text-gray-400 transition', isOpen && 'rotate-180')} />
+      </button>
+
+      <FloatingPanel
+        anchorRef={triggerRef as MutableRefObject<HTMLElement | null>}
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+      >
+        {searchable && (
+          <div className="relative mb-2">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={searchPlaceholder}
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm text-gray-900 outline-none transition focus:border-brand-300 focus:bg-white"
+            />
+          </div>
+        )}
+
+        <div className="max-h-64 overflow-auto">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((option) => {
+              const isSelected = option.value === value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  onClick={() => {
+                    onChange(option.value);
+                    setIsOpen(false);
+                  }}
+                  className={cn(
+                    'flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm transition',
+                    isSelected
+                      ? 'bg-brand-50 text-brand-700'
+                      : 'text-gray-700 hover:bg-gray-50',
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
+                  <Check className={cn('h-4 w-4', isSelected ? 'opacity-100' : 'opacity-0')} />
+                </button>
+              );
+            })
+          ) : (
+            <p className="px-3 py-2 text-sm text-gray-400">No matching options.</p>
+          )}
+        </div>
+      </FloatingPanel>
+    </div>
+  );
+}
+
+function DateField({
+  id,
+  label,
+  tooltip,
+  value,
+  onChange,
+  disabled,
+}: DateFieldProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const selectedDate = useMemo(() => DateTime.fromISO(value), [value]);
+  const [visibleMonth, setVisibleMonth] = useState(
+    (selectedDate.isValid ? selectedDate : DateTime.now()).startOf('month'),
+  );
+
+  useEffect(() => {
+    if (disabled) {
+      setIsOpen(false);
+    }
+  }, [disabled]);
+
+  useEffect(() => {
+    if (isOpen) {
+      const nextVisibleMonth = (selectedDate.isValid ? selectedDate : DateTime.now()).startOf('month');
+      setVisibleMonth((current) => (
+        current.hasSame(nextVisibleMonth, 'month') ? current : nextVisibleMonth
+      ));
+    }
+  }, [isOpen, selectedDate]);
+
+  const calendarStart = visibleMonth.startOf('month').startOf('week');
+  const calendarDays = Array.from({ length: 42 }, (_, index) => calendarStart.plus({ days: index }));
+
+  return (
+    <div className="flex flex-col gap-1">
+      {buildFieldLabel(id, label, tooltip)}
+      <button
+        ref={triggerRef}
+        id={id}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (!disabled) setIsOpen((current) => !current);
+        }}
+        className={buildTriggerButtonClassName(disabled)}
+      >
+        <CalendarDays className="h-4 w-4 text-gray-400" />
+        <span className="min-w-0 flex-1 text-left">
+          {selectedDate.isValid ? selectedDate.toFormat('dd/LL/yyyy') : 'Select date'}
+        </span>
+        <ChevronDown className={cn('h-4 w-4 text-gray-400 transition', isOpen && 'rotate-180')} />
+      </button>
+
+      <FloatingPanel
+        anchorRef={triggerRef as MutableRefObject<HTMLElement | null>}
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        matchTriggerWidth={false}
+        className="w-[304px]"
+      >
+        <div className="flex items-center justify-between px-1 pb-2">
+          <button
+            type="button"
+            onClick={() => setVisibleMonth((current) => current.minus({ months: 1 }))}
+            className="rounded-md p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+            aria-label="Previous month"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="text-sm font-medium text-gray-900">
+            {visibleMonth.toFormat('LLLL yyyy')}
+          </span>
+          <button
+            type="button"
+            onClick={() => setVisibleMonth((current) => current.plus({ months: 1 }))}
+            className="rounded-md p-1.5 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+            aria-label="Next month"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 px-1 pb-2">
+          {WEEKDAY_LABELS.map((weekday, index) => (
+            <span
+              key={`${weekday}-${index}`}
+              className="flex h-8 items-center justify-center text-xs font-medium uppercase tracking-wide text-gray-400"
+            >
+              {weekday}
+            </span>
+          ))}
+          {calendarDays.map((day) => {
+            const isCurrentMonth = day.month === visibleMonth.month;
+            const isSelected = selectedDate.isValid && day.hasSame(selectedDate, 'day');
+
+            return (
+              <button
+                key={day.toISODate()}
+                type="button"
+                onClick={() => {
+                  onChange(day.toFormat('yyyy-LL-dd'));
+                  setIsOpen(false);
+                }}
+                className={cn(
+                  'flex h-9 items-center justify-center rounded-lg text-sm transition',
+                  isSelected
+                    ? 'bg-brand-600 font-medium text-white shadow-sm'
+                    : isCurrentMonth
+                      ? 'text-gray-700 hover:bg-gray-100'
+                      : 'text-gray-300 hover:bg-gray-50',
+                )}
+              >
+                {day.day}
+              </button>
+            );
+          })}
+        </div>
+      </FloatingPanel>
+    </div>
+  );
+}
+
+function TimeField({
+  id,
+  label,
+  tooltip,
+  value,
+  onChange,
+  disabled,
+}: TimeFieldProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [selectedHour = '00', selectedMinute = '00'] = value.split(':');
+
+  useEffect(() => {
+    if (disabled) {
+      setIsOpen(false);
+    }
+  }, [disabled]);
+
+  function updateTime(nextHour: string, nextMinute: string, closeAfterUpdate = false) {
+    onChange(`${nextHour}:${nextMinute}`);
+    if (closeAfterUpdate) {
+      setIsOpen(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      {buildFieldLabel(id, label, tooltip)}
+      <button
+        ref={triggerRef}
+        id={id}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+        onClick={() => {
+          if (!disabled) setIsOpen((current) => !current);
+        }}
+        className={buildTriggerButtonClassName(disabled)}
+      >
+        <Clock3 className="h-4 w-4 text-gray-400" />
+        <span className="min-w-0 flex-1 text-left">{value}</span>
+        <ChevronDown className={cn('h-4 w-4 text-gray-400 transition', isOpen && 'rotate-180')} />
+      </button>
+
+      <FloatingPanel
+        anchorRef={triggerRef as MutableRefObject<HTMLElement | null>}
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        matchTriggerWidth={false}
+        className="w-[304px]"
+      >
+        <div className="mb-2 px-1">
+          <p className="text-sm font-medium text-gray-900">{selectedHour}:{selectedMinute}</p>
+          <p className="text-xs text-gray-500">Choose an hour and minute.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="min-w-0">
+            <p className="px-2 pb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Hour</p>
+            <div className="max-h-56 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-1">
+              {HOUR_OPTIONS.map((hour) => {
+                const isSelected = hour === selectedHour;
+                return (
+                  <button
+                    key={hour}
+                    type="button"
+                    onClick={() => updateTime(hour, selectedMinute)}
+                    className={cn(
+                      'flex w-full items-center justify-center rounded-md px-2 py-2 text-sm transition',
+                      isSelected
+                        ? 'bg-brand-600 font-medium text-white'
+                        : 'text-gray-700 hover:bg-white',
+                    )}
+                  >
+                    {hour}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div className="min-w-0">
+            <p className="px-2 pb-2 text-xs font-medium uppercase tracking-wide text-gray-400">Minute</p>
+            <div className="max-h-56 overflow-auto rounded-lg border border-gray-200 bg-gray-50 p-1">
+              {MINUTE_OPTIONS.map((minute) => {
+                const isSelected = minute === selectedMinute;
+                return (
+                  <button
+                    key={minute}
+                    type="button"
+                    onClick={() => updateTime(selectedHour, minute, true)}
+                    className={cn(
+                      'flex w-full items-center justify-center rounded-md px-2 py-2 text-sm transition',
+                      isSelected
+                        ? 'bg-brand-600 font-medium text-white'
+                        : 'text-gray-700 hover:bg-white',
+                    )}
+                  >
+                    {minute}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </FloatingPanel>
+    </div>
+  );
 }
 
 export function BrandScanScheduleFields({
   value,
   onChange,
 }: BrandScanScheduleFieldsProps) {
-  const timeZones = useMemo(() => getSupportedTimeZones(), []);
+  const timeZones = useMemo(
+    () => getSupportedTimeZones().map((timeZone) => ({ value: timeZone, label: timeZone })),
+    [],
+  );
   const summary = buildScheduleSummary(value);
 
   function updateValue(patch: Partial<BrandScanScheduleInput>) {
@@ -111,75 +705,45 @@ export function BrandScanScheduleFields({
         !value.enabled && 'opacity-60',
       )}
       >
-        <div className="flex flex-col gap-1">
-          <label htmlFor="schedule-frequency" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-            Frequency
-            <InfoTooltip content="The selected start date anchors weekly, fortnightly, and monthly repeats." />
-          </label>
-          <select
-            id="schedule-frequency"
-            value={value.frequency}
-            disabled={!value.enabled}
-            onChange={(event) => updateValue({ frequency: event.target.value as BrandScanScheduleInput['frequency'] })}
-            className="brand-form-input w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 transition focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:cursor-not-allowed"
-          >
-            {(['daily', 'weekly', 'fortnightly', 'monthly'] as const).map((frequency) => (
-              <option key={frequency} value={frequency}>
-                {formatScanScheduleFrequency(frequency)}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SelectField
+          id="schedule-frequency"
+          label="Frequency"
+          tooltip="The selected start date anchors weekly, fortnightly, and monthly repeats."
+          value={value.frequency}
+          options={FREQUENCY_OPTIONS}
+          onChange={(nextValue) => updateValue({ frequency: nextValue as BrandScanScheduleInput['frequency'] })}
+          disabled={!value.enabled}
+        />
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor="schedule-timezone" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-            Timezone
-            <InfoTooltip content="Scheduled scans stay pinned to this local timezone, including through daylight saving changes." />
-          </label>
-          <select
-            id="schedule-timezone"
-            value={value.timeZone}
-            disabled={!value.enabled}
-            onChange={(event) => updateValue({ timeZone: event.target.value })}
-            className="brand-form-input w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 transition focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:cursor-not-allowed"
-          >
-            {timeZones.map((timeZone) => (
-              <option key={timeZone} value={timeZone}>
-                {timeZone}
-              </option>
-            ))}
-          </select>
-        </div>
+        <SelectField
+          id="schedule-timezone"
+          label="Timezone"
+          tooltip="Scheduled scans stay pinned to this local timezone, including through daylight saving changes."
+          value={value.timeZone}
+          options={timeZones}
+          onChange={(nextValue) => updateValue({ timeZone: nextValue })}
+          disabled={!value.enabled}
+          searchable
+          searchPlaceholder="Search timezones"
+        />
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor="schedule-start-date" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-            Start date
-            <InfoTooltip content="The first local date used to anchor the repeating schedule." />
-          </label>
-          <input
-            id="schedule-start-date"
-            type="date"
-            value={value.startDate}
-            disabled={!value.enabled}
-            onChange={(event) => updateValue({ startDate: event.target.value })}
-            className="brand-form-input w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 transition focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:cursor-not-allowed"
-          />
-        </div>
+        <DateField
+          id="schedule-start-date"
+          label="Start date"
+          tooltip="The first local date used to anchor the repeating schedule."
+          value={value.startDate}
+          onChange={(nextValue) => updateValue({ startDate: nextValue })}
+          disabled={!value.enabled}
+        />
 
-        <div className="flex flex-col gap-1">
-          <label htmlFor="schedule-start-time" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-            Time
-            <InfoTooltip content="The same local time is reused for each scheduled run." />
-          </label>
-          <input
-            id="schedule-start-time"
-            type="time"
-            value={value.startTime}
-            disabled={!value.enabled}
-            onChange={(event) => updateValue({ startTime: event.target.value })}
-            className="brand-form-input w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 transition focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent disabled:cursor-not-allowed"
-          />
-        </div>
+        <TimeField
+          id="schedule-start-time"
+          label="Time"
+          tooltip="Scheduled scans will run within 10 minutes of the scheduled start time."
+          value={value.startTime}
+          onChange={(nextValue) => updateValue({ startTime: nextValue })}
+          disabled={!value.enabled}
+        />
       </div>
     </div>
   );

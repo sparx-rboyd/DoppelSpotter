@@ -14,6 +14,7 @@ export async function POST(request: NextRequest) {
     console.error('[scheduled-scans] Missing SCHEDULE_DISPATCH_SERVICE_ACCOUNT_EMAIL');
     return errorResponse('Scheduler is not configured', 500);
   }
+  const normalizedSchedulerServiceAccountEmail = schedulerServiceAccountEmail.trim().toLowerCase();
 
   const authorizationHeader = request.headers.get('authorization');
   if (!authorizationHeader?.startsWith('Bearer ')) {
@@ -29,13 +30,23 @@ export async function POST(request: NextRequest) {
       audience: dispatcherAudience,
     });
     const payload = ticket.getPayload();
+    const tokenEmail = payload?.email?.trim().toLowerCase();
+    const hasValidIssuer = GOOGLE_ISSUERS.has(payload?.iss ?? '');
+    const matchesConfiguredEmail = tokenEmail === normalizedSchedulerServiceAccountEmail;
 
     if (
       !payload ||
-      payload.email !== schedulerServiceAccountEmail ||
-      payload.email_verified !== true ||
-      !GOOGLE_ISSUERS.has(payload.iss ?? '')
+      !matchesConfiguredEmail ||
+      !hasValidIssuer
     ) {
+      console.error('[scheduled-scans] Rejected Cloud Scheduler token payload', {
+        email: payload?.email ?? null,
+        sub: payload?.sub ?? null,
+        iss: payload?.iss ?? null,
+        aud: payload?.aud ?? null,
+        expectedEmail: schedulerServiceAccountEmail,
+        expectedAudience: dispatcherAudience,
+      });
       return errorResponse('Unauthorized', 401);
     }
   } catch (error) {

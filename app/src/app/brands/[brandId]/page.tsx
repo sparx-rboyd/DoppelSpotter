@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
   ChevronDown, ChevronRight, Pencil, Trash2, X, EyeOff, Bookmark,
-  Sparkles,
+  Sparkles, Clock3,
 } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
@@ -1487,19 +1487,31 @@ export default function BrandDetailPage() {
                     )}
 
                     <div className="mt-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-medium text-gray-700">Scheduled scans</span>
-                        {scanSchedule?.enabled ? (
-                          <Badge variant="brand">{formatScanScheduleFrequency(scanSchedule.frequency)}</Badge>
-                        ) : (
-                          <Badge variant="default">Off</Badge>
-                        )}
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
+                          <Clock3 className="h-4 w-4" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-sm font-medium text-gray-700">Scheduled scans</span>
+                            {scanSchedule?.enabled ? (
+                              <Badge variant="brand">{formatScanScheduleFrequency(scanSchedule.frequency)}</Badge>
+                            ) : (
+                              <Badge variant="default">Off</Badge>
+                            )}
+                          </div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-gray-500">
+                            <span>
+                              {scanSchedule?.enabled
+                                ? `Next due ${formatScheduledRunAt(scanSchedule.nextRunAt, scanSchedule.timeZone)}`
+                                : 'Scheduling is currently disabled for this brand.'}
+                            </span>
+                            {scanSchedule?.enabled && (
+                              <InfoTooltip content="Scheduled scans will run within 10 minutes of the scheduled start time." />
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <p className="mt-1 text-sm text-gray-500">
-                        {scanSchedule?.enabled
-                          ? `Next due ${formatScheduledRunAt(scanSchedule.nextRunAt, scanSchedule.timeZone)}.`
-                          : 'Scheduling is currently disabled for this brand.'}
-                      </p>
                     </div>
                   </div>
                 );
