@@ -22,7 +22,7 @@ import {
   formatScheduledRunAt,
 } from '@/lib/scan-schedules';
 import { cn, formatScanDate } from '@/lib/utils';
-import type { ActorRunInfo, BrandProfile, FindingSummary, Scan, ScanSummary } from '@/lib/types';
+import type { ActorRunInfo, BrandProfile, FindingCategory, FindingSummary, Scan, ScanSummary } from '@/lib/types';
 
 const POLL_INTERVAL_MS = 5_000;
 const ACTIVE_SCAN_IDLE_POLL_INTERVAL_MS = 20_000;
@@ -64,6 +64,18 @@ function clearStoredScanId(brandId: string) {
 // Severity badge helpers
 // ---------------------------------------------------------------------------
 
+const SEVERITY_BADGE_CLASSES = {
+  high: '!border-red-300 !bg-red-200 !text-red-900',
+  medium: '!border-amber-300 !bg-amber-200 !text-amber-900',
+  low: '!border-green-300 !bg-green-200 !text-green-900',
+} as const;
+
+const SEVERITY_COUNT_TEXT_CLASSES = {
+  high: 'text-red-900',
+  medium: 'text-amber-900',
+  low: 'text-green-900',
+} as const;
+
 function SeverityPills({ high, medium, low }: { high: number; medium: number; low: number }) {
   if (high === 0 && medium === 0 && low === 0) return null;
   return (
@@ -104,6 +116,8 @@ function SeverityGroup({
   severity,
   findings,
   onIgnoreToggle,
+  onAddressToggle,
+  onReclassify,
   onBookmarkUpdate,
   forceExpanded = false,
   highlightQuery,
@@ -111,6 +125,8 @@ function SeverityGroup({
   severity: 'high' | 'medium' | 'low';
   findings: FindingSummary[];
   onIgnoreToggle?: (finding: FindingSummary, isIgnored: boolean) => Promise<void>;
+  onAddressToggle?: (finding: FindingSummary, isAddressed: boolean) => Promise<void>;
+  onReclassify?: (finding: FindingSummary, category: FindingCategory) => Promise<void>;
   onBookmarkUpdate?: (finding: FindingSummary, updates: BookmarkUpdate) => Promise<void>;
   forceExpanded?: boolean;
   highlightQuery?: string;
@@ -149,11 +165,11 @@ function SeverityGroup({
           {expanded
             ? <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
             : <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />}
-          <Badge variant={variant}>
+          <Badge variant={variant} className={SEVERITY_BADGE_CLASSES[severity]}>
             <Icon className="w-3.5 h-3.5" />
             {label}
           </Badge>
-          <span className="text-xs text-gray-500">
+          <span className={cn('text-xs', SEVERITY_COUNT_TEXT_CLASSES[severity])}>
             {findings.length} finding{findings.length !== 1 ? 's' : ''}
           </span>
         </button>
@@ -162,7 +178,7 @@ function SeverityGroup({
             type="button"
             onClick={handleIgnoreAll}
             disabled={ignoringAll}
-            className="flex-shrink-0 mr-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500 hover:bg-gray-200 transition disabled:opacity-50"
+            className="flex-shrink-0 mr-3 inline-flex items-center gap-1 rounded-full border border-gray-300 bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-700 transition hover:bg-gray-300 disabled:opacity-50"
           >
             {ignoringAll
               ? <Loader2 className="w-3 h-3 animate-spin" />
@@ -179,6 +195,8 @@ function SeverityGroup({
               finding={finding}
               highlightQuery={highlightQuery}
               onIgnoreToggle={onIgnoreToggle}
+              onAddressToggle={onAddressToggle}
+              onReclassify={onReclassify}
               onBookmarkUpdate={onBookmarkUpdate}
             />
           ))}
@@ -288,7 +306,8 @@ export default function BrandDetailPage() {
   const [showNonHitsByScanId, setShowNonHitsByScanId] = useState<Record<string, boolean>>({});
   const [showIgnoredByScanId, setShowIgnoredByScanId] = useState<Record<string, boolean>>({});
   const [allBookmarkedFindings, setAllBookmarkedFindings] = useState<FindingSummary[]>([]);
-  const [activeTab, setActiveTab] = useState<'scans' | 'bookmarks' | 'ignored'>('scans');
+  const [allAddressedFindings, setAllAddressedFindings] = useState<FindingSummary[]>([]);
+  const [activeTab, setActiveTab] = useState<'scans' | 'bookmarks' | 'ignored' | 'addressed'>('scans');
   const [allIgnoredFindings, setAllIgnoredFindings] = useState<FindingSummary[]>([]);
   const [findingsSearchQuery, setFindingsSearchQuery] = useState('');
   const [findingsSearchLoading, setFindingsSearchLoading] = useState(false);
@@ -440,6 +459,18 @@ export default function BrandDetailPage() {
     }
   }
 
+  async function loadAllAddressedFindings() {
+    try {
+      const res = await fetch(`/api/brands/${brandId}/findings?addressedOnly=true`, { credentials: 'same-origin' });
+      if (res.ok) {
+        const json = await res.json();
+        setAllAddressedFindings(json.data ?? []);
+      }
+    } catch {
+      // Non-critical
+    }
+  }
+
   async function loadAllBookmarkedFindings() {
     try {
       const res = await fetch(`/api/brands/${brandId}/findings?bookmarkedOnly=true`, { credentials: 'same-origin' });
@@ -493,6 +524,24 @@ export default function BrandDetailPage() {
     return changed ? next : record;
   }
 
+  function getFindingDisplayBucket(finding: FindingSummary) {
+    if (finding.isFalsePositive === true) return 'non-hit' as const;
+    if (finding.isIgnored === true) return 'ignored' as const;
+    if (finding.isAddressed === true) return 'addressed' as const;
+    return 'hit' as const;
+  }
+
+  function removeFindingsFromList(findings: FindingSummary[], findingIds: Set<string>) {
+    const next = findings.filter((finding) => !findingIds.has(finding.id));
+    return next.length === findings.length ? findings : next;
+  }
+
+  function upsertFindingsIntoList(findings: FindingSummary[], additions: FindingSummary[]) {
+    if (additions.length === 0) return findings;
+    const additionIds = new Set(additions.map((finding) => finding.id));
+    return [...additions, ...findings.filter((finding) => !additionIds.has(finding.id))];
+  }
+
   function attachToActiveScan(scan: Scan, options?: { collapseExpandedScans?: boolean }) {
     setScanning(true);
     setCancelling(false);
@@ -535,7 +584,7 @@ export default function BrandDetailPage() {
   }
 
   // ---------------------------------------------------------------------------
-  // Ignore / un-ignore a finding
+  // Ignore / un-ignore a real finding; reclassify any finding category
   // ---------------------------------------------------------------------------
 
   async function handleBookmarkUpdate(triggerFinding: FindingSummary, updates: BookmarkUpdate) {
@@ -569,6 +618,7 @@ export default function BrandDetailPage() {
     setScanNonHits((prev) => updateFindingMap(prev, triggerFinding.id, applyBookmarkUpdate));
     setScanIgnored((prev) => updateFindingMap(prev, triggerFinding.id, applyBookmarkUpdate));
     setLiveScanFindings((prev) => updateFindingList(prev, triggerFinding.id, applyBookmarkUpdate));
+    setAllAddressedFindings((prev) => updateFindingList(prev, triggerFinding.id, applyBookmarkUpdate));
     setAllIgnoredFindings((prev) => updateFindingList(prev, triggerFinding.id, applyBookmarkUpdate));
     setAllBookmarkedFindings((prev) => {
       if (!isBookmarked) {
@@ -801,6 +851,232 @@ export default function BrandDetailPage() {
     );
   }
 
+  async function handleAddressedToggle(triggerFinding: FindingSummary, isAddressed: boolean) {
+    const res = await fetch(`/api/brands/${brandId}/findings/${triggerFinding.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ isAddressed }),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error ?? 'Failed to update finding');
+    }
+
+    const json = await res.json().catch(() => ({}));
+    const responseData = (json.data ?? {}) as {
+      affectedFindings?: FindingSummary[];
+      affectedScanDeltas?: Record<string, {
+        findingCount: number;
+        highCount: number;
+        mediumCount: number;
+        lowCount: number;
+        nonHitCount: number;
+        ignoredCount: number;
+        addressedCount: number;
+      }>;
+    };
+    const fallbackFinding: FindingSummary = {
+      ...triggerFinding,
+      isIgnored: false,
+      isAddressed,
+    };
+    const affectedFindings = Array.isArray(responseData.affectedFindings) && responseData.affectedFindings.length > 0
+      ? responseData.affectedFindings
+      : [fallbackFinding];
+    const affectedIds = new Set(affectedFindings.map((finding) => finding.id));
+    const affectedFindingsById = new Map(affectedFindings.map((finding) => [finding.id, finding]));
+    const nextHitsByScanId = affectedFindings.reduce<Record<string, FindingSummary[]>>((acc, finding) => {
+      if (getFindingDisplayBucket(finding) !== 'hit') return acc;
+      if (!acc[finding.scanId]) acc[finding.scanId] = [];
+      acc[finding.scanId].push(finding);
+      return acc;
+    }, {});
+    const nextAddressedFindings = affectedFindings.filter((finding) => getFindingDisplayBucket(finding) === 'addressed');
+
+    setScanFindings((prev) => {
+      let changed = false;
+      const next: Record<string, FindingSummary[]> = {};
+      for (const [scanId, findings] of Object.entries(prev)) {
+        let updated = removeFindingsFromList(findings, affectedIds);
+        const additions = nextHitsByScanId[scanId] ?? [];
+        if (additions.length > 0) {
+          updated = upsertFindingsIntoList(updated, additions);
+        }
+        next[scanId] = updated;
+        if (updated !== findings) changed = true;
+      }
+      return changed ? next : prev;
+    });
+
+    setLiveScanFindings((prev) => prev.flatMap((finding) => {
+      const updated = affectedFindingsById.get(finding.id);
+      if (!updated) return [finding];
+      return getFindingDisplayBucket(updated) === 'hit' ? [updated] : [];
+    }));
+    setAllAddressedFindings((prev) => {
+      const next = removeFindingsFromList(prev, affectedIds);
+      return nextAddressedFindings.length > 0 ? upsertFindingsIntoList(next, nextAddressedFindings) : next;
+    });
+    setAllBookmarkedFindings((prev) => prev.map((finding) => affectedFindingsById.get(finding.id) ?? finding));
+    setAllIgnoredFindings((prev) => removeFindingsFromList(prev, affectedIds));
+    setScans((prev) =>
+      prev.map((scan) => {
+        const delta = responseData.affectedScanDeltas?.[scan.id];
+        if (!delta) return scan;
+
+        return {
+          ...scan,
+          highCount: Math.max(0, scan.highCount + delta.highCount),
+          mediumCount: Math.max(0, scan.mediumCount + delta.mediumCount),
+          lowCount: Math.max(0, scan.lowCount + delta.lowCount),
+          nonHitCount: Math.max(0, scan.nonHitCount + delta.nonHitCount),
+          ignoredCount: Math.max(0, (scan.ignoredCount ?? 0) + delta.ignoredCount),
+          addressedCount: Math.max(0, (scan.addressedCount ?? 0) + delta.addressedCount),
+        };
+      }),
+    );
+  }
+
+  async function handleReclassifyFinding(triggerFinding: FindingSummary, category: FindingCategory) {
+    const res = await fetch(`/api/brands/${brandId}/findings/${triggerFinding.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ reclassifiedCategory: category }),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error ?? 'Failed to reclassify finding');
+    }
+
+    const json = await res.json().catch(() => ({}));
+    const responseData = (json.data ?? {}) as {
+      affectedFindings?: FindingSummary[];
+      affectedScanDeltas?: Record<string, {
+        findingCount: number;
+        highCount: number;
+        mediumCount: number;
+        lowCount: number;
+        nonHitCount: number;
+        ignoredCount: number;
+        addressedCount: number;
+      }>;
+    };
+    const fallbackFinding: FindingSummary = {
+      ...triggerFinding,
+      severity: category === 'non-hit' ? triggerFinding.severity : category,
+      isFalsePositive: category === 'non-hit',
+      isIgnored: category === 'non-hit',
+      isAddressed: false,
+    };
+    const affectedFindings = Array.isArray(responseData.affectedFindings) && responseData.affectedFindings.length > 0
+      ? responseData.affectedFindings
+      : [fallbackFinding];
+    const affectedIds = new Set(affectedFindings.map((finding) => finding.id));
+    const affectedFindingsByScanId = affectedFindings.reduce<Record<string, FindingSummary[]>>((acc, finding) => {
+      if (!acc[finding.scanId]) acc[finding.scanId] = [];
+      acc[finding.scanId].push(finding);
+      return acc;
+    }, {});
+    const affectedCountsByScanId = affectedFindings.reduce<Record<string, number>>((acc, finding) => {
+      acc[finding.scanId] = (acc[finding.scanId] ?? 0) + 1;
+      return acc;
+    }, {});
+    const affectedFindingsById = new Map(affectedFindings.map((finding) => [finding.id, finding]));
+    const nextHitsByScanId: Record<string, FindingSummary[]> = {};
+    const nextNonHitsByScanId: Record<string, FindingSummary[]> = {};
+    const nextIgnoredByScanId: Record<string, FindingSummary[]> = {};
+    const nextAddressedFindings: FindingSummary[] = [];
+    for (const [scanId, findings] of Object.entries(affectedFindingsByScanId)) {
+      nextHitsByScanId[scanId] = findings.filter((finding) => getFindingDisplayBucket(finding) === 'hit');
+      nextNonHitsByScanId[scanId] = findings.filter((finding) => getFindingDisplayBucket(finding) === 'non-hit');
+      nextIgnoredByScanId[scanId] = findings.filter((finding) => getFindingDisplayBucket(finding) === 'ignored');
+      nextAddressedFindings.push(...findings.filter((finding) => getFindingDisplayBucket(finding) === 'addressed'));
+    }
+
+    setScanFindings((prev) => {
+      let changed = false;
+      const next: Record<string, FindingSummary[]> = {};
+      for (const [scanId, findings] of Object.entries(prev)) {
+        let updated = removeFindingsFromList(findings, affectedIds);
+        const additions = nextHitsByScanId[scanId] ?? [];
+        if (additions.length > 0) {
+          updated = upsertFindingsIntoList(updated, additions);
+        }
+        next[scanId] = updated;
+        if (updated !== findings) changed = true;
+      }
+      return changed ? next : prev;
+    });
+
+    setScanNonHits((prev) => {
+      let changed = false;
+      const next: Record<string, FindingSummary[]> = {};
+      for (const [scanId, findings] of Object.entries(prev)) {
+        let updated = removeFindingsFromList(findings, affectedIds);
+        const additions = nextNonHitsByScanId[scanId] ?? [];
+        if (additions.length > 0) {
+          updated = upsertFindingsIntoList(updated, additions);
+        }
+        next[scanId] = updated;
+        if (updated !== findings) changed = true;
+      }
+      return changed ? next : prev;
+    });
+
+    setScanIgnored((prev) => {
+      let changed = false;
+      const next: Record<string, FindingSummary[]> = {};
+      for (const [scanId, findings] of Object.entries(prev)) {
+        let updated = removeFindingsFromList(findings, affectedIds);
+        const additions = nextIgnoredByScanId[scanId] ?? [];
+        if (additions.length > 0) {
+          updated = upsertFindingsIntoList(updated, additions);
+        }
+        next[scanId] = updated;
+        if (updated !== findings) changed = true;
+      }
+      return changed ? next : prev;
+    });
+
+    setLiveScanFindings((prev) => prev.flatMap((finding) => {
+      const updated = affectedFindingsById.get(finding.id);
+      if (!updated) return [finding];
+      return getFindingDisplayBucket(updated) === 'hit' ? [updated] : [];
+    }));
+    setAllIgnoredFindings((prev) => {
+      const next = removeFindingsFromList(prev, affectedIds);
+      const additions = affectedFindings.filter((finding) => getFindingDisplayBucket(finding) === 'ignored');
+      return additions.length > 0 ? upsertFindingsIntoList(next, additions) : next;
+    });
+    setAllAddressedFindings((prev) => {
+      const next = removeFindingsFromList(prev, affectedIds);
+      return nextAddressedFindings.length > 0 ? upsertFindingsIntoList(next, nextAddressedFindings) : next;
+    });
+    setAllBookmarkedFindings((prev) => prev.map((finding) => affectedFindingsById.get(finding.id) ?? finding));
+    setScans((prev) =>
+      prev.map((scan) => {
+        const delta = responseData.affectedScanDeltas?.[scan.id];
+        if (!delta) {
+          const affectedCount = affectedCountsByScanId[scan.id] ?? 0;
+          if (affectedCount === 0) return scan;
+          return scan;
+        }
+
+        return {
+          ...scan,
+          highCount: Math.max(0, scan.highCount + delta.highCount),
+          mediumCount: Math.max(0, scan.mediumCount + delta.mediumCount),
+          lowCount: Math.max(0, scan.lowCount + delta.lowCount),
+          nonHitCount: Math.max(0, scan.nonHitCount + delta.nonHitCount),
+          ignoredCount: Math.max(0, (scan.ignoredCount ?? 0) + delta.ignoredCount),
+          addressedCount: Math.max(0, (scan.addressedCount ?? 0) + delta.addressedCount),
+        };
+      }),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // On mount: fetch brand + scans; restore in-flight scan if present
   // ---------------------------------------------------------------------------
@@ -812,6 +1088,7 @@ export default function BrandDetailPage() {
 
       // Fire non-critical loads immediately so they run in parallel with brand + scans fetches
       void loadAllBookmarkedFindings();
+      void loadAllAddressedFindings();
       void loadAllIgnoredFindings();
 
       try {
@@ -960,7 +1237,7 @@ export default function BrandDetailPage() {
     }
   }
 
-  function switchFindingsTab(tab: 'scans' | 'bookmarks' | 'ignored') {
+  function switchFindingsTab(tab: 'scans' | 'bookmarks' | 'ignored' | 'addressed') {
     if (tab !== 'scans') {
       setAnchorTargetScanId(null);
     }
@@ -1141,6 +1418,7 @@ export default function BrandDetailPage() {
         }
         return n;
       });
+      setAllAddressedFindings((prev) => prev.filter((finding) => finding.scanId !== scanId));
       setExpandedScanIds((prev) => prev.filter((id) => id !== scanId));
       setScans((prev) => prev.filter((s) => s.id !== scanId));
     } catch (err) {
@@ -1172,6 +1450,7 @@ export default function BrandDetailPage() {
       setScanNonHits({});
       setScanIgnored({});
       setAllBookmarkedFindings([]);
+      setAllAddressedFindings([]);
       setAllIgnoredFindings([]);
       setExpandedScanIds([]);
       setActiveScan(null);
@@ -1433,15 +1712,18 @@ export default function BrandDetailPage() {
 
   const totalFindings = scans.reduce((sum, s) => sum + s.highCount + s.mediumCount + s.lowCount, 0);
   const totalNonHits = scans.reduce((sum, s) => sum + s.nonHitCount, 0);
+  const totalAddressed = scans.reduce((sum, s) => sum + (s.addressedCount ?? 0), 0);
   const totalIgnored = scans.reduce((sum, s) => sum + (s.ignoredCount ?? 0), 0);
   const totalSkipped = scans.reduce((sum, s) => sum + (s.skippedCount ?? 0), 0);
-  const totalResultsCount = totalFindings + totalNonHits + totalIgnored + totalSkipped;
+  const totalResultsCount = totalFindings + totalNonHits + totalAddressed + totalIgnored + totalSkipped;
   const requiresClearHistoryConfirmation = totalResultsCount > 0;
   const isAwaitingClearHistoryConfirmation = confirmClear && requiresClearHistoryConfirmation;
   const visibleBookmarkedFindings = filterFindingsForSearch(allBookmarkedFindings) ?? [];
   const bookmarkedHits = visibleBookmarkedFindings.filter((finding) => !finding.isFalsePositive);
   const bookmarkedNonHits = sortBySeverity(visibleBookmarkedFindings.filter((finding) => finding.isFalsePositive));
   const visibleBookmarkedCount = visibleBookmarkedFindings.length;
+  const visibleAddressedFindings = filterFindingsForSearch(allAddressedFindings) ?? [];
+  const visibleAddressedCount = visibleAddressedFindings.length;
   const visibleIgnoredFindings = filterFindingsForSearch(allIgnoredFindings) ?? [];
   const visibleIgnoredCount = visibleIgnoredFindings.length;
   const visibleLiveScanFindings = filterFindingsForSearch(liveScanFindings) ?? [];
@@ -1624,7 +1906,7 @@ export default function BrandDetailPage() {
                   {isFindingsSearchActive && (
                     <p className="mt-3 text-xs text-white/80">
                       {findingsSearchLoading
-                        ? 'Searching across hits, non-hits, ignored, and bookmarked findings...'
+                        ? 'Searching across hits, non-hits, ignored, addressed, and bookmarked findings...'
                         : 'Showing only findings that match this search.'}
                     </p>
                   )}
@@ -1686,6 +1968,23 @@ export default function BrandDetailPage() {
                       </button>
                       <button
                         type="button"
+                        onClick={() => switchFindingsTab('addressed')}
+                        className={cn(
+                          "inline-flex items-center gap-2 whitespace-nowrap border-b-2 py-4 text-sm font-medium transition-colors",
+                          activeTab === 'addressed'
+                            ? "border-brand-600 text-brand-700"
+                            : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700",
+                        )}
+                      >
+                        Addressed
+                        {visibleAddressedCount > 0 && (
+                          <Badge variant="default" className="rounded-full border-none bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-600">
+                            {visibleAddressedCount}
+                          </Badge>
+                        )}
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => switchFindingsTab('ignored')}
                         className={cn(
                           "inline-flex items-center gap-2 whitespace-nowrap border-b-2 py-4 text-sm font-medium transition-colors",
@@ -1724,6 +2023,8 @@ export default function BrandDetailPage() {
                                 key={`bookmarked-${sev}`}
                                 severity={sev}
                                 findings={bookmarkedHits.filter((finding) => finding.severity === sev)}
+                                onAddressToggle={handleAddressedToggle}
+                                onReclassify={handleReclassifyFinding}
                                 onBookmarkUpdate={handleBookmarkUpdate}
                                 forceExpanded={true}
                                 highlightQuery={activeHighlightQuery}
@@ -1740,7 +2041,7 @@ export default function BrandDetailPage() {
                                     ({bookmarkedNonHits.length})
                                   </span>
                                 </span>
-                                <span className="text-xs text-gray-400">· bookmarked despite AI classifying them as false positives</span>
+                                <span className="text-xs text-gray-400">· bookmarked despite AI classifying them as false positives · reclassify to any category</span>
                               </div>
                               <div className="space-y-4 border-t border-gray-100 p-4">
                                 {bookmarkedNonHits.map((finding) => (
@@ -1748,12 +2049,42 @@ export default function BrandDetailPage() {
                                     key={finding.id}
                                     finding={finding}
                                     highlightQuery={activeHighlightQuery}
+                                    onReclassify={handleReclassifyFinding}
                                     onBookmarkUpdate={handleBookmarkUpdate}
                                   />
                                 ))}
                               </div>
                             </div>
                           )}
+                        </div>
+                      )
+                    )}
+
+                    {activeTab === 'addressed' && (
+                      visibleAddressedCount === 0 ? (
+                        <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
+                            <Check className="w-5 h-5 text-brand-600" />
+                          </div>
+                          <p className="text-sm text-gray-500">
+                            {isFindingsSearchActive ? 'No addressed findings match this search.' : 'No addressed findings yet.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          {(['high', 'medium', 'low'] as const)
+                            .filter((sev) => visibleAddressedFindings.some((finding) => finding.severity === sev))
+                            .map((sev) => (
+                              <SeverityGroup
+                                key={`addressed-${sev}`}
+                                severity={sev}
+                                findings={visibleAddressedFindings.filter((finding) => finding.severity === sev)}
+                                onAddressToggle={handleAddressedToggle}
+                                onBookmarkUpdate={handleBookmarkUpdate}
+                                forceExpanded={true}
+                                highlightQuery={activeHighlightQuery}
+                              />
+                            ))}
                         </div>
                       )
                     )}
@@ -1776,6 +2107,7 @@ export default function BrandDetailPage() {
                               finding={finding}
                               highlightQuery={activeHighlightQuery}
                               onIgnoreToggle={handleIgnoreToggle}
+                              onReclassify={handleReclassifyFinding}
                               onBookmarkUpdate={handleBookmarkUpdate}
                             />
                           ))}
@@ -1862,6 +2194,7 @@ export default function BrandDetailPage() {
                                         key={`live-${sev}`}
                                         severity={sev}
                                         findings={visibleLiveScanFindings.filter((f) => f.severity === sev)}
+                                        onReclassify={handleReclassifyFinding}
                                         onBookmarkUpdate={handleBookmarkUpdate}
                                         forceExpanded={isFindingsSearchActive}
                                         highlightQuery={activeHighlightQuery}
@@ -1917,6 +2250,7 @@ export default function BrandDetailPage() {
                               + scan.mediumCount
                               + scan.lowCount
                               + scan.nonHitCount
+                              + (scan.addressedCount ?? 0)
                               + (scan.ignoredCount ?? 0)
                               + (scan.skippedCount ?? 0);
                             const requiresDeleteScanConfirmation = scanResultsCount > 0;
@@ -1937,6 +2271,9 @@ export default function BrandDetailPage() {
                             const displayedNonHitCount = isFindingsSearchActive
                               ? matchingNonHitCount
                               : scan.nonHitCount;
+                            const displayedAddressedCount = isFindingsSearchActive
+                              ? 0
+                              : (scan.addressedCount ?? 0);
                             const displayedIgnoredCount = isFindingsSearchActive
                               ? matchingIgnoredCount
                               : (scan.ignoredCount ?? 0);
@@ -2011,6 +2348,11 @@ export default function BrandDetailPage() {
                                         {displayedNonHitCount > 0 && (
                                           <span className="text-xs text-gray-400">
                                             · {displayedNonHitCount} non-hit{displayedNonHitCount !== 1 ? 's' : ''}
+                                          </span>
+                                        )}
+                                        {displayedAddressedCount > 0 && (
+                                          <span className="text-xs text-gray-400">
+                                            · {displayedAddressedCount} addressed
                                           </span>
                                         )}
                                         {displayedIgnoredCount > 0 && (
@@ -2134,6 +2476,8 @@ export default function BrandDetailPage() {
                                                   severity={sev}
                                                   findings={hits.filter((f) => f.severity === sev)}
                                                   onIgnoreToggle={handleIgnoreToggle}
+                                                  onAddressToggle={handleAddressedToggle}
+                                                  onReclassify={handleReclassifyFinding}
                                                   onBookmarkUpdate={handleBookmarkUpdate}
                                                   forceExpanded={isFindingsSearchActive}
                                                   highlightQuery={activeHighlightQuery}
@@ -2166,7 +2510,7 @@ export default function BrandDetailPage() {
                                                   ({nonHits ? nonHits.length : displayedNonHitCount})
                                                 </span>
                                               </span>
-                                              <span className="text-xs text-gray-400">· classified as false positives by AI</span>
+                                              <span className="text-xs text-gray-400">· classified as false positives by AI · reclassify to any category</span>
                                             </button>
                                             {showNonHits && (
                                               <div className="space-y-4 border-t border-gray-100 p-4">
@@ -2181,7 +2525,7 @@ export default function BrandDetailPage() {
                                                       key={finding.id}
                                                       finding={finding}
                                                       highlightQuery={activeHighlightQuery}
-                                                      onIgnoreToggle={handleIgnoreToggle}
+                                                      onReclassify={handleReclassifyFinding}
                                                       onBookmarkUpdate={handleBookmarkUpdate}
                                                     />
                                                   ))
@@ -2232,6 +2576,7 @@ export default function BrandDetailPage() {
                                                       finding={finding}
                                                       highlightQuery={activeHighlightQuery}
                                                       onIgnoreToggle={handleIgnoreToggle}
+                                                      onReclassify={handleReclassifyFinding}
                                                       onBookmarkUpdate={handleBookmarkUpdate}
                                                     />
                                                   ))

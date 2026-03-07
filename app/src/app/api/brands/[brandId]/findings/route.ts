@@ -9,6 +9,7 @@ type Params = { params: Promise<{ brandId: string }> };
 // Query params:
 //   nonHitsOnly    (optional) — when "true", returns only AI-classified false-positives
 //   ignoredOnly    (optional) — when "true", returns only user-ignored findings (across all scans if no scanId)
+//   addressedOnly  (optional) — when "true", returns only user-addressed findings (across all scans if no scanId)
 //   bookmarkedOnly (optional) — when "true", returns only bookmarked findings (across all scans if no scanId)
 //   scanId         (optional) — when provided, filters findings to a specific scan
 export async function GET(request: NextRequest, { params }: Params) {
@@ -18,6 +19,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { brandId } = await params;
   const nonHitsOnly = request.nextUrl.searchParams.get('nonHitsOnly') === 'true';
   const ignoredOnly = request.nextUrl.searchParams.get('ignoredOnly') === 'true';
+  const addressedOnly = request.nextUrl.searchParams.get('addressedOnly') === 'true';
   const bookmarkedOnly = request.nextUrl.searchParams.get('bookmarkedOnly') === 'true';
   const scanId = request.nextUrl.searchParams.get('scanId');
 
@@ -25,7 +27,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   // a user can only retrieve findings that belong to them. We still verify brand
   // existence for the cross-scan ignoredOnly path to return a proper 404, but skip
   // it for per-scan queries where an empty result is a sufficient response.
-  if ((ignoredOnly || bookmarkedOnly) && !scanId) {
+  if ((ignoredOnly || addressedOnly || bookmarkedOnly) && !scanId) {
     const brandDoc = await db.collection('brands').doc(brandId).get();
     if (!brandDoc.exists) return errorResponse('Brand not found', 404);
     if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
@@ -44,9 +46,13 @@ export async function GET(request: NextRequest, { params }: Params) {
   // fetch the small number of matching documents rather than all findings for the brand.
   // Requires composite indexes:
   // - brandId ASC, userId ASC, isIgnored ASC, createdAt DESC
+  // - brandId ASC, userId ASC, isAddressed ASC, addressedAt DESC
   // - brandId ASC, userId ASC, isBookmarked ASC, bookmarkedAt DESC
   if (ignoredOnly && !scanId) {
     query = query.where('isIgnored', '==', true);
+  }
+  if (addressedOnly) {
+    query = query.where('isAddressed', '==', true);
   }
   if (bookmarkedOnly) {
     query = query.where('isBookmarked', '==', true);
@@ -63,12 +69,14 @@ export async function GET(request: NextRequest, { params }: Params) {
       'url',
       'isFalsePositive',
       'isIgnored',
+      'isAddressed',
       'isBookmarked',
+      'addressedAt',
       'bookmarkNote',
       'bookmarkedAt',
       'createdAt',
     )
-    .orderBy(bookmarkedOnly ? 'bookmarkedAt' : 'createdAt', 'desc')
+    .orderBy(bookmarkedOnly ? 'bookmarkedAt' : addressedOnly ? 'addressedAt' : 'createdAt', 'desc')
     .limit(200)
     .get();
 
@@ -80,17 +88,18 @@ export async function GET(request: NextRequest, { params }: Params) {
   let findings: FindingSummary[];
   if (bookmarkedOnly) {
     findings = all.filter((f) => f.isBookmarked === true);
+  } else if (addressedOnly) {
+    findings = all.filter((f) => f.isAddressed === true && !f.isFalsePositive);
   } else if (ignoredOnly) {
     // Only user-manually-ignored real findings (not auto-ignored AI false positives —
     // those have their own non-hits section).
-    findings = all.filter((f) => f.isIgnored === true && !f.isFalsePositive);
+    findings = all.filter((f) => f.isIgnored === true && !f.isFalsePositive && !f.isAddressed);
   } else if (nonHitsOnly) {
-    // All AI false positives, regardless of their ignored state (auto-ignored or
-    // explicitly un-ignored by the user).
+    // All AI false positives, regardless of their internal ignored state.
     findings = all.filter((f) => f.isFalsePositive === true);
   } else {
-    // Default: real hits only — exclude AI false-positives and user-ignored findings
-    findings = all.filter((f) => !f.isFalsePositive && !f.isIgnored);
+    // Default: real hits only — exclude AI false-positives, ignored findings, and addressed findings.
+    findings = all.filter((f) => !f.isFalsePositive && !f.isIgnored && !f.isAddressed);
   }
 
   return NextResponse.json({ data: findings });

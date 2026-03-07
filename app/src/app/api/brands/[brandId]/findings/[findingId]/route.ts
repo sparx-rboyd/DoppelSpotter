@@ -1,10 +1,144 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { FieldValue } from '@google-cloud/firestore';
+import { FieldValue, type DocumentSnapshot, type QueryDocumentSnapshot } from '@google-cloud/firestore';
+type FindingDocSnapshot = DocumentSnapshot | QueryDocumentSnapshot;
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
-import type { Finding } from '@/lib/types';
+import type { Finding, FindingCategory, FindingSummary } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string; findingId: string }> };
+type CountDelta = {
+  findingCount: number;
+  highCount: number;
+  mediumCount: number;
+  lowCount: number;
+  nonHitCount: number;
+  ignoredCount: number;
+  addressedCount: number;
+};
+type FindingCountState = Pick<Finding, 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed'>;
+
+function emptyCountDelta(): CountDelta {
+  return {
+    findingCount: 0,
+    highCount: 0,
+    mediumCount: 0,
+    lowCount: 0,
+    nonHitCount: 0,
+    ignoredCount: 0,
+    addressedCount: 0,
+  };
+}
+
+function getFindingCountState(finding: FindingCountState): CountDelta {
+  if (finding.isFalsePositive) {
+    return {
+      ...emptyCountDelta(),
+      nonHitCount: 1,
+    };
+  }
+
+  if (finding.isIgnored) {
+    return {
+      ...emptyCountDelta(),
+      findingCount: 1,
+      ignoredCount: 1,
+    };
+  }
+
+  if (finding.isAddressed) {
+    return {
+      ...emptyCountDelta(),
+      findingCount: 1,
+      addressedCount: 1,
+    };
+  }
+
+  return {
+    ...emptyCountDelta(),
+    findingCount: 1,
+    highCount: finding.severity === 'high' ? 1 : 0,
+    mediumCount: finding.severity === 'medium' ? 1 : 0,
+    lowCount: finding.severity === 'low' ? 1 : 0,
+  };
+}
+
+function applyCountDelta(target: CountDelta, previousState: FindingCountState, nextState: FindingCountState) {
+  const previousCounts = getFindingCountState(previousState);
+  const nextCounts = getFindingCountState(nextState);
+  target.findingCount += nextCounts.findingCount - previousCounts.findingCount;
+  target.highCount += nextCounts.highCount - previousCounts.highCount;
+  target.mediumCount += nextCounts.mediumCount - previousCounts.mediumCount;
+  target.lowCount += nextCounts.lowCount - previousCounts.lowCount;
+  target.nonHitCount += nextCounts.nonHitCount - previousCounts.nonHitCount;
+  target.ignoredCount += nextCounts.ignoredCount - previousCounts.ignoredCount;
+  target.addressedCount += nextCounts.addressedCount - previousCounts.addressedCount;
+}
+
+function buildFindingSummary(
+  id: string,
+  sourceFinding: Finding,
+  nextState: FindingCountState,
+): FindingSummary {
+  return {
+    id,
+    scanId: sourceFinding.scanId,
+    brandId: sourceFinding.brandId,
+    source: sourceFinding.source,
+    severity: nextState.severity,
+    title: sourceFinding.title,
+    llmAnalysis: sourceFinding.llmAnalysis,
+    url: sourceFinding.url,
+    isFalsePositive: nextState.isFalsePositive,
+    isIgnored: nextState.isIgnored,
+    isAddressed: nextState.isAddressed,
+    addressedAt: nextState.isAddressed ? sourceFinding.addressedAt : undefined,
+    isBookmarked: sourceFinding.isBookmarked,
+    bookmarkedAt: sourceFinding.bookmarkedAt,
+    bookmarkNote: sourceFinding.bookmarkNote,
+    createdAt: sourceFinding.createdAt,
+  };
+}
+
+function buildReclassifiedState(
+  finding: Pick<Finding, 'severity'>,
+  category: FindingCategory,
+): FindingCountState {
+  if (category === 'non-hit') {
+    return {
+      severity: finding.severity,
+      isFalsePositive: true,
+      isIgnored: true,
+      isAddressed: false,
+    };
+  }
+
+  return {
+    severity: category,
+    isFalsePositive: false,
+    isIgnored: false,
+    isAddressed: false,
+  };
+}
+
+async function loadUrlScopedFindingDocs(
+  brandId: string,
+  uid: string,
+  url?: string,
+  fallbackDoc?: FindingDocSnapshot,
+) {
+  if (!url || !fallbackDoc) {
+    return fallbackDoc ? [fallbackDoc] : [];
+  }
+
+  return (
+    await db
+      .collection('findings')
+      .where('brandId', '==', brandId)
+      .where('userId', '==', uid)
+      .where('url', '==', url)
+      .get()
+  ).docs;
+}
 
 // GET /api/brands/[brandId]/findings/[findingId]
 // Returns the full finding payload, including raw debug fields.
@@ -34,11 +168,13 @@ export async function GET(request: NextRequest, { params }: Params) {
 // PATCH /api/brands/[brandId]/findings/[findingId]
 // Body: {
 //   isIgnored?: boolean;
+//   isAddressed?: boolean;
 //   isBookmarked?: boolean;
 //   bookmarkNote?: string | null;
+//   reclassifiedCategory?: 'high' | 'medium' | 'low' | 'non-hit';
 // }
-// Ignoring is URL-scoped, but bookmark state and bookmark notes are stored on the
-// individual finding document only.
+// Ignoring, addressing, and category reclassification are URL-scoped, but bookmark
+// state and bookmark notes are stored on the individual finding document only.
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { uid, error } = requireAuth(request);
   if (error) return error;
@@ -47,8 +183,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   let body: {
     isIgnored?: boolean;
+    isAddressed?: boolean;
     isBookmarked?: boolean;
     bookmarkNote?: string | null;
+    reclassifiedCategory?: FindingCategory;
   };
   try {
     body = await request.json();
@@ -57,15 +195,20 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 
   const hasIgnoreUpdate = Object.prototype.hasOwnProperty.call(body, 'isIgnored');
+  const hasAddressedUpdate = Object.prototype.hasOwnProperty.call(body, 'isAddressed');
   const hasBookmarkUpdate = Object.prototype.hasOwnProperty.call(body, 'isBookmarked');
   const hasBookmarkNoteUpdate = Object.prototype.hasOwnProperty.call(body, 'bookmarkNote');
+  const hasReclassificationUpdate = Object.prototype.hasOwnProperty.call(body, 'reclassifiedCategory');
 
-  if (!hasIgnoreUpdate && !hasBookmarkUpdate && !hasBookmarkNoteUpdate) {
+  if (!hasIgnoreUpdate && !hasAddressedUpdate && !hasBookmarkUpdate && !hasBookmarkNoteUpdate && !hasReclassificationUpdate) {
     return errorResponse('No supported fields provided');
   }
 
   if (hasIgnoreUpdate && typeof body.isIgnored !== 'boolean') {
     return errorResponse('isIgnored must be a boolean');
+  }
+  if (hasAddressedUpdate && typeof body.isAddressed !== 'boolean') {
+    return errorResponse('isAddressed must be a boolean');
   }
   if (hasBookmarkUpdate && typeof body.isBookmarked !== 'boolean') {
     return errorResponse('isBookmarked must be a boolean');
@@ -73,8 +216,23 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (hasBookmarkNoteUpdate && body.bookmarkNote !== null && typeof body.bookmarkNote !== 'string') {
     return errorResponse('bookmarkNote must be a string or null');
   }
+  if (
+    hasReclassificationUpdate
+    && body.reclassifiedCategory !== 'low'
+    && body.reclassifiedCategory !== 'medium'
+    && body.reclassifiedCategory !== 'high'
+    && body.reclassifiedCategory !== 'non-hit'
+  ) {
+    return errorResponse('reclassifiedCategory must be one of: high, medium, low, non-hit');
+  }
+  if (hasIgnoreUpdate && hasAddressedUpdate) {
+    return errorResponse('isIgnored and isAddressed cannot be combined');
+  }
+  if (hasReclassificationUpdate && (hasIgnoreUpdate || hasAddressedUpdate || hasBookmarkUpdate || hasBookmarkNoteUpdate)) {
+    return errorResponse('reclassifiedCategory cannot be combined with other updates');
+  }
 
-  // Verify the finding belongs to this brand and user
+  // Verify the finding belongs to this brand and user.
   const findingDoc = await db.collection('findings').doc(findingId).get();
   if (!findingDoc.exists) return errorResponse('Finding not found', 404);
 
@@ -114,7 +272,120 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       : FieldValue.delete();
   }
 
+  let affectedFindings: FindingSummary[] = [];
+  const affectedScanDeltas: Record<string, CountDelta> = {};
+
+  if (hasReclassificationUpdate) {
+    const reclassifiedCategory = body.reclassifiedCategory as FindingCategory;
+    const affectedDocs = await loadUrlScopedFindingDocs(brandId, uid, finding.url, findingDoc);
+
+    const BATCH_LIMIT = 500;
+    for (let i = 0; i < affectedDocs.length; i += BATCH_LIMIT) {
+      const batch = db.batch();
+      affectedDocs.slice(i, i + BATCH_LIMIT).forEach((doc) => {
+        const sourceFinding = doc.data() as Finding;
+        const nextState = buildReclassifiedState(sourceFinding, reclassifiedCategory);
+        batch.update(doc.ref, {
+          severity: nextState.severity,
+          isFalsePositive: nextState.isFalsePositive,
+          isIgnored: nextState.isIgnored,
+          ignoredAt: nextState.isIgnored ? FieldValue.serverTimestamp() : FieldValue.delete(),
+          isAddressed: false,
+          addressedAt: FieldValue.delete(),
+        });
+      });
+      await batch.commit();
+    }
+
+    affectedFindings = affectedDocs.map((doc) => {
+      const sourceFinding = doc.data() as Finding;
+      const nextState = buildReclassifiedState(sourceFinding, reclassifiedCategory);
+      const scanDelta = affectedScanDeltas[sourceFinding.scanId] ?? emptyCountDelta();
+      applyCountDelta(scanDelta, sourceFinding, nextState);
+      affectedScanDeltas[sourceFinding.scanId] = scanDelta;
+      return buildFindingSummary(doc.id, sourceFinding, nextState);
+    });
+
+    await Promise.all(
+      Object.entries(affectedScanDeltas)
+        .filter(([, delta]) => Object.values(delta).some((value) => value !== 0))
+        .map(([scanId, delta]) =>
+          db.collection('scans').doc(scanId).update({
+            findingCount: FieldValue.increment(delta.findingCount),
+            highCount: FieldValue.increment(delta.highCount),
+            mediumCount: FieldValue.increment(delta.mediumCount),
+            lowCount: FieldValue.increment(delta.lowCount),
+            nonHitCount: FieldValue.increment(delta.nonHitCount),
+            ignoredCount: FieldValue.increment(delta.ignoredCount),
+            addressedCount: FieldValue.increment(delta.addressedCount),
+          }),
+        ),
+    );
+  }
+
+  if (hasAddressedUpdate) {
+    if (finding.isFalsePositive) {
+      return errorResponse('Only real findings can be marked as addressed', 409);
+    }
+
+    const addressAffectedDocs = (await loadUrlScopedFindingDocs(brandId, uid, finding.url, findingDoc))
+      .filter((doc) => {
+        const sourceFinding = doc.data() as Finding;
+        return sourceFinding.isFalsePositive !== true;
+      });
+
+    if (body.isAddressed && addressAffectedDocs.some((doc) => (doc.data() as Finding).isIgnored === true)) {
+      return errorResponse('Ignored findings must be un-ignored before they can be marked as addressed', 409);
+    }
+
+    const addressUpdates: Record<string, unknown> = {
+      isAddressed: body.isAddressed === true,
+      addressedAt: body.isAddressed ? FieldValue.serverTimestamp() : FieldValue.delete(),
+    };
+
+    const BATCH_LIMIT = 500;
+    for (let i = 0; i < addressAffectedDocs.length; i += BATCH_LIMIT) {
+      const batch = db.batch();
+      addressAffectedDocs.slice(i, i + BATCH_LIMIT).forEach((doc) => batch.update(doc.ref, addressUpdates));
+      await batch.commit();
+    }
+
+    affectedFindings = addressAffectedDocs.map((doc) => {
+      const sourceFinding = doc.data() as Finding;
+      const nextState: FindingCountState = {
+        severity: sourceFinding.severity,
+        isFalsePositive: false,
+        isIgnored: false,
+        isAddressed: body.isAddressed === true,
+      };
+      const scanDelta = affectedScanDeltas[sourceFinding.scanId] ?? emptyCountDelta();
+      applyCountDelta(scanDelta, sourceFinding, nextState);
+      affectedScanDeltas[sourceFinding.scanId] = scanDelta;
+      return buildFindingSummary(doc.id, sourceFinding, nextState);
+    });
+
+    await Promise.all(
+      Object.entries(affectedScanDeltas)
+        .filter(([, delta]) => Object.values(delta).some((value) => value !== 0))
+        .map(([scanId, delta]) =>
+          db.collection('scans').doc(scanId).update({
+            findingCount: FieldValue.increment(delta.findingCount),
+            highCount: FieldValue.increment(delta.highCount),
+            mediumCount: FieldValue.increment(delta.mediumCount),
+            lowCount: FieldValue.increment(delta.lowCount),
+            nonHitCount: FieldValue.increment(delta.nonHitCount),
+            ignoredCount: FieldValue.increment(delta.ignoredCount),
+            addressedCount: FieldValue.increment(delta.addressedCount),
+          }),
+        ),
+    );
+  }
+
   if (hasIgnoreUpdate) {
+    if (finding.isFalsePositive) {
+      return errorResponse('Only real findings can be ignored', 409);
+    }
+
     const ignoreUpdates: Record<string, unknown> = { isIgnored: body.isIgnored === true };
     if (body.isIgnored) {
       ignoreUpdates.ignoredAt = FieldValue.serverTimestamp();
@@ -132,6 +403,16 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         .where('userId', '==', uid)
         .where('url', '==', url)
         .get();
+
+      if (
+        body.isIgnored
+        && siblingsSnap.docs.some((doc) => {
+          const sibling = doc.data() as Finding;
+          return sibling.isFalsePositive !== true && sibling.isAddressed === true;
+        })
+      ) {
+        return errorResponse('Addressed findings must be un-addressed before they can be ignored', 409);
+      }
 
       const BATCH_LIMIT = 500;
       const allDocs = siblingsSnap.docs; // includes the target finding itself
@@ -169,7 +450,11 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         );
       }
     } else {
-      // No URL — update only this document
+      // No URL — update only this document.
+      if (body.isIgnored && finding.isAddressed) {
+        return errorResponse('Addressed findings must be un-addressed before they can be ignored', 409);
+      }
+
       await findingDoc.ref.update(ignoreUpdates);
 
       // Update the scan's denormalized counts if this is a non-false-positive finding
@@ -196,14 +481,32 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     : hasBookmarkNoteUpdate
       ? normalizedBookmarkNote
       : finding.bookmarkNote ?? null;
+  const updatedTriggerFinding = affectedFindings.find((affectedFinding) => affectedFinding.id === findingId);
 
   return NextResponse.json({
     data: {
       id: findingId,
       url: finding.url,
-      isIgnored: hasIgnoreUpdate ? body.isIgnored === true : finding.isIgnored === true,
+      isIgnored: hasReclassificationUpdate
+        ? (updatedTriggerFinding?.isIgnored ?? (finding.isIgnored === true))
+        : hasIgnoreUpdate
+          ? body.isIgnored === true
+          : finding.isIgnored === true,
+      isFalsePositive: hasReclassificationUpdate
+        ? (updatedTriggerFinding?.isFalsePositive ?? (finding.isFalsePositive === true))
+        : finding.isFalsePositive === true,
+      severity: hasReclassificationUpdate
+        ? (updatedTriggerFinding?.severity ?? finding.severity)
+        : finding.severity,
+      isAddressed: hasReclassificationUpdate
+        ? (updatedTriggerFinding?.isAddressed ?? (finding.isAddressed === true))
+        : hasAddressedUpdate
+          ? body.isAddressed === true
+          : finding.isAddressed === true,
       isBookmarked: hasBookmarkUpdate ? body.isBookmarked === true : finding.isBookmarked === true,
       bookmarkNote: finalBookmarkNote,
+      affectedFindings,
+      affectedScanDeltas,
     },
   });
 }

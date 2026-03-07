@@ -140,11 +140,11 @@ export function buildAnalysisPrompt(params: {
   officialDomains: string[];
   watchWords?: string[];
   safeWords?: string[];
-  ignoredUrls?: string[];
+  acknowledgedUrls?: string[];
   source: FindingSource;
   rawData: Record<string, unknown>;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, safeWords, ignoredUrls, source, rawData } = params;
+  const { brandName, keywords, officialDomains, watchWords, safeWords, acknowledgedUrls, source, rawData } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — note any presence or implied association in your analysis): ${watchWords.join(', ')}`
@@ -154,14 +154,14 @@ export function buildAnalysisPrompt(params: {
     ? `Safe words (terms the brand owner is comfortable being associated with — if present, treat the result with reduced caution unless there are strong warning signs in other areas): ${safeWords.join(', ')}`
     : null;
 
-  const ignoredUrlsLine = ignoredUrls && ignoredUrls.length > 0
-    ? `Previously reviewed and dismissed URLs (the user has already acknowledged these — set isFalsePositive: true if the result URL matches any of these exactly):\n${ignoredUrls.map((u) => `  - ${u}`).join('\n')}`
+  const acknowledgedUrlsLine = acknowledgedUrls && acknowledgedUrls.length > 0
+    ? `Previously reviewed URLs (the user has already either dismissed or addressed these — set isFalsePositive: true if the result URL matches any of these exactly):\n${acknowledgedUrls.map((u) => `  - ${u}`).join('\n')}`
     : null;
 
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${ignoredUrlsLine ? `${ignoredUrlsLine}\n` : ''}Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}Monitoring surface: ${source}
 
 Raw scraping result to analyse:
 ${JSON.stringify(rawData, null, 2)}
@@ -178,12 +178,12 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   officialDomains: string[];
   watchWords?: string[];
   safeWords?: string[];
-  ignoredUrls?: string[];
+  acknowledgedUrls?: string[];
   source: FindingSource;
   candidates: GoogleSearchCandidate[];
   runContext: GoogleRunContext;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, safeWords, ignoredUrls, source, candidates, runContext } = params;
+  const { brandName, keywords, officialDomains, watchWords, safeWords, acknowledgedUrls, source, candidates, runContext } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that result): ${watchWords.join(', ')}`
@@ -193,8 +193,8 @@ export function buildGoogleChunkAnalysisPrompt(params: {
     ? `Safe words (terms the brand owner is comfortable being associated with — if present in a result, treat it with reduced caution in the individual "analysis" field unless there are strong warning signs in other areas): ${safeWords.join(', ')}`
     : null;
 
-  const ignoredUrlsLine = ignoredUrls && ignoredUrls.length > 0
-    ? `Previously reviewed and dismissed URLs (the user has already acknowledged these — set isFalsePositive: true for any result whose URL exactly matches one of these):\n${ignoredUrls.map((u) => `  - ${u}`).join('\n')}`
+  const acknowledgedUrlsLine = acknowledgedUrls && acknowledgedUrls.length > 0
+    ? `Previously reviewed URLs (the user has already either dismissed or addressed these — set isFalsePositive: true for any result whose URL exactly matches one of these):\n${acknowledgedUrls.map((u) => `  - ${u}`).join('\n')}`
     : null;
 
   const compactCandidates = candidates.map((candidate) => ({
@@ -212,7 +212,7 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${ignoredUrlsLine ? `${ignoredUrlsLine}\n` : ''}Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}Monitoring surface: ${source}
 
 Supporting SERP context (for extra caution only — do NOT assess these as findings):
 - Source queries: ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.join(' | ') : 'none'}

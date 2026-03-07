@@ -250,18 +250,29 @@ async function handleSucceededRun({
   const shouldSkipPreviouslySeenUrls =
     analysisMode === 'batch' || source === 'google' || actorId === 'apify/google-search-scraper';
 
-  // Fetch all URLs that the user has previously ignored for this brand so that
-  // AI analysis can skip them rather than re-reporting them on every scan.
-  const ignoredSnap = await db
-    .collection('findings')
-    .where('brandId', '==', scan.brandId)
-    .where('userId', '==', scan.userId)
-    .where('isIgnored', '==', true)
-    .select('url')
-    .get();
-  const ignoredUrls = ignoredSnap.docs
-    .map((d) => (d.data() as { url?: string }).url)
-    .filter((u): u is string => typeof u === 'string' && u.length > 0);
+  // Fetch all URLs that the user has previously dismissed or addressed for this
+  // brand so AI analysis can avoid re-reporting them in later scans.
+  const [ignoredSnap, addressedSnap] = await Promise.all([
+    db
+      .collection('findings')
+      .where('brandId', '==', scan.brandId)
+      .where('userId', '==', scan.userId)
+      .where('isIgnored', '==', true)
+      .select('url')
+      .get(),
+    db
+      .collection('findings')
+      .where('brandId', '==', scan.brandId)
+      .where('userId', '==', scan.userId)
+      .where('isAddressed', '==', true)
+      .select('url')
+      .get(),
+  ]);
+  const acknowledgedUrls = Array.from(new Set(
+    [...ignoredSnap.docs, ...addressedSnap.docs]
+      .map((d) => (d.data() as { url?: string }).url)
+      .filter((u): u is string => typeof u === 'string' && u.length > 0),
+  ));
   const previousFindingUrls = shouldSkipPreviouslySeenUrls
     ? await loadPreviousFindingUrls({
       brandId: scan.brandId,
@@ -319,7 +330,7 @@ async function handleSucceededRun({
       items: itemsToAnalyse,
       searchDepth,
       searchQuery,
-      ignoredUrls,
+      acknowledgedUrls,
       previousFindingUrls,
     });
     newFindingCount = findingCount;
@@ -360,7 +371,7 @@ async function handleSucceededRun({
     // Analyse each item sequentially to avoid rate-limiting OpenRouter
     for (const item of itemsToAnalyse) {
       try {
-        const analysisResult = await analyseItem({ brand, source, actorId, item, ignoredUrls });
+        const analysisResult = await analyseItem({ brand, source, actorId, item, acknowledgedUrls });
         const findingRef = db.collection('findings').doc();
         const finding: Omit<Finding, 'id'> = {
           scanId: scan.id ?? scanDoc.id,
@@ -376,7 +387,7 @@ async function handleSucceededRun({
           rawData: item,
           isFalsePositive: analysisResult.isFalsePositive,
           // Auto-ignore AI-classified false positives so their URLs are excluded
-          // from future scans. Users can un-ignore them if needed.
+          // from future scans. Users can later reclassify them if the AI got it wrong.
           ...(analysisResult.isFalsePositive && {
             isIgnored: true,
             ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
@@ -501,7 +512,7 @@ async function analyseAndWriteBatch({
   items,
   searchDepth,
   searchQuery,
-  ignoredUrls,
+  acknowledgedUrls,
   previousFindingUrls,
 }: {
   scanDoc: QueryDocumentSnapshot;
@@ -514,7 +525,7 @@ async function analyseAndWriteBatch({
   items: Record<string, unknown>[];
   searchDepth: number;
   searchQuery?: string;
-  ignoredUrls?: string[];
+  acknowledgedUrls?: string[];
   previousFindingUrls?: ReadonlySet<string>;
 }): Promise<{
   findingCount: number;
@@ -561,7 +572,7 @@ async function analyseAndWriteBatch({
           source,
           candidates: chunk,
           runContext: normalizedRun.runContext,
-          ignoredUrls,
+          acknowledgedUrls,
         });
 
         return chunkResult;
@@ -650,6 +661,7 @@ type ScanFindingTotals = {
   lowCount: number;
   nonHitCount: number;
   ignoredCount: number;
+  addressedCount: number;
   skippedCount: number;
 };
 
@@ -765,13 +777,13 @@ async function analyseGoogleChunk({
   source,
   candidates,
   runContext,
-  ignoredUrls,
+  acknowledgedUrls,
 }: {
   brand: BrandProfile;
   source: Finding['source'];
   candidates: GoogleSearchCandidate[];
   runContext: GoogleRunContext;
-  ignoredUrls?: string[];
+  acknowledgedUrls?: string[];
 }): Promise<GoogleChunkAnalysisResult> {
   const prompt = buildGoogleChunkAnalysisPrompt({
     brandName: brand.name,
@@ -779,7 +791,7 @@ async function analyseGoogleChunk({
     officialDomains: brand.officialDomains,
     watchWords: brand.watchWords,
     safeWords: brand.safeWords,
-    ignoredUrls,
+    acknowledgedUrls,
     source,
     candidates,
     runContext,
@@ -973,6 +985,10 @@ async function upsertGoogleFinding({
       if (existing.isIgnored !== true) {
         updates.ignoredAt = FieldValue.serverTimestamp();
       }
+      updates.isAddressed = false;
+      if (existing.addressedAt) {
+        updates.addressedAt = FieldValue.delete();
+      }
     } else {
       updates.isIgnored = false;
       if (existing.ignoredAt) {
@@ -1102,13 +1118,13 @@ async function analyseItem({
   source,
   actorId,
   item,
-  ignoredUrls,
+  acknowledgedUrls,
 }: {
   brand: BrandProfile;
   source: Finding['source'];
   actorId: string;
   item: Record<string, unknown>;
-  ignoredUrls?: string[];
+  acknowledgedUrls?: string[];
 }): Promise<{ severity: Finding['severity']; title: string; llmAnalysis: string; isFalsePositive: boolean; rawLlmResponse: string }> {
   void actorId;
   const prompt = buildAnalysisPrompt({
@@ -1117,7 +1133,7 @@ async function analyseItem({
     officialDomains: brand.officialDomains,
     watchWords: brand.watchWords,
     safeWords: brand.safeWords,
-    ignoredUrls,
+    acknowledgedUrls,
     source,
     rawData: item,
   });
@@ -1338,7 +1354,7 @@ function diffFindingStates(previous: FindingDelta, next: FindingDelta): FindingD
   };
 }
 
-function buildScanFindingTotals(findings: Iterable<Pick<Finding, 'severity' | 'isFalsePositive' | 'isIgnored'>>): ScanFindingTotals {
+function buildScanFindingTotals(findings: Iterable<Pick<Finding, 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed'>>): ScanFindingTotals {
   const totals: ScanFindingTotals = {
     findingCount: 0,
     highCount: 0,
@@ -1346,6 +1362,7 @@ function buildScanFindingTotals(findings: Iterable<Pick<Finding, 'severity' | 'i
     lowCount: 0,
     nonHitCount: 0,
     ignoredCount: 0,
+    addressedCount: 0,
     skippedCount: 0,
   };
 
@@ -1359,6 +1376,11 @@ function buildScanFindingTotals(findings: Iterable<Pick<Finding, 'severity' | 'i
 
     if (finding.isIgnored) {
       totals.ignoredCount++;
+      continue;
+    }
+
+    if (finding.isAddressed) {
+      totals.addressedCount++;
       continue;
     }
 
@@ -1383,6 +1405,7 @@ function getNextScanFindingTotals(
     lowCount: (scan.lowCount ?? 0) + newCounts.low,
     nonHitCount: (scan.nonHitCount ?? 0) + newCounts.nonHit,
     ignoredCount: scan.ignoredCount ?? 0,
+    addressedCount: scan.addressedCount ?? 0,
     skippedCount: (scan.skippedCount ?? 0) + newSkippedCount,
   };
 }
@@ -1754,9 +1777,9 @@ async function markActorRunComplete(
               .where('scanId', '==', scanDoc.id)
               .where('brandId', '==', fresh.brandId)
               .where('userId', '==', fresh.userId)
-              .select('severity', 'isFalsePositive', 'isIgnored'),
+              .select('severity', 'isFalsePositive', 'isIgnored', 'isAddressed'),
           )
-        ).docs.map((doc) => doc.data() as Pick<Finding, 'severity' | 'isFalsePositive' | 'isIgnored'>),
+        ).docs.map((doc) => doc.data() as Pick<Finding, 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed'>),
         ),
         skippedCount: getSkippedDuplicateCount(fresh.actorRuns),
       }
@@ -1774,6 +1797,7 @@ async function markActorRunComplete(
           lowCount: reconciledTotals.lowCount,
           nonHitCount: reconciledTotals.nonHitCount,
           ignoredCount: reconciledTotals.ignoredCount,
+          addressedCount: reconciledTotals.addressedCount,
           skippedCount: reconciledTotals.skippedCount,
         }
         : {

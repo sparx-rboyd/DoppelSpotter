@@ -28,7 +28,9 @@ export async function GET(request: NextRequest) {
       'url',
       'isFalsePositive',
       'isIgnored',
+      'isAddressed',
       'isBookmarked',
+      'addressedAt',
       'bookmarkNote',
       'bookmarkedAt',
       'createdAt',
@@ -58,7 +60,7 @@ export async function GET(request: NextRequest) {
 
       const isMatch = nonHitsOnly
         ? finding.isFalsePositive === true
-        : finding.isFalsePositive !== true;
+        : finding.isFalsePositive !== true && finding.isAddressed !== true;
 
       if (isMatch) {
         findings.push(finding);

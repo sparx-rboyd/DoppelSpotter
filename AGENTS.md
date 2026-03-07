@@ -145,8 +145,9 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ in the default `llm-final` mode, chunk calls do classification only — they do not propose deep-search queries
       └─ the webhook collects the full deduped run-level `relatedQueries` + `peopleAlsoAsk` text signals (not URLs) and passes them to the final deep-search chooser without truncating them
       └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
-      └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
-      └─ isFalsePositive: true findings are stored but excluded from default API responses
+ └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
+ └─ isFalsePositive: true findings are stored but excluded from default API responses
+ └─ URLs that the user previously ignored or marked as addressed are passed back into AI classification prompts so repeat matches can be auto-suppressed in future scans
  └─ (batch mode, depth 0 only) if ranked chunk/fallback suggestions are present and the brand allows deep search → triggers deep-search runs
       └─ suggestions are reserved on the originating run so duplicate callbacks do not fan out extra searches
       └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
@@ -246,6 +247,24 @@ Users can manually dismiss (ignore) any non-false-positive finding at the indivi
 
 ---
 
+## Addressed Findings
+
+Users can mark any real finding as addressed once they have completed the follow-up work they care about. Addressed state is URL-scoped like ignore/un-ignore, so matching findings for the same URL across scans move together.
+
+**Behaviour:**
+- Addressed findings are excluded from the default findings API response and from visible severity counts in `ScanSummary`
+- They are grouped into a dedicated cross-scan "Addressed" tab on the brand page, organised by `high`, `medium`, and `low`
+- Addressed findings can be un-addressed from that tab, which restores them to the normal findings lists
+- Addressed and ignored are mutually exclusive for real findings: a finding must be un-ignored before it can be addressed, and un-addressed before it can be ignored
+- Addressed is only available for real findings; AI-classified non-hits must be reclassified into a real category first
+- On each new scan, previously addressed URLs are treated the same as ignored URLs in the AI prompts so they do not get surfaced again as new actionable findings
+
+**API:**
+- `PATCH /api/brands/[brandId]/findings/[findingId]` — body `{ isAddressed: boolean }` — toggles addressed state URL-wide for real findings
+- `GET /api/brands/[brandId]/findings?addressedOnly=true` — returns addressed findings across all scans for the brand
+
+---
+
 ## Bookmarked Findings
 
 Users can bookmark any finding they want to follow up on, including AI-classified non-hits. Bookmark state is stored directly on the finding document with `isBookmarked`, `bookmarkedAt`, and optional `bookmarkNote`.
@@ -289,8 +308,8 @@ Users can bookmark any finding they want to follow up on, including AI-classifie
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
-| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, skippedCount, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?**, rawLlmResponse?, createdAt |
+| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
+| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?**, rawLlmResponse?, createdAt |
 
 ---
 
@@ -328,6 +347,7 @@ The findings API is optimised to minimise Firestore reads and HTTP round-trips o
   2. **Non-hits** — fetched when the user first opens the "Non-hits" sub-section
   3. **Ignored** — fetched when the user first opens the "Ignored" sub-section
 - **Eager cross-scan bookmark fetch** — the brand page separately loads `GET /api/brands/[brandId]/findings?bookmarkedOnly=true` on mount so the bookmark follow-up panel is immediately available without expanding individual scans
+- **Eager cross-scan addressed fetch** — the brand page separately loads `GET /api/brands/[brandId]/findings?addressedOnly=true` on mount so addressed findings are available in their dedicated tab without loading individual scan accordions
 - **Lightweight list payloads** — the findings list endpoints (`GET /api/brands/[brandId]/findings` and `GET /api/findings`) return a compact `FindingSummary` shape via Firestore `.select(...)`, excluding `rawData`, `rawLlmResponse`, and other fields not needed for normal rendering. This avoids repeatedly shipping the full SERP batch payload on every finding card.
 - **Incremental dashboard fetch** — `GET /api/findings` pages through the newest findings until it has filled the requested limit, instead of always fetching a fixed `limit * 4` window and filtering in memory. This keeps dashboard reads closer to the actual number of cards rendered.
 - **Debug details fetched on demand** — `FindingCard` fetches `GET /api/brands/[brandId]/findings/[findingId]` only when a debug section is opened (`?debug=true`). Normal list views never load raw actor data or raw AI responses.

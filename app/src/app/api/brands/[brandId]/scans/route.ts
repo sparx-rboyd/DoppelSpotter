@@ -9,7 +9,7 @@ const TERMINAL_STATUSES: ScanStatus[] = ['completed', 'cancelled', 'failed'];
 
 // GET /api/brands/[brandId]/scans
 // Returns all terminal scans for the brand, newest first, using denormalized counts stored
-// on each scan document (written by the webhook, updated on ignore/un-ignore).
+// on each scan document (written by the webhook, updated on ignore/un-ignore/reclassify).
 export async function GET(request: NextRequest, { params }: Params) {
   const { uid, error } = requireAuth(request);
   if (error) return error;
@@ -49,6 +49,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     lowCount: scan.lowCount ?? 0,
     nonHitCount: scan.nonHitCount ?? 0,
     ignoredCount: scan.ignoredCount ?? 0,
+    addressedCount: scan.addressedCount ?? 0,
     skippedCount: scan.skippedCount ?? 0,
     aiSummary: scan.aiSummary,
   }));

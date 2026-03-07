@@ -79,6 +79,7 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
     actorRuns: {},
     completedRunCount: 0,
     findingCount: 0,
+    addressedCount: 0,
     skippedCount: 0,
     startedAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
   };

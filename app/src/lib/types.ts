@@ -107,6 +107,7 @@ export interface BrandSummary {
 // ─── Findings ──────────────────────────────────────────────────────────────
 
 export type Severity = 'high' | 'medium' | 'low';
+export type FindingCategory = Severity | 'non-hit';
 
 export type FindingSource =
   | 'domain'
@@ -133,8 +134,12 @@ export interface FindingSummary {
   isFalsePositive?: boolean;
   /** Set to true when the user manually dismisses this finding. */
   isIgnored?: boolean;
+  /** Set to true when the user marks this finding as addressed. */
+  isAddressed?: boolean;
   /** Set to true when the user bookmarks the finding for follow-up. */
   isBookmarked?: boolean;
+  /** Timestamp when the finding was marked as addressed by the user. */
+  addressedAt?: Timestamp;
   /** Timestamp when the finding was bookmarked by the user. */
   bookmarkedAt?: Timestamp;
   /** Optional reminder note attached to a bookmarked finding. */
@@ -203,14 +208,15 @@ export interface Scan {
   actorRuns?: Record<string, ActorRunInfo>;
   /** How many actor runs have completed (succeeded or failed) — used to detect scan completion */
   completedRunCount?: number;
-  /** Total non-false-positive findings (high + medium + low + ignored) */
+  /** Total persisted non-false-positive findings, including ignored and addressed items. */
   findingCount: number;
-  /** Denormalized per-severity counts — written by the webhook and updated on ignore/un-ignore */
+  /** Denormalized visible per-severity counts — written by the webhook and updated on finding state changes */
   highCount?: number;
   mediumCount?: number;
   lowCount?: number;
   nonHitCount?: number;
   ignoredCount?: number;
+  addressedCount?: number;
   /** Number of duplicate URLs skipped because they already appeared in previous scans. */
   skippedCount?: number;
   /** Succinct AI-generated overview of the scan's high/medium/low findings. */
@@ -245,6 +251,7 @@ export interface ScanSummary {
   lowCount: number;
   nonHitCount: number;
   ignoredCount: number;
+  addressedCount: number;
   skippedCount: number;
   aiSummary?: string;
 }
