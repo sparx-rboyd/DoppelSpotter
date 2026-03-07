@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 248 40" fill="none" role="img" aria-label="DoppelSpotter">
+  <title>DoppelSpotter</title>
+
+  <!--
+    Icon: Lucide scan-eye v0.576.0 (https://lucide.dev/icons/scan-eye)
+    Rendered at 32x32, translated to (4, 4) within the viewbox.
+    White variant for rendering on dark backgrounds.
+  -->
+  <g transform="translate(4, 4) scale(1.333)" stroke="#ffffff" stroke-width="1.875" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Corner brackets -->
+    <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+    <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+    <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+    <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+    <!-- Eye -->
+    <path d="M18.944 12.33a1 1 0 0 0 0-.66 7.5 7.5 0 0 0-13.888 0 1 1 0 0 0 0 .66 7.5 7.5 0 0 0 13.888 0"/>
+    <!-- Pupil -->
+    <circle cx="12" cy="12" r="1" fill="#ffffff"/>
+  </g>
+
+  <!-- Wordmark - Inter Bold, white for dark backgrounds -->
+  <text
+    x="46"
+    y="27"
+    font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    font-size="20"
+    font-weight="700"
+    letter-spacing="-0.3"
+    fill="#ffffff"
+  >DoppelSpotter</text>
+</svg>

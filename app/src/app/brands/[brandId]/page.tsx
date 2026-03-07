@@ -1321,7 +1321,7 @@ export default function BrandDetailPage() {
     }
 
     switch (runStatus) {
-      case 'fetching_dataset': return 'Fetching initial search results from Apify';
+      case 'fetching_dataset': return 'Fetching search results';
       case 'analysing': return withAnalysisCounts('Analysing search results', 'Analysing search results', activeRun);
       default: return 'Waiting for web search to complete';
     }
