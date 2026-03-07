@@ -401,7 +401,6 @@ function ScanExportPdfDocument({
             : <Text style={styles.logoFallback}>DoppelSpotter</Text>}
           <Text style={styles.headerEyebrow}>Brand protection scan report</Text>
           <Text style={styles.headerTitle}>Scan findings report</Text>
-          <Text style={styles.headerSubtitle}>Actionable findings grouped by severity, with addressed items summarised separately.</Text>
         </View>
 
         <View style={styles.metaCard} wrap={false}>
