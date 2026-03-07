@@ -14,7 +14,7 @@ export const runtime = 'nodejs';
 // GET /api/brands/[brandId]/scans/[scanId]/export/pdf
 // Downloads a branded PDF report for the scan's actionable and addressed findings.
 export async function GET(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId, scanId } = await params;

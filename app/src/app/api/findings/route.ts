@@ -9,7 +9,7 @@ import type { FindingSummary } from '@/lib/types';
 //   limit        (optional, default 20, max 100)
 //   nonHitsOnly  (optional) — when "true", returns only AI-classified false-positives; otherwise returns only real findings
 export async function GET(request: NextRequest) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const limitParam = request.nextUrl.searchParams.get('limit');

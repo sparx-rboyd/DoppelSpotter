@@ -200,7 +200,7 @@ async function loadUrlScopedFindingDocs(
 // GET /api/brands/[brandId]/findings/[findingId]
 // Returns the full finding payload, including raw debug fields.
 export async function GET(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId, findingId } = await params;
@@ -233,7 +233,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 // Ignoring, addressing, and category reclassification are URL-scoped, but bookmark
 // state and notes are stored on the individual finding document only.
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId, findingId } = await params;

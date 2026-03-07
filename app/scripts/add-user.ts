@@ -87,6 +87,7 @@ async function main() {
   await userRef.set({
     email: normalizedEmail,
     passwordHash,
+    sessionVersion: 0,
     createdAt: FieldValue.serverTimestamp(),
   });
 

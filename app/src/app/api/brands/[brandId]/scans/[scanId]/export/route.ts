@@ -37,7 +37,7 @@ function serializeCsvRow(values: string[]): string {
 // GET /api/brands/[brandId]/scans/[scanId]/export
 // Downloads a CSV export of every finding for the scan, including non-hits.
 export async function GET(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId, scanId } = await params;

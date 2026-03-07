@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { db } from '@/lib/firestore';
 import { signToken, AUTH_COOKIE_NAME } from '@/lib/auth/jwt';
 import { errorResponse } from '@/lib/api-utils';
+import type { UserRecord } from '@/lib/types';
 
 export async function POST(request: NextRequest) {
   let body: { email?: string; password?: string };
@@ -32,14 +33,16 @@ export async function POST(request: NextRequest) {
   }
 
   const userDoc = snapshot.docs[0];
-  const { passwordHash } = userDoc.data() as { passwordHash: string };
+  const user = userDoc.data() as Pick<UserRecord, 'email' | 'passwordHash' | 'sessionVersion'>;
+  const { passwordHash } = user;
 
   const valid = await bcrypt.compare(password, passwordHash);
   if (!valid) {
     return errorResponse('Invalid email or password', 401);
   }
 
-  const token = signToken(userDoc.id, normalizedEmail);
+  const sessionVersion = user.sessionVersion ?? 0;
+  const token = signToken(userDoc.id, normalizedEmail, sessionVersion);
 
   const response = NextResponse.json({ userId: userDoc.id, email: normalizedEmail });
 

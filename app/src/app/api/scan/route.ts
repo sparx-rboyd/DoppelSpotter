@@ -21,7 +21,7 @@ import {
 // POST /api/scan — trigger a scan for a brand
 // Body: { brandId: string; actorIds?: string[] }
 export async function POST(request: NextRequest) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   let body: { brandId: string; actorIds?: string[] };
@@ -72,7 +72,7 @@ export async function POST(request: NextRequest) {
 
 // GET /api/scan?scanId=xxx — poll scan status
 export async function GET(request: NextRequest) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const scanId = request.nextUrl.searchParams.get('scanId');
@@ -110,7 +110,7 @@ export async function GET(request: NextRequest) {
 
 // DELETE /api/scan?scanId=xxx — cancel an in-progress scan
 export async function DELETE(request: NextRequest) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const scanId = request.nextUrl.searchParams.get('scanId');

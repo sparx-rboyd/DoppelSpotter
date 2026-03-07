@@ -16,7 +16,7 @@ const DELETE_BATCH_LIMIT = 500;
 
 // GET /api/brands/[brandId]
 export async function GET(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;
@@ -32,7 +32,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
 // PATCH /api/brands/[brandId]
 export async function PATCH(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;
@@ -110,7 +110,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
 // DELETE /api/brands/[brandId]
 export async function DELETE(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;

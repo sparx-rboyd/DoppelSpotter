@@ -6,6 +6,10 @@ export interface UserRecord {
   id: string;
   email: string;
   passwordHash: string;
+  /** Bumped whenever credentials change so older JWT sessions can be rejected. */
+  sessionVersion?: number;
+  /** Timestamp when the password was last changed. */
+  passwordChangedAt?: Timestamp;
   createdAt: Timestamp;
 }
 

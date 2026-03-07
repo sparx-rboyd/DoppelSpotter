@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
-import { ScanEye, LayoutDashboard, Shield, LogOut } from 'lucide-react';
-import { useAuth } from '@/lib/auth/auth-context';
+import { usePathname } from 'next/navigation';
+import { ScanEye, LayoutDashboard, Shield } from 'lucide-react';
+import { UserMenu } from '@/components/user-menu';
 import { cn } from '@/lib/utils';
 
 const navLinks = [
@@ -12,14 +12,7 @@ const navLinks = [
 ];
 
 export function Navbar() {
-  const { signOut } = useAuth();
   const pathname = usePathname();
-  const router = useRouter();
-
-  async function handleSignOut() {
-    await signOut();
-    router.replace('/login');
-  }
 
   return (
     <nav className="fixed z-50 w-full border-b border-brand-700/60 bg-brand-600">
@@ -50,14 +43,7 @@ export function Navbar() {
             ))}
           </div>
 
-          {/* Sign out */}
-          <button
-            onClick={handleSignOut}
-            className="flex items-center gap-1.5 text-sm text-white/70 hover:text-white transition px-3 py-2 rounded-lg hover:bg-white/10"
-          >
-            <LogOut className="w-4 h-4" />
-            <span className="hidden sm:inline">Sign out</span>
-          </button>
+          <UserMenu />
         </div>
       </div>
     </nav>

@@ -18,7 +18,7 @@ const IN_PROGRESS_SCAN_STATUSES: ScanStatus[] = ['pending', 'running', 'summaris
 
 // GET /api/brands — list all brands for the authenticated user
 export async function GET(request: NextRequest) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
   void request;
 
@@ -100,7 +100,7 @@ export async function GET(request: NextRequest) {
 
 // POST /api/brands — create a new brand profile
 export async function POST(request: NextRequest) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   let body: BrandProfileCreateInput;

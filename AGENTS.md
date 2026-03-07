@@ -37,7 +37,7 @@ using Apify actors for scraping and AI analysis for classification.
 │   └── src/
 │       ├── app/                  # Pages + API routes (App Router)
 │       │   └── api/
-│       │       ├── auth/         # login, logout, me (signup disabled — use add-user CLI)
+│       │       ├── auth/         # login, logout, me, change-password (signup disabled — use add-user CLI)
 │       │       ├── brands/       # CRUD + findings + scans per brand
 │       │       ├── findings/     # Cross-brand findings query
 │       │       ├── internal/     # Internal service-to-service routes (scheduled scan dispatch)
@@ -357,7 +357,7 @@ Users can add notes to any finding, regardless of whether it is bookmarked, igno
 
 | Collection | Key Fields |
 |---|---|
-| `users` | id, email, passwordHash, createdAt |
+| `users` | id, email, passwordHash, **sessionVersion?**, **passwordChangedAt?**, createdAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
@@ -374,6 +374,15 @@ npm run add-user -- --email user@example.com --password secret123
 ```
 
 Script: `app/scripts/add-user.ts`. Reads `.env.local` automatically (same file used by `next dev`).
+
+Authenticated users can open the top-right user menu to change their password. The password-change flow:
+
+- lives at `GET /account/password` behind the authenticated navbar user menu
+- posts to `POST /api/auth/change-password` with the current password and replacement password
+- verifies the current password before storing a new bcrypt hash
+- increments `users.sessionVersion`, stamps `users.passwordChangedAt`, and reissues the current browser's JWT
+- causes older cookies with a stale `sessionVersion` to be rejected by both `requireAuth()`-protected API routes and `GET /api/auth/me`
+- broadcasts an auth-sync event across tabs so other open tabs refresh their session state promptly after sign-in, sign-out, or password changes
 
 To backfill denormalized severity counts onto existing scan documents (needed after adding the count fields for the first time, or to recompute from findings after manual data changes):
 

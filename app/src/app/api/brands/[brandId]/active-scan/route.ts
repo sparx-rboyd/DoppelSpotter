@@ -16,7 +16,7 @@ type Params = { params: Promise<{ brandId: string }> };
 // GET /api/brands/[brandId]/active-scan
 // Returns the current in-progress scan for this brand, if any.
 export async function GET(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;

@@ -13,7 +13,7 @@ type Params = { params: Promise<{ brandId: string }> };
 //   bookmarkedOnly (optional) — when "true", returns only bookmarked findings (across all scans if no scanId)
 //   scanId         (optional) — when provided, filters findings to a specific scan
 export async function GET(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;
@@ -108,7 +108,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 // DELETE /api/brands/[brandId]/findings
 // Permanently deletes all findings AND scan records for this brand.
 export async function DELETE(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;

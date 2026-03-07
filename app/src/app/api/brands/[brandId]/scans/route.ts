@@ -11,7 +11,7 @@ const TERMINAL_STATUSES: ScanStatus[] = ['completed', 'cancelled', 'failed'];
 // Returns all terminal scans for the brand, newest first, using denormalized counts stored
 // on each scan document (written by the webhook, updated on ignore/un-ignore/reclassify).
 export async function GET(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId } = await params;

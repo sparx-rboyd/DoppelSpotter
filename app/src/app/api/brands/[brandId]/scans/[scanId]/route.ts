@@ -8,7 +8,7 @@ type Params = { params: Promise<{ brandId: string; scanId: string }> };
 // DELETE /api/brands/[brandId]/scans/[scanId]
 // Permanently deletes a single scan and all its findings.
 export async function DELETE(request: NextRequest, { params }: Params) {
-  const { uid, error } = requireAuth(request);
+  const { uid, error } = await requireAuth(request);
   if (error) return error;
 
   const { brandId, scanId } = await params;
