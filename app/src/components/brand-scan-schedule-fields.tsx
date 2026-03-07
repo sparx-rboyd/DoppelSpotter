@@ -288,7 +288,7 @@ function FloatingPanel({
     <div
       ref={panelRef}
       className={cn(
-        'fixed z-[120] overflow-y-auto rounded-xl border border-gray-200 bg-white p-2 shadow-xl',
+        'fixed z-[120] overflow-y-auto rounded-xl border border-gray-200 bg-white p-2',
         className,
       )}
       style={{
@@ -522,7 +522,7 @@ function DateField({
                 className={cn(
                   'flex h-9 items-center justify-center rounded-lg text-sm transition',
                   isSelected
-                    ? 'bg-brand-600 font-medium text-white shadow-sm'
+                    ? 'bg-brand-600 font-medium text-white'
                     : isCurrentMonth
                       ? 'text-gray-700 hover:bg-gray-100'
                       : 'text-gray-300 hover:bg-gray-50',
@@ -692,7 +692,7 @@ export function BrandScanScheduleFields({
             }`}
           >
             <span
-              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition ${
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
                 value.enabled ? 'left-[22px]' : 'left-0.5'
               }`}
             />

@@ -8,6 +8,10 @@ const MAX_DUE_BRANDS_PER_DISPATCH = 20;
 const GOOGLE_ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
 const oidcClient = new OAuth2Client();
 
+function normalizeAudience(value: string): string {
+  return value.trim().replace(/\/+$/, '');
+}
+
 function extractBearerToken(request: NextRequest): string | null {
   const candidateHeaders = [
     request.headers.get('authorization'),
@@ -32,12 +36,12 @@ export async function POST(request: NextRequest) {
   const normalizedSchedulerServiceAccountEmail = schedulerServiceAccountEmail.trim().toLowerCase();
 
   const dispatcherAudience = `${request.nextUrl.origin}${request.nextUrl.pathname}`;
-  const acceptableAudiences = [
+  const acceptableAudiences = new Set([
     dispatcherAudience,
     dispatcherAudience.replace(/\/$/, ''),
     request.nextUrl.origin,
     request.nextUrl.origin.replace(/\/$/, ''),
-  ];
+  ].map(normalizeAudience));
   const oidcToken = extractBearerToken(request);
   if (!oidcToken) {
     console.error('[scheduled-scans] Missing bearer token on scheduler request', {
@@ -50,27 +54,34 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const ticket = await oidcClient.verifyIdToken({
-      idToken: oidcToken,
-      audience: acceptableAudiences,
-    });
+    const ticket = await oidcClient.verifyIdToken({ idToken: oidcToken });
     const payload = ticket.getPayload();
+    const payloadAudiences = Array.isArray(payload?.aud)
+      ? payload.aud
+      : payload?.aud
+        ? [payload.aud]
+        : [];
     const tokenEmail = payload?.email?.trim().toLowerCase();
     const hasValidIssuer = GOOGLE_ISSUERS.has(payload?.iss ?? '');
     const matchesConfiguredEmail = tokenEmail === normalizedSchedulerServiceAccountEmail;
+    const hasAcceptableAudience = payloadAudiences
+      .map((audience) => normalizeAudience(audience))
+      .some((audience) => acceptableAudiences.has(audience));
 
     if (
       !payload ||
       !matchesConfiguredEmail ||
-      !hasValidIssuer
+      !hasValidIssuer ||
+      !hasAcceptableAudience
     ) {
       console.error('[scheduled-scans] Rejected Cloud Scheduler token payload', {
         email: payload?.email ?? null,
         sub: payload?.sub ?? null,
         iss: payload?.iss ?? null,
         aud: payload?.aud ?? null,
+        normalizedAudiences: payloadAudiences.map((audience) => normalizeAudience(audience)),
         expectedEmail: schedulerServiceAccountEmail,
-        expectedAudience: dispatcherAudience,
+        expectedAudiences: Array.from(acceptableAudiences),
       });
       return errorResponse('Unauthorized', 401);
     }

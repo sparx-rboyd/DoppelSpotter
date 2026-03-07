@@ -90,7 +90,7 @@ export function Tooltip({
           id={tooltipId}
           role="tooltip"
           className={cn(
-            'pointer-events-none fixed z-[100] max-w-xs rounded-lg bg-gray-900 px-3 py-2.5 text-xs font-normal leading-relaxed text-white shadow-lg',
+            'pointer-events-none fixed z-[100] max-w-xs rounded-lg border border-gray-800 bg-gray-900 px-3 py-2.5 text-xs font-normal leading-relaxed text-white',
             align === 'center' ? '-translate-x-1/2 -translate-y-full' : '-translate-x-full -translate-y-full',
             contentClassName,
           )}

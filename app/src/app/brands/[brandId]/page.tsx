@@ -6,7 +6,7 @@ import { useParams } from 'next/navigation';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
   ChevronDown, ChevronRight, Pencil, Trash2, X, EyeOff, Bookmark,
-  Sparkles, Clock3,
+  Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
@@ -190,11 +190,9 @@ function SeverityGroup({
 
 function ScanSummaryPanel({ summary }: { summary: string }) {
   return (
-    <div className="rounded-xl border border-brand-100 bg-brand-50/70 px-4 py-4">
+    <div className="rounded-xl border border-brand-100 bg-brand-50/70 px-4 py-4 border-l-2 border-l-brand-500">
       <div className="flex items-start gap-3">
-        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-white border border-brand-100">
-          <Sparkles className="w-4 h-4 text-brand-600" />
-        </div>
+        <Sparkles className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-500" />
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-700/80">
             AI summary
@@ -231,7 +229,6 @@ export default function BrandDetailPage() {
   const [allBookmarkedFindings, setAllBookmarkedFindings] = useState<FindingSummary[]>([]);
   const [activeTab, setActiveTab] = useState<'scans' | 'bookmarks' | 'ignored'>('scans');
   const [allIgnoredFindings, setAllIgnoredFindings] = useState<FindingSummary[]>([]);
-  const [showAllIgnored, setShowAllIgnored] = useState(false);
   const [findingsSearchQuery, setFindingsSearchQuery] = useState('');
   const [findingsSearchLoading, setFindingsSearchLoading] = useState(false);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
@@ -859,6 +856,14 @@ export default function BrandDetailPage() {
     }
   }
 
+  function switchFindingsTab(tab: 'scans' | 'bookmarks' | 'ignored') {
+    setActiveTab(tab);
+    if (tab !== 'scans') {
+      setConfirmClear(false);
+      setConfirmDeleteScanId(null);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Polling
   // ---------------------------------------------------------------------------
@@ -1312,10 +1317,13 @@ export default function BrandDetailPage() {
   const totalNonHits = scans.reduce((sum, s) => sum + s.nonHitCount, 0);
   const totalIgnored = scans.reduce((sum, s) => sum + (s.ignoredCount ?? 0), 0);
   const totalSkipped = scans.reduce((sum, s) => sum + (s.skippedCount ?? 0), 0);
+  const totalResultsCount = totalFindings + totalNonHits + totalIgnored + totalSkipped;
   const visibleBookmarkedFindings = filterFindingsForSearch(allBookmarkedFindings) ?? [];
   const bookmarkedHits = visibleBookmarkedFindings.filter((finding) => !finding.isFalsePositive);
   const bookmarkedNonHits = sortBySeverity(visibleBookmarkedFindings.filter((finding) => finding.isFalsePositive));
+  const visibleBookmarkedCount = visibleBookmarkedFindings.length;
   const visibleIgnoredFindings = filterFindingsForSearch(allIgnoredFindings) ?? [];
+  const visibleIgnoredCount = visibleIgnoredFindings.length;
   const visibleLiveScanFindings = filterFindingsForSearch(liveScanFindings) ?? [];
   const scansToRender = isFindingsSearchActive
     ? scans.filter((scan) => {
@@ -1325,11 +1333,8 @@ export default function BrandDetailPage() {
         return hits.length > 0 || nonHits.length > 0 || ignored.length > 0;
       })
     : scans;
-  const hasAnyVisibleSearchMatches = (
+  const hasVisibleScanSearchMatches = (
     visibleLiveScanFindings.length > 0
-    || bookmarkedHits.length > 0
-    || bookmarkedNonHits.length > 0
-    || visibleIgnoredFindings.length > 0
     || scansToRender.length > 0
   );
   const clearHistoryDisabledReason = scanning
@@ -1337,6 +1342,7 @@ export default function BrandDetailPage() {
     : clearing
       ? CLEARING_HISTORY_DELETE_TOOLTIP
       : null;
+  const showClearHistoryAction = activeTab === 'scans' && scans.length > 0 && !confirmClear;
 
   // ---------------------------------------------------------------------------
   // Render
@@ -1445,7 +1451,7 @@ export default function BrandDetailPage() {
                 const activeSection = sections.find((s) => s.key === expandedBrandSection);
 
                 return (
-                  <div className="mb-8">
+                  <div className="mb-4">
                     <div className="flex items-center gap-1 flex-wrap">
                       {sections.map((section, idx) => {
                         const isOpen = expandedBrandSection === section.key;
@@ -1486,33 +1492,24 @@ export default function BrandDetailPage() {
                       </div>
                     )}
 
-                    <div className="mt-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
-                      <div className="flex items-start gap-3">
-                        <div className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-brand-50 text-brand-600">
-                          <Clock3 className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-medium text-gray-700">Scheduled scans</span>
-                            {scanSchedule?.enabled ? (
+                    {scanSchedule?.enabled && (
+                      <div className="mt-4 rounded-xl border border-gray-200 bg-white px-4 py-2.5">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex min-w-0 items-center gap-2.5">
+                            <div className="flex min-w-0 flex-wrap items-center gap-2">
+                              <span className="text-sm font-medium text-gray-700">Scheduled scans</span>
                               <Badge variant="brand">{formatScanScheduleFrequency(scanSchedule.frequency)}</Badge>
-                            ) : (
-                              <Badge variant="default">Off</Badge>
-                            )}
+                            </div>
                           </div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-sm text-gray-500">
-                            <span>
-                              {scanSchedule?.enabled
-                                ? `Next due ${formatScheduledRunAt(scanSchedule.nextRunAt, scanSchedule.timeZone)}`
-                                : 'Scheduling is currently disabled for this brand.'}
+                          <div className="flex min-w-0 items-center gap-1.5 text-sm text-gray-500 sm:justify-end">
+                            <span className="min-w-0 truncate">
+                              {`Next due ${formatScheduledRunAt(scanSchedule.nextRunAt, scanSchedule.timeZone)}`}
                             </span>
-                            {scanSchedule?.enabled && (
-                              <InfoTooltip content="Scheduled scans will run within 10 minutes of the scheduled start time." />
-                            )}
+                            <InfoTooltip content="Scheduled scans will run within 10 minutes of the scheduled start time." />
                           </div>
                         </div>
                       </div>
-                    </div>
+                    )}
                   </div>
                 );
               })()}
@@ -1562,23 +1559,31 @@ export default function BrandDetailPage() {
                   )}
                 </div>
               )}
-
-
-                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
-                  {/* Panel header */}
-                  <div className="px-6 py-5 border-b border-brand-700 flex items-center justify-between gap-4 bg-brand-600">
-                    <div className="flex items-center gap-3">
-                      <div>
-                        <h2 className="text-base font-semibold text-white">Findings</h2>
-                        <p className="text-xs font-medium text-white/85">
+              <section className="mb-6">
+                <div className="rounded-t-2xl bg-brand-600 px-5 py-5 sm:px-6">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0">
+                      <h2 className="text-base font-semibold text-white sm:text-lg">Findings</h2>
+                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
                           {scans.length === 0
                             ? 'No scans yet'
-                            : `${scans.length} scan${scans.length !== 1 ? 's' : ''} · ${totalFindings} finding${totalFindings !== 1 ? 's' : ''} detected`}
-                        </p>
+                            : `${scans.length} scan${scans.length !== 1 ? 's' : ''}`}
+                        </span>
+                        {scans.length > 0 && (
+                          <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
+                            {totalFindings} finding{totalFindings !== 1 ? 's' : ''} detected
+                          </span>
+                        )}
+                        {totalNonHits > 0 && (
+                          <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
+                            {totalNonHits} non-hit{totalNonHits !== 1 ? 's' : ''}
+                          </span>
+                        )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {(totalFindings > 0 || totalNonHits > 0) && !confirmClear && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {showClearHistoryAction && (
                         clearHistoryDisabledReason ? (
                           <Tooltip content={clearHistoryDisabledReason} align="end">
                             <button
@@ -1588,7 +1593,7 @@ export default function BrandDetailPage() {
                                 e.preventDefault();
                                 e.stopPropagation();
                               }}
-                              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 px-3 py-1.5 text-xs font-medium bg-white/5 text-white/50 opacity-70 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/50 opacity-70 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
                               Clear history
@@ -1599,7 +1604,7 @@ export default function BrandDetailPage() {
                             variant="ghost"
                             size="sm"
                             onClick={() => setConfirmClear(true)}
-                            className="border border-white/15 text-white/90 hover:text-white hover:bg-white/10"
+                            className="border border-white/15 text-white/90 hover:border-white/25 hover:bg-white/10 hover:text-white"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                             Clear history
@@ -1612,19 +1617,47 @@ export default function BrandDetailPage() {
                         onClick={triggerScan}
                         loading={scanning}
                         disabled={scanning || clearing || confirmClear}
-                        className="border-white/20 bg-white !text-brand-700 hover:bg-brand-50 hover:border-white/30 disabled:hover:bg-white"
+                        className="border-white/15 bg-white !text-brand-700 hover:border-white/30 hover:bg-brand-50 disabled:hover:bg-white"
                       >
                         <Play className="w-4 h-4" />
                         Run scan
                       </Button>
                     </div>
                   </div>
+                  <div className="mt-4 relative max-w-xl">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                    <Input
+                      value={findingsSearchQuery}
+                      onChange={(e) => setFindingsSearchQuery(e.target.value)}
+                      placeholder="Search finding titles, URLs, and analyses"
+                      aria-label="Search findings"
+                      className="pl-9 pr-10 border-white/20 bg-white text-gray-900 placeholder:text-gray-400"
+                    />
+                    {isFindingsSearchActive && (
+                      <button
+                        type="button"
+                        onClick={() => setFindingsSearchQuery('')}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition"
+                        aria-label="Clear findings search"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                  {isFindingsSearchActive && (
+                    <p className="mt-2 text-xs text-white/80">
+                      {findingsSearchLoading
+                        ? 'Searching across hits, non-hits, ignored, and bookmarked findings...'
+                        : 'Showing only findings that match this search.'}
+                    </p>
+                  )}
+                </div>
 
-                  {/* Inline clear all confirmation */}
-                  {confirmClear && (
-                    <div className="px-6 py-4 bg-red-50 border-b border-red-100 flex items-center justify-between gap-4">
+                {activeTab === 'scans' && confirmClear && (
+                  <div className="border-x border-b border-red-100 bg-red-50 px-4 py-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-sm text-red-800">
-                        Permanently delete all {totalFindings + totalNonHits + totalIgnored + totalSkipped} result{(totalFindings + totalNonHits + totalIgnored + totalSkipped) !== 1 ? 's' : ''} and scan history? This cannot be undone.
+                        Permanently delete all {totalResultsCount} result{totalResultsCount !== 1 ? 's' : ''} and scan history? This cannot be undone.
                       </p>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <Button variant="secondary" size="sm" onClick={() => setConfirmClear(false)} disabled={clearing}>
@@ -1636,93 +1669,71 @@ export default function BrandDetailPage() {
                         </Button>
                       </div>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  <div className="px-6 py-4 border-b border-gray-100 bg-white">
-                    <div className="relative max-w-xl">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        value={findingsSearchQuery}
-                        onChange={(e) => setFindingsSearchQuery(e.target.value)}
-                        placeholder="Search finding titles, URLs, and analyses"
-                        aria-label="Search findings"
-                        className="pl-9 pr-10"
-                      />
-                      {isFindingsSearchActive && (
-                        <button
-                          type="button"
-                          onClick={() => setFindingsSearchQuery('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition"
-                          aria-label="Clear findings search"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
+                <div className="overflow-hidden rounded-b-2xl border border-gray-200 border-t-0 bg-white">
+                  <div className="border-b border-gray-200 px-4 sm:px-6">
+                    <div className="flex items-end gap-6 overflow-x-auto">
+                      <button
+                        type="button"
+                        onClick={() => switchFindingsTab('scans')}
+                        className={cn(
+                          "inline-flex items-center gap-2 whitespace-nowrap border-b-2 py-4 text-sm font-medium transition-colors",
+                          activeTab === 'scans'
+                            ? "border-brand-600 text-brand-700"
+                            : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700",
+                        )}
+                      >
+                        Scans
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => switchFindingsTab('bookmarks')}
+                        className={cn(
+                          "inline-flex items-center gap-2 whitespace-nowrap border-b-2 py-4 text-sm font-medium transition-colors",
+                          activeTab === 'bookmarks'
+                            ? "border-brand-600 text-brand-700"
+                            : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700",
+                        )}
+                      >
+                        Bookmarks
+                        {visibleBookmarkedCount > 0 && (
+                          <Badge variant="default" className="rounded-full border-none bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-600">
+                            {visibleBookmarkedCount}
+                          </Badge>
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => switchFindingsTab('ignored')}
+                        className={cn(
+                          "inline-flex items-center gap-2 whitespace-nowrap border-b-2 py-4 text-sm font-medium transition-colors",
+                          activeTab === 'ignored'
+                            ? "border-brand-600 text-brand-700"
+                            : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700",
+                        )}
+                      >
+                        Ignored
+                        {visibleIgnoredCount > 0 && (
+                          <Badge variant="default" className="rounded-full border-none bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-600">
+                            {visibleIgnoredCount}
+                          </Badge>
+                        )}
+                      </button>
                     </div>
-                    {isFindingsSearchActive && (
-                      <p className="mt-2 text-xs text-gray-500">
-                        {findingsSearchLoading
-                          ? 'Searching across hits, non-hits, ignored, and bookmarked findings...'
-                          : 'Showing only findings that match this search.'}
-                      </p>
-                    )}
                   </div>
 
-                  {/* Tabs */}
-                  <div className="px-6 flex items-center gap-6 bg-white border-b border-gray-100">
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('scans')}
-                      className={cn(
-                        "py-3 text-sm font-medium border-b-2 transition-colors",
-                        activeTab === 'scans' ? "border-brand-600 text-brand-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                      )}
-                    >
-                      Scans
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('bookmarks')}
-                      className={cn(
-                        "py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2",
-                        activeTab === 'bookmarks' ? "border-brand-600 text-brand-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                      )}
-                    >
-                      Bookmarks
-                      {(isFindingsSearchActive ? visibleBookmarkedFindings.length : allBookmarkedFindings.length) > 0 && (
-                        <Badge variant="default" className="px-1.5 py-0.5 text-[10px] leading-none bg-gray-100 text-gray-600 font-semibold rounded-full border-none">
-                          {isFindingsSearchActive ? visibleBookmarkedFindings.length : allBookmarkedFindings.length}
-                        </Badge>
-                      )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('ignored')}
-                      className={cn(
-                        "py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2",
-                        activeTab === 'ignored' ? "border-brand-600 text-brand-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                      )}
-                    >
-                      Ignored URLs
-                      {(isFindingsSearchActive ? visibleIgnoredFindings.length : allIgnoredFindings.length) > 0 && (
-                        <Badge variant="default" className="px-1.5 py-0.5 text-[10px] leading-none bg-gray-100 text-gray-600 font-semibold rounded-full border-none">
-                          {isFindingsSearchActive ? visibleIgnoredFindings.length : allIgnoredFindings.length}
-                        </Badge>
-                      )}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Tab content */}
-                <div>
-                  {activeTab === 'bookmarks' && (
-                    <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                      {(isFindingsSearchActive ? visibleBookmarkedFindings.length : allBookmarkedFindings.length) === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-12 gap-3">
-                          <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
+                  <div className="bg-gray-50 px-4 py-5 sm:px-6">
+                    {activeTab === 'bookmarks' && (
+                      visibleBookmarkedCount === 0 ? (
+                        <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
                             <Bookmark className="w-5 h-5 text-brand-600" />
                           </div>
-                          <p className="text-sm text-gray-500">No bookmarked findings.</p>
+                          <p className="text-sm text-gray-500">
+                            {isFindingsSearchActive ? 'No bookmarked findings match this search.' : 'No bookmarked findings yet.'}
+                          </p>
                         </div>
                       ) : (
                         <div className="space-y-6">
@@ -1740,8 +1751,8 @@ export default function BrandDetailPage() {
                             ))}
 
                           {bookmarkedNonHits.length > 0 && (
-                            <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-                              <div className="px-4 py-3 flex items-center gap-2 bg-gray-50 border-b border-gray-100">
+                            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                              <div className="flex items-center gap-2 border-b border-gray-100 bg-gray-50 px-4 py-3">
                                 <Bookmark className="w-3.5 h-3.5 text-gray-400" />
                                 <span className="text-sm font-medium text-gray-500">
                                   Non-hits
@@ -1751,7 +1762,7 @@ export default function BrandDetailPage() {
                                 </span>
                                 <span className="text-xs text-gray-400">· bookmarked despite AI classifying them as false positives</span>
                               </div>
-                              <div className="border-t border-gray-100 p-4 space-y-4">
+                              <div className="space-y-4 border-t border-gray-100 p-4">
                                 {bookmarkedNonHits.map((finding) => (
                                   <FindingCard
                                     key={finding.id}
@@ -1764,18 +1775,18 @@ export default function BrandDetailPage() {
                             </div>
                           )}
                         </div>
-                      )}
-                    </div>
-                  )}
+                      )
+                    )}
 
-                  {activeTab === 'ignored' && (
-                    <div className="bg-white rounded-2xl border border-gray-200 p-6">
-                      {(isFindingsSearchActive ? visibleIgnoredFindings.length : allIgnoredFindings.length) === 0 ? (
-                        <div className="flex flex-col items-center justify-center py-12 gap-3">
-                          <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
+                    {activeTab === 'ignored' && (
+                      visibleIgnoredCount === 0 ? (
+                        <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
                             <EyeOff className="w-5 h-5 text-brand-600" />
                           </div>
-                          <p className="text-sm text-gray-500">No ignored URLs.</p>
+                          <p className="text-sm text-gray-500">
+                            {isFindingsSearchActive ? 'No ignored findings match this search.' : 'No ignored findings yet.'}
+                          </p>
                         </div>
                       ) : (
                         <div className="space-y-4">
@@ -1789,437 +1800,387 @@ export default function BrandDetailPage() {
                             />
                           ))}
                         </div>
-                      )}
-                    </div>
-                  )}
+                      )
+                    )}
 
-                  {activeTab === 'scans' && (
-                    <div className="space-y-4">
-                      {/* Live findings — shown while a scan is in progress */}
-                  {scanning && (!isFindingsSearchActive || visibleLiveScanFindings.length > 0) && (
-                    <div className="bg-brand-50/40">
-                      {/* Live row header */}
-                      <div className="flex items-center gap-4 px-6 py-4">
-                        <div className="flex items-center gap-3 flex-1 min-w-0 text-left">
-                          <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
-                          <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
-                            Scan in progress
-                          </span>
-                          {visibleLiveScanFindings.length > 0 && (
-                            <SeverityPills
-                              high={visibleLiveScanFindings.filter((f) => f.severity === 'high').length}
-                              medium={visibleLiveScanFindings.filter((f) => f.severity === 'medium').length}
-                              low={visibleLiveScanFindings.filter((f) => f.severity === 'low').length}
-                            />
-                          )}
-                        </div>
-                      </div>
-                      {/* Live row body */}
-                      <div className="border-t border-brand-100 px-4 sm:px-6 py-5 bg-brand-50/30">
-                        {visibleLiveScanFindings.length === 0 ? (
-                          <div className="flex items-center justify-center py-8 gap-2 text-gray-400">
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                            <span className="text-sm">
-                              {isFindingsSearchActive ? 'No live findings match this search yet.' : 'Waiting for first results…'}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="space-y-3">
-                            {(['high', 'medium', 'low'] as const)
-                              .filter((sev) => visibleLiveScanFindings.some((f) => f.severity === sev))
-                              .map((sev) => (
-                                <SeverityGroup
-                                  key={`live-${sev}`}
-                                  severity={sev}
-                                  findings={visibleLiveScanFindings.filter((f) => f.severity === sev)}
-                                  onBookmarkUpdate={handleBookmarkUpdate}
-                                  forceExpanded={isFindingsSearchActive}
-                                  highlightQuery={activeHighlightQuery}
-                                />
-                              ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {isFindingsSearchActive && findingsSearchLoading ? (
-                    <div className="flex items-center justify-center py-12 gap-2 text-gray-400">
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      <span className="text-sm">Searching across all findings…</span>
-                    </div>
-                  ) : isFindingsSearchActive && !hasAnyVisibleSearchMatches ? (
-                    <div className="flex flex-col items-center justify-center py-12 gap-3 bg-white rounded-xl border border-gray-200 shadow-sm">
-                      <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
-                        <Search className="w-5 h-5 text-brand-600" />
-                      </div>
-                      <p className="text-sm text-gray-500">No findings match this search.</p>
-                    </div>
-                  ) : !isFindingsSearchActive && scansToRender.length === 0 && !scanning ? (
-                    <div className="flex flex-col items-center justify-center py-12 gap-3 bg-white rounded-xl border border-gray-200 shadow-sm">
-                      <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
-                        <Shield className="w-5 h-5 text-brand-600" />
-                      </div>
-                      <p className="text-sm text-gray-500">No findings yet. Run a scan to start monitoring.</p>
-                    </div>
-                  ) : (
-                    scansToRender.map((scan) => {
-                      const hits = filterFindingsForSearch(scanFindings[scan.id]);
-                      const nonHits = filterFindingsForSearch(scanNonHits[scan.id]);
-                      const ignored = filterFindingsForSearch(scanIgnored[scan.id]);
-                      const matchingHitCount = hits?.length ?? 0;
-                      const matchingNonHitCount = nonHits?.length ?? 0;
-                      const matchingIgnoredCount = ignored?.length ?? 0;
-                      const isExpanded = isFindingsSearchActive
-                        ? matchingHitCount + matchingNonHitCount + matchingIgnoredCount > 0
-                        : expandedScanIds.includes(scan.id);
-                      const isLoading = loadingScanIds.includes(scan.id);
-                      const showNonHits = isFindingsSearchActive
-                        ? matchingNonHitCount > 0
-                        : showNonHitsByScanId[scan.id] ?? false;
-                      const showIgnored = isFindingsSearchActive
-                        ? matchingIgnoredCount > 0
-                        : showIgnoredByScanId[scan.id] ?? false;
-                      const isConfirmingDelete = confirmDeleteScanId === scan.id;
-                      const isDeleting = deletingScanId === scan.id;
-                      const hasFindings = isFindingsSearchActive
-                        ? matchingHitCount > 0
-                        : scan.highCount + scan.mediumCount + scan.lowCount > 0;
-                      const displayedHighCount = isFindingsSearchActive
-                        ? hits?.filter((f) => f.severity === 'high').length ?? 0
-                        : scan.highCount;
-                      const displayedMediumCount = isFindingsSearchActive
-                        ? hits?.filter((f) => f.severity === 'medium').length ?? 0
-                        : scan.mediumCount;
-                      const displayedLowCount = isFindingsSearchActive
-                        ? hits?.filter((f) => f.severity === 'low').length ?? 0
-                        : scan.lowCount;
-                      const displayedNonHitCount = isFindingsSearchActive
-                        ? matchingNonHitCount
-                        : scan.nonHitCount;
-                      const displayedIgnoredCount = isFindingsSearchActive
-                        ? matchingIgnoredCount
-                        : (scan.ignoredCount ?? 0);
-                      const deleteDisabledReason = scanning
-                        ? ACTIVE_SCAN_DELETE_TOOLTIP
-                        : clearing
-                          ? CLEARING_HISTORY_DELETE_TOOLTIP
-                          : null;
-
-                      return (
-                        <div key={scan.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-                          {/* Scan row header */}
-                          {isConfirmingDelete ? (
-                            <div className="px-6 py-4 bg-red-50 flex items-center justify-between gap-4">
-                              <p className="text-sm text-red-800">
-                                Delete this scan and its {scan.highCount + scan.mediumCount + scan.lowCount + scan.nonHitCount + (scan.ignoredCount ?? 0) + (scan.skippedCount ?? 0)} result{(scan.highCount + scan.mediumCount + scan.lowCount + scan.nonHitCount + (scan.ignoredCount ?? 0) + (scan.skippedCount ?? 0)) !== 1 ? 's' : ''}? This cannot be undone.
-                              </p>
-                              <div className="flex items-center gap-2 flex-shrink-0">
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  onClick={() => setConfirmDeleteScanId(null)}
-                                  disabled={isDeleting}
-                                >
-                                  Cancel
-                                </Button>
-                                <Button
-                                  variant="danger"
-                                  size="sm"
-                                  onClick={() => deleteScan(scan.id)}
-                                  loading={isDeleting}
-                                  disabled={isDeleting}
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                  Delete
-                                </Button>
+                    {activeTab === 'scans' && (
+                      <div className="space-y-4">
+                        {scanning && (!isFindingsSearchActive || visibleLiveScanFindings.length > 0) && (
+                          <div className="overflow-hidden rounded-xl border border-brand-200 bg-white">
+                            <div className="flex items-center gap-4 bg-brand-50/40 px-6 py-4">
+                              <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
+                                <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
+                                <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
+                                  Scan in progress
+                                </span>
+                                {visibleLiveScanFindings.length > 0 && (
+                                  <SeverityPills
+                                    high={visibleLiveScanFindings.filter((f) => f.severity === 'high').length}
+                                    medium={visibleLiveScanFindings.filter((f) => f.severity === 'medium').length}
+                                    low={visibleLiveScanFindings.filter((f) => f.severity === 'low').length}
+                                  />
+                                )}
                               </div>
                             </div>
-                          ) : (
-                    <div className="flex items-center gap-4 px-6 py-4 hover:bg-gray-50 transition group">
-                      {/* Expand toggle */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (isFindingsSearchActive) return;
-                          toggleScanExpand(scan.id);
-                        }}
-                        className="flex items-center gap-4 flex-1 min-w-0 text-left"
-                        aria-expanded={isExpanded}
-                      >
-                                {isExpanded
-                                  ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                                  : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-                                <span className="text-sm font-semibold text-gray-500 flex-shrink-0">
-                                  {formatScanDate(scan.startedAt)}
-                                </span>
-                                <span className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                  {hasFindings ? (
-                                    <SeverityPills
-                                      high={displayedHighCount}
-                                      medium={displayedMediumCount}
-                                      low={displayedLowCount}
-                                    />
-                                  ) : (
-                                    <span className="text-xs text-gray-400">No findings</span>
-                                  )}
-                                  {displayedNonHitCount > 0 && (
-                                    <span className="text-xs text-gray-400">
-                                      · {displayedNonHitCount} non-hit{displayedNonHitCount !== 1 ? 's' : ''}
-                                    </span>
-                                  )}
-                                  {displayedIgnoredCount > 0 && (
-                                    <span className="text-xs text-gray-400">
-                                      · {displayedIgnoredCount} ignored
-                                    </span>
-                                  )}
-                                  {(scan.skippedCount ?? 0) > 0 && (
-                                    <span className="inline-flex items-center gap-1 text-xs text-gray-400">
-                                      · {scan.skippedCount} skipped
-                                      <InfoTooltip
-                                        content="Findings that appeared in previous scans were skipped."
-                                        iconClassName="text-gray-300 hover:text-gray-400"
-                                      />
-                                    </span>
-                                  )}
-                                  {scan.status === 'cancelled' && (
-                                    <span className="text-xs text-gray-400 italic">· cancelled</span>
-                                  )}
-                                  {scan.status === 'failed' && (
-                                    <span className="text-xs text-red-400 italic">· failed</span>
-                                  )}
-                                </span>
-                              </button>
-
-                              {/* Delete button */}
-                              {deleteDisabledReason ? (
-                                <Tooltip content={deleteDisabledReason} align="end" triggerClassName="flex-shrink-0">
-                                  <button
-                                    type="button"
-                                    aria-disabled="true"
-                                    onClick={(e) => {
-                                      e.preventDefault();
-                                      e.stopPropagation();
-                                    }}
-                                    className="inline-flex items-center justify-center p-1.5 rounded-md text-gray-300 opacity-40 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                </Tooltip>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setConfirmDeleteScanId(scan.id);
-                                    setConfirmClear(false);
-                                  }}
-                                  className="flex-shrink-0 p-1.5 rounded-md text-gray-300 hover:text-red-500 hover:bg-red-50 transition opacity-0 group-hover:opacity-100 focus:opacity-100 disabled:cursor-not-allowed"
-                                  aria-label="Delete scan"
-                                >
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              )}
-                            </div>
-                          )}
-
-                          {/* Expanded body */}
-                          {isExpanded && (
-                            <div className="border-t border-gray-100 px-4 sm:px-6 py-5 bg-gray-50">
-                              {isLoading ? (
-                                <div className="flex items-center justify-center py-8 gap-2 text-gray-400">
+                            <div className="border-t border-brand-100 bg-brand-50/30 px-4 py-5 sm:px-6">
+                              {visibleLiveScanFindings.length === 0 ? (
+                                <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
                                   <Loader2 className="w-4 h-4 animate-spin" />
-                                  <span className="text-sm">Loading results…</span>
+                                  <span className="text-sm">
+                                    {isFindingsSearchActive ? 'No live findings match this search yet.' : 'Waiting for first results…'}
+                                  </span>
                                 </div>
                               ) : (
-                                <>
-                                  {scan.aiSummary && (
-                                    <div className="mb-4">
-                                      <ScanSummaryPanel summary={scan.aiSummary} />
-                                    </div>
-                                  )}
-
-                                  {/* Real findings grouped by severity */}
-                                  {!hits || hits.length === 0 ? (
-                                    !isFindingsSearchActive && (
-                                      <div className="flex flex-col items-center justify-center py-8 gap-2">
-                                        <Shield className="w-5 h-5 text-brand-300" />
-                                        <p className="text-sm text-gray-400">
-                                          {scan.skippedCount > 0
-                                            ? 'No new findings detected in this scan.'
-                                            : 'No findings detected in this scan.'}
-                                        </p>
-                                      </div>
-                                    )
-                                  ) : (
-                                    <div className="space-y-3">
-                                      {(['high', 'medium', 'low'] as const)
-                                        .filter((sev) => hits.some((f) => f.severity === sev))
-                                        .map((sev) => (
-                                          <SeverityGroup
-                                            key={`${scan.id}-${sev}`}
-                                            severity={sev}
-                                            findings={hits.filter((f) => f.severity === sev)}
-                                            onIgnoreToggle={handleIgnoreToggle}
-                                            onBookmarkUpdate={handleBookmarkUpdate}
-                                            forceExpanded={isFindingsSearchActive}
-                                            highlightQuery={activeHighlightQuery}
-                                          />
-                                        ))}
-                                    </div>
-                                  )}
-
-                                  {/* Non-hits sub-section */}
-                                  {displayedNonHitCount > 0 && (
-                                    <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          if (isFindingsSearchActive) return;
-                                          const next = !showNonHitsByScanId[scan.id];
-                                          setShowNonHitsByScanId((prev) => ({ ...prev, [scan.id]: next }));
-                                          if (next) loadScanNonHits(scan.id);
-                                        }}
-                                        className={cn(
-                                          "w-full px-4 py-3 flex items-center gap-2 transition text-left",
-                                          showNonHits ? "bg-gray-50 border-b border-gray-100" : "hover:bg-gray-50"
-                                        )}
-                                      >
-                                        {showNonHits
-                                          ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-                                          : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
-                                        <span className="text-sm font-medium text-gray-500">
-                                          Non-hits
-                                          <span className="ml-1.5 text-xs font-normal text-gray-400">
-                                            ({nonHits ? nonHits.length : displayedNonHitCount})
-                                          </span>
-                                        </span>
-                                        <span className="text-xs text-gray-400">· classified as false positives by AI</span>
-                                      </button>
-                                      {showNonHits && (
-                                        <div className="border-t border-gray-100 p-4 space-y-4">
-                                          {!nonHits ? (
-                                            <div className="flex items-center justify-center py-4 gap-2 text-gray-400">
-                                              <Loader2 className="w-4 h-4 animate-spin" />
-                                              <span className="text-sm">Loading…</span>
-                                            </div>
-                                          ) : (
-                                            sortBySeverity(nonHits).map((finding) => (
-                                              <FindingCard
-                                                key={finding.id}
-                                                finding={finding}
-                                                highlightQuery={activeHighlightQuery}
-                                                onIgnoreToggle={handleIgnoreToggle}
-                                                onBookmarkUpdate={handleBookmarkUpdate}
-                                              />
-                                            ))
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-
-                                  {/* Ignored sub-section */}
-                                  {displayedIgnoredCount > 0 && (
-                                    <div className="mt-4 bg-white rounded-xl border border-gray-200 overflow-hidden">
-                                      <button
-                                        type="button"
-                                        onClick={() => {
-                                          if (isFindingsSearchActive) return;
-                                          const next = !showIgnoredByScanId[scan.id];
-                                          setShowIgnoredByScanId((prev) => ({ ...prev, [scan.id]: next }));
-                                          if (next) loadScanIgnored(scan.id);
-                                        }}
-                                        className={cn(
-                                          "w-full px-4 py-3 flex items-center gap-2 transition text-left",
-                                          showIgnored ? "bg-gray-50 border-b border-gray-100" : "hover:bg-gray-50"
-                                        )}
-                                      >
-                                        {showIgnored
-                                          ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-                                          : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
-                                        <EyeOff className="w-3.5 h-3.5 text-gray-400" />
-                                        <span className="text-sm font-medium text-gray-500">
-                                          Ignored
-                                          <span className="ml-1.5 text-xs font-normal text-gray-400">
-                                            ({ignored ? ignored.length : displayedIgnoredCount})
-                                          </span>
-                                        </span>
-                                        <span className="text-xs text-gray-400">· manually dismissed</span>
-                                      </button>
-                                      {showIgnored && (
-                                        <div className="border-t border-gray-100 p-4 space-y-4">
-                                          {!ignored ? (
-                                            <div className="flex items-center justify-center py-4 gap-2 text-gray-400">
-                                              <Loader2 className="w-4 h-4 animate-spin" />
-                                              <span className="text-sm">Loading…</span>
-                                            </div>
-                                          ) : (
-                                            ignored.map((finding) => (
-                                              <FindingCard
-                                                key={finding.id}
-                                                finding={finding}
-                                                highlightQuery={activeHighlightQuery}
-                                                onIgnoreToggle={handleIgnoreToggle}
-                                                onBookmarkUpdate={handleBookmarkUpdate}
-                                              />
-                                            ))
-                                          )}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </>
+                                <div className="space-y-3">
+                                  {(['high', 'medium', 'low'] as const)
+                                    .filter((sev) => visibleLiveScanFindings.some((f) => f.severity === sev))
+                                    .map((sev) => (
+                                      <SeverityGroup
+                                        key={`live-${sev}`}
+                                        severity={sev}
+                                        findings={visibleLiveScanFindings.filter((f) => f.severity === sev)}
+                                        onBookmarkUpdate={handleBookmarkUpdate}
+                                        forceExpanded={isFindingsSearchActive}
+                                        highlightQuery={activeHighlightQuery}
+                                      />
+                                    ))}
+                                </div>
                               )}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-                )}
-              </div>
-              {/* Brand-level ignored URLs panel */}
-              {(isFindingsSearchActive ? visibleIgnoredFindings.length > 0 : allIgnoredFindings.length > 0) && (
-                <div className="mt-6 bg-white rounded-2xl border border-gray-200 overflow-hidden">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isFindingsSearchActive) return;
-                      setShowAllIgnored((v) => !v);
-                    }}
-                    className={cn(
-                      "w-full px-6 py-5 flex items-center gap-3 transition text-left bg-brand-50",
-                      (isFindingsSearchActive || showAllIgnored) ? "border-b border-brand-100" : "hover:bg-brand-100"
+                          </div>
+                        )}
+
+                        {isFindingsSearchActive && findingsSearchLoading ? (
+                          <div className="flex items-center justify-center gap-2 py-12 text-gray-400">
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span className="text-sm">Searching across all findings…</span>
+                          </div>
+                        ) : isFindingsSearchActive && !hasVisibleScanSearchMatches ? (
+                          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
+                              <Search className="w-5 h-5 text-brand-600" />
+                            </div>
+                            <p className="text-sm text-gray-500">No findings match this search.</p>
+                          </div>
+                        ) : !isFindingsSearchActive && scansToRender.length === 0 && !scanning ? (
+                          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
+                              <Shield className="w-5 h-5 text-brand-600" />
+                            </div>
+                            <p className="text-sm text-gray-500">No findings yet. Run a scan to start monitoring.</p>
+                          </div>
+                        ) : (
+                          scansToRender.map((scan) => {
+                            const hits = filterFindingsForSearch(scanFindings[scan.id]);
+                            const nonHits = filterFindingsForSearch(scanNonHits[scan.id]);
+                            const ignored = filterFindingsForSearch(scanIgnored[scan.id]);
+                            const matchingHitCount = hits?.length ?? 0;
+                            const matchingNonHitCount = nonHits?.length ?? 0;
+                            const matchingIgnoredCount = ignored?.length ?? 0;
+                            const isExpanded = isFindingsSearchActive
+                              ? matchingHitCount + matchingNonHitCount + matchingIgnoredCount > 0
+                              : expandedScanIds.includes(scan.id);
+                            const isLoading = loadingScanIds.includes(scan.id);
+                            const showNonHits = isFindingsSearchActive
+                              ? matchingNonHitCount > 0
+                              : showNonHitsByScanId[scan.id] ?? false;
+                            const showIgnored = isFindingsSearchActive
+                              ? matchingIgnoredCount > 0
+                              : showIgnoredByScanId[scan.id] ?? false;
+                            const isConfirmingDelete = confirmDeleteScanId === scan.id;
+                            const isDeleting = deletingScanId === scan.id;
+                            const hasFindings = isFindingsSearchActive
+                              ? matchingHitCount > 0
+                              : scan.highCount + scan.mediumCount + scan.lowCount > 0;
+                            const displayedHighCount = isFindingsSearchActive
+                              ? hits?.filter((f) => f.severity === 'high').length ?? 0
+                              : scan.highCount;
+                            const displayedMediumCount = isFindingsSearchActive
+                              ? hits?.filter((f) => f.severity === 'medium').length ?? 0
+                              : scan.mediumCount;
+                            const displayedLowCount = isFindingsSearchActive
+                              ? hits?.filter((f) => f.severity === 'low').length ?? 0
+                              : scan.lowCount;
+                            const displayedNonHitCount = isFindingsSearchActive
+                              ? matchingNonHitCount
+                              : scan.nonHitCount;
+                            const displayedIgnoredCount = isFindingsSearchActive
+                              ? matchingIgnoredCount
+                              : (scan.ignoredCount ?? 0);
+                            const deleteDisabledReason = scanning
+                              ? ACTIVE_SCAN_DELETE_TOOLTIP
+                              : clearing
+                                ? CLEARING_HISTORY_DELETE_TOOLTIP
+                                : null;
+
+                            return (
+                              <div key={scan.id} className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                                {isConfirmingDelete ? (
+                                  <div className="flex items-center justify-between gap-4 bg-red-50 px-6 py-4">
+                                    <p className="text-sm text-red-800">
+                                      Delete this scan and its {scan.highCount + scan.mediumCount + scan.lowCount + scan.nonHitCount + (scan.ignoredCount ?? 0) + (scan.skippedCount ?? 0)} result{(scan.highCount + scan.mediumCount + scan.lowCount + scan.nonHitCount + (scan.ignoredCount ?? 0) + (scan.skippedCount ?? 0)) !== 1 ? 's' : ''}? This cannot be undone.
+                                    </p>
+                                    <div className="flex items-center gap-2 flex-shrink-0">
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={() => setConfirmDeleteScanId(null)}
+                                        disabled={isDeleting}
+                                      >
+                                        Cancel
+                                      </Button>
+                                      <Button
+                                        variant="danger"
+                                        size="sm"
+                                        onClick={() => deleteScan(scan.id)}
+                                        loading={isDeleting}
+                                        disabled={isDeleting}
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                        Delete
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="group flex items-center gap-4 px-6 py-4 transition hover:bg-gray-50">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (isFindingsSearchActive) return;
+                                        toggleScanExpand(scan.id);
+                                      }}
+                                      className="flex min-w-0 flex-1 items-center gap-4 text-left"
+                                      aria-expanded={isExpanded}
+                                    >
+                                      {isExpanded
+                                        ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
+                                        : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
+                                      <span className="text-sm font-semibold text-gray-500 flex-shrink-0">
+                                        {formatScanDate(scan.startedAt)}
+                                      </span>
+                                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                        {hasFindings ? (
+                                          <SeverityPills
+                                            high={displayedHighCount}
+                                            medium={displayedMediumCount}
+                                            low={displayedLowCount}
+                                          />
+                                        ) : (
+                                          <span className="text-xs text-gray-400">No findings</span>
+                                        )}
+                                        {displayedNonHitCount > 0 && (
+                                          <span className="text-xs text-gray-400">
+                                            · {displayedNonHitCount} non-hit{displayedNonHitCount !== 1 ? 's' : ''}
+                                          </span>
+                                        )}
+                                        {displayedIgnoredCount > 0 && (
+                                          <span className="text-xs text-gray-400">
+                                            · {displayedIgnoredCount} ignored
+                                          </span>
+                                        )}
+                                        {(scan.skippedCount ?? 0) > 0 && (
+                                          <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+                                            · {scan.skippedCount} skipped
+                                            <InfoTooltip
+                                              content="Findings that appeared in previous scans were skipped."
+                                              iconClassName="text-gray-300 hover:text-gray-400"
+                                            />
+                                          </span>
+                                        )}
+                                        {scan.status === 'cancelled' && (
+                                          <span className="text-xs italic text-gray-400">· cancelled</span>
+                                        )}
+                                        {scan.status === 'failed' && (
+                                          <span className="text-xs italic text-red-400">· failed</span>
+                                        )}
+                                      </span>
+                                    </button>
+
+                                    {deleteDisabledReason ? (
+                                      <Tooltip content={deleteDisabledReason} align="end" triggerClassName="flex-shrink-0">
+                                        <button
+                                          type="button"
+                                          aria-disabled="true"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                          }}
+                                          className="inline-flex items-center justify-center rounded-md p-1.5 text-gray-300 opacity-40 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </Tooltip>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setConfirmDeleteScanId(scan.id);
+                                          setConfirmClear(false);
+                                        }}
+                                        className="flex-shrink-0 rounded-md p-1.5 text-gray-300 opacity-0 transition hover:bg-red-50 hover:text-red-500 focus:opacity-100 group-hover:opacity-100"
+                                        aria-label="Delete scan"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    )}
+                                  </div>
+                                )}
+
+                                {isExpanded && (
+                                  <div className="border-t border-gray-100 bg-gray-50 px-4 py-5 sm:px-6">
+                                    {isLoading ? (
+                                      <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        <span className="text-sm">Loading results…</span>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        {scan.aiSummary && (
+                                          <div className="mb-4">
+                                            <ScanSummaryPanel summary={scan.aiSummary} />
+                                          </div>
+                                        )}
+
+                                        {!hits || hits.length === 0 ? (
+                                          !isFindingsSearchActive && (
+                                            <div className="flex flex-col items-center justify-center gap-2 py-8">
+                                              <Shield className="w-5 h-5 text-brand-300" />
+                                              <p className="text-sm text-gray-400">
+                                                {scan.skippedCount > 0
+                                                  ? 'No new findings detected in this scan.'
+                                                  : 'No findings detected in this scan.'}
+                                              </p>
+                                            </div>
+                                          )
+                                        ) : (
+                                          <div className="space-y-3">
+                                            {(['high', 'medium', 'low'] as const)
+                                              .filter((sev) => hits.some((f) => f.severity === sev))
+                                              .map((sev) => (
+                                                <SeverityGroup
+                                                  key={`${scan.id}-${sev}`}
+                                                  severity={sev}
+                                                  findings={hits.filter((f) => f.severity === sev)}
+                                                  onIgnoreToggle={handleIgnoreToggle}
+                                                  onBookmarkUpdate={handleBookmarkUpdate}
+                                                  forceExpanded={isFindingsSearchActive}
+                                                  highlightQuery={activeHighlightQuery}
+                                                />
+                                              ))}
+                                          </div>
+                                        )}
+
+                                        {displayedNonHitCount > 0 && (
+                                          <div className="mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                if (isFindingsSearchActive) return;
+                                                const next = !showNonHitsByScanId[scan.id];
+                                                setShowNonHitsByScanId((prev) => ({ ...prev, [scan.id]: next }));
+                                                if (next) loadScanNonHits(scan.id);
+                                              }}
+                                              className={cn(
+                                                "flex w-full items-center gap-2 px-4 py-3 text-left transition",
+                                                showNonHits ? "border-b border-gray-100 bg-gray-50" : "hover:bg-gray-50",
+                                              )}
+                                            >
+                                              {showNonHits
+                                                ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                                                : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
+                                              <span className="text-sm font-medium text-gray-500">
+                                                Non-hits
+                                                <span className="ml-1.5 text-xs font-normal text-gray-400">
+                                                  ({nonHits ? nonHits.length : displayedNonHitCount})
+                                                </span>
+                                              </span>
+                                              <span className="text-xs text-gray-400">· classified as false positives by AI</span>
+                                            </button>
+                                            {showNonHits && (
+                                              <div className="space-y-4 border-t border-gray-100 p-4">
+                                                {!nonHits ? (
+                                                  <div className="flex items-center justify-center gap-2 py-4 text-gray-400">
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                    <span className="text-sm">Loading…</span>
+                                                  </div>
+                                                ) : (
+                                                  sortBySeverity(nonHits).map((finding) => (
+                                                    <FindingCard
+                                                      key={finding.id}
+                                                      finding={finding}
+                                                      highlightQuery={activeHighlightQuery}
+                                                      onIgnoreToggle={handleIgnoreToggle}
+                                                      onBookmarkUpdate={handleBookmarkUpdate}
+                                                    />
+                                                  ))
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+
+                                        {displayedIgnoredCount > 0 && (
+                                          <div className="mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                if (isFindingsSearchActive) return;
+                                                const next = !showIgnoredByScanId[scan.id];
+                                                setShowIgnoredByScanId((prev) => ({ ...prev, [scan.id]: next }));
+                                                if (next) loadScanIgnored(scan.id);
+                                              }}
+                                              className={cn(
+                                                "flex w-full items-center gap-2 px-4 py-3 text-left transition",
+                                                showIgnored ? "border-b border-gray-100 bg-gray-50" : "hover:bg-gray-50",
+                                              )}
+                                            >
+                                              {showIgnored
+                                                ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                                                : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
+                                              <EyeOff className="w-3.5 h-3.5 text-gray-400" />
+                                              <span className="text-sm font-medium text-gray-500">
+                                                Ignored
+                                                <span className="ml-1.5 text-xs font-normal text-gray-400">
+                                                  ({ignored ? ignored.length : displayedIgnoredCount})
+                                                </span>
+                                              </span>
+                                              <span className="text-xs text-gray-400">· manually dismissed</span>
+                                            </button>
+                                            {showIgnored && (
+                                              <div className="space-y-4 border-t border-gray-100 p-4">
+                                                {!ignored ? (
+                                                  <div className="flex items-center justify-center gap-2 py-4 text-gray-400">
+                                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                                    <span className="text-sm">Loading…</span>
+                                                  </div>
+                                                ) : (
+                                                  ignored.map((finding) => (
+                                                    <FindingCard
+                                                      key={finding.id}
+                                                      finding={finding}
+                                                      highlightQuery={activeHighlightQuery}
+                                                      onIgnoreToggle={handleIgnoreToggle}
+                                                      onBookmarkUpdate={handleBookmarkUpdate}
+                                                    />
+                                                  ))
+                                                )}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     )}
-                    aria-expanded={isFindingsSearchActive || showAllIgnored}
-                  >
-                    {(isFindingsSearchActive || showAllIgnored)
-                      ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                      : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-                    <EyeOff className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                    <div>
-                      <h2 className="text-base font-semibold text-gray-900">Ignored URLs</h2>
-                      <p className="text-xs text-gray-500">
-                        {(isFindingsSearchActive ? visibleIgnoredFindings.length : allIgnoredFindings.length)} URL{(isFindingsSearchActive ? visibleIgnoredFindings.length : allIgnoredFindings.length) !== 1 ? 's' : ''} manually dismissed · AI analysis will skip these in future scans
-                      </p>
-                    </div>
-                  </button>
-                  {(isFindingsSearchActive || showAllIgnored) && (
-                    <div className="border-t border-gray-100 p-4 sm:p-5 space-y-4">
-                      {visibleIgnoredFindings.map((finding) => (
-                        <FindingCard
-                          key={finding.id}
-                          finding={finding}
-                          highlightQuery={activeHighlightQuery}
-                          onIgnoreToggle={handleIgnoreToggle}
-                          onBookmarkUpdate={handleBookmarkUpdate}
-                        />
-                      ))}
-                    </div>
-                  )}
+                  </div>
                 </div>
-              )}
+              </section>
             </>
           )}
         </div>

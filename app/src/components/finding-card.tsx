@@ -342,10 +342,10 @@ export function FindingCard({
   return (
     <div
       className={cn(
-        'bg-white p-4 sm:p-5 rounded-xl border shadow-sm',
+        'bg-white p-4 sm:p-5 rounded-xl border',
         muted
           ? 'border-gray-200 opacity-75'
-          : 'border-gray-200 hover:border-gray-300 hover:shadow-md transition-all duration-200',
+          : 'border-gray-200 hover:border-gray-300 transition-colors duration-200',
         className,
       )}
     >

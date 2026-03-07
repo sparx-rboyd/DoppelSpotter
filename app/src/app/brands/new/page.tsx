@@ -285,7 +285,7 @@ export default function NewBrandPage() {
                       }`}
                     >
                       <span
-                        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition ${
+                        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
                           allowAiDeepSearches ? 'left-[22px]' : 'left-0.5'
                         }`}
                       />
