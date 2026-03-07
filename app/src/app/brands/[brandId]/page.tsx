@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
-  ChevronDown, ChevronRight, Pencil, Trash2, X, EyeOff, Bookmark,
+  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark,
   Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -233,8 +233,6 @@ export default function BrandDetailPage() {
   const [findingsSearchLoading, setFindingsSearchLoading] = useState(false);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
-
-  const [expandedBrandSection, setExpandedBrandSection] = useState<'keywords' | 'officialDomains' | 'watchWords' | 'safeWords' | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -1367,8 +1365,8 @@ export default function BrandDetailPage() {
             {brand && (
               <Link href={`/brands/${brandId}/edit`}>
                 <Button variant="secondary" size="sm">
-                  <Pencil className="w-4 h-4" />
-                  Edit
+                  <Settings className="w-4 h-4" />
+                  Brand Settings
                 </Button>
               </Link>
             )}
@@ -1388,131 +1386,24 @@ export default function BrandDetailPage() {
 
           {brand && !loading && (
             <>
-              {/* Brand meta */}
-              {(() => {
-                const keywords = brand.keywords;
-                const domains = brand.officialDomains;
-                const watchWords = brand.watchWords ?? [];
-                const safeWords = brand.safeWords ?? [];
-                const scanSchedule = brand.scanSchedule;
-
-                type Section = 'keywords' | 'officialDomains' | 'watchWords' | 'safeWords';
-                function toggleSection(section: Section) {
-                  setExpandedBrandSection((prev) => (prev === section ? null : section));
-                }
-
-                const sections: {
-                  key: Section;
-                  label: string;
-                  count: number;
-                  tooltip: string;
-                  items: string[];
-                  badgeVariant: 'brand' | 'default' | 'warning';
-                  emptyLabel: string;
-                }[] = [
-                  {
-                    key: 'keywords',
-                    label: 'Keywords',
-                    count: keywords.length,
-                    tooltip: 'The words associated with your brand that you want to protect and monitor (e.g. your trademarks). Scans will search for these keywords.',
-                    items: keywords,
-                    badgeVariant: 'default',
-                    emptyLabel: 'No keywords set',
-                  },
-                  {
-                    key: 'officialDomains',
-                    label: 'Official Domains',
-                    count: domains.length,
-                    tooltip: 'Domains that you own, so that the AI analysis knows not to flag them.',
-                    items: domains,
-                    badgeVariant: 'default',
-                    emptyLabel: 'No official domains set',
-                  },
-                  {
-                    key: 'watchWords',
-                    label: 'Watch Words',
-                    count: watchWords.length,
-                    tooltip: "Words that you don't want to be associated with your brand. Scans won't search for these words, but if they appear in scan results the AI analysis will treat the results with more caution.",
-                    items: watchWords,
-                    badgeVariant: 'default',
-                    emptyLabel: 'No watch words set',
-                  },
-                  {
-                    key: 'safeWords',
-                    label: 'Safe Words',
-                    count: safeWords.length,
-                    tooltip: "Words that you're happy to be associated with your brand. If they appear in scan results the AI analysis will treat the results with less caution.",
-                    items: safeWords,
-                    badgeVariant: 'default',
-                    emptyLabel: 'No safe words set',
-                  },
-                ];
-
-                const activeSection = sections.find((s) => s.key === expandedBrandSection);
-
-                return (
-                  <div className="mb-4">
-                    <div className="flex items-center gap-1 flex-wrap">
-                      {sections.map((section, idx) => {
-                        const isOpen = expandedBrandSection === section.key;
-                        return (
-                          <div key={section.key} className="flex items-center gap-1">
-                            {idx > 0 && <span className="text-gray-300 text-xs select-none">·</span>}
-                            <button
-                              type="button"
-                              onClick={() => toggleSection(section.key)}
-                              className={cn(
-                                "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition",
-                                isOpen
-                                  ? "bg-brand-600 text-white"
-                                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
-                              )}
-                            >
-                              <span>{section.label}</span>
-                              <span className={cn(
-                                "inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-semibold",
-                                isOpen ? "bg-white text-gray-900" : "bg-gray-200 text-gray-600"
-                              )}>
-                                {section.count}
-                              </span>
-                              <InfoTooltip content={section.tooltip} iconClassName={isOpen ? 'text-white/70 hover:text-white' : 'text-gray-400 hover:text-gray-500'} />
-                            </button>
-                          </div>
-                        );
-                      })}
+              {brand.scanSchedule?.enabled && (
+                <div className="mb-4 rounded-lg bg-brand-100/70 px-3 py-2">
+                  <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium uppercase tracking-[0.08em] text-gray-500">Scheduled scans</span>
+                        <Badge variant="brand">{formatScanScheduleFrequency(brand.scanSchedule.frequency)}</Badge>
+                      </div>
                     </div>
-
-                    {activeSection && (
-                      <div className="mt-2 px-3 py-2.5 bg-white border border-gray-200 rounded-xl flex flex-wrap gap-2">
-                        {activeSection.items.length > 0
-                          ? activeSection.items.map((item) => (
-                              <Badge key={item} variant={activeSection.badgeVariant}>{item}</Badge>
-                            ))
-                          : <span className="text-sm text-gray-400">{activeSection.emptyLabel}</span>}
-                      </div>
-                    )}
-
-                    {scanSchedule?.enabled && (
-                      <div className="mt-4 rounded-xl border border-gray-200 bg-white px-4 py-2.5">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                          <div className="flex min-w-0 items-center gap-2.5">
-                            <div className="flex min-w-0 flex-wrap items-center gap-2">
-                              <span className="text-sm font-medium text-gray-700">Scheduled scans</span>
-                              <Badge variant="brand">{formatScanScheduleFrequency(scanSchedule.frequency)}</Badge>
-                            </div>
-                          </div>
-                          <div className="flex min-w-0 items-center gap-1.5 text-sm text-gray-500 sm:justify-end">
-                            <span className="min-w-0 truncate">
-                              {`Next due ${formatScheduledRunAt(scanSchedule.nextRunAt, scanSchedule.timeZone)}`}
-                            </span>
-                            <InfoTooltip content="Scheduled scans will run within 10 minutes of the scheduled start time." />
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    <div className="flex min-w-0 items-center gap-1.5 text-xs text-gray-400 sm:justify-end">
+                      <span className="min-w-0 truncate text-gray-400">
+                        {`Next due ${formatScheduledRunAt(brand.scanSchedule.nextRunAt, brand.scanSchedule.timeZone)}`}
+                      </span>
+                      <InfoTooltip content="Scheduled scans will run within 10 minutes of the scheduled start time." />
+                    </div>
                   </div>
-                );
-              })()}
+                </div>
+              )}
 
               {/* Scan progress banner */}
               {scanning && (
@@ -1560,11 +1451,11 @@ export default function BrandDetailPage() {
                 </div>
               )}
               <section className="mb-6">
-                <div className="rounded-t-2xl bg-brand-600 px-5 py-5 sm:px-6">
-                  <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                    <div className="min-w-0">
-                      <h2 className="text-base font-semibold text-white sm:text-lg">Findings</h2>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
+                <div className="rounded-t-2xl bg-brand-600 px-5 py-6 sm:px-6">
+                  <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 space-y-4">
+                      <h2 className="text-xl font-semibold text-white sm:text-2xl">Findings</h2>
+                      <div className="flex flex-wrap items-center gap-2.5">
                         <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
                           {scans.length === 0
                             ? 'No scans yet'
@@ -1582,7 +1473,7 @@ export default function BrandDetailPage() {
                         )}
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-3">
                       {showClearHistoryAction && (
                         clearHistoryDisabledReason ? (
                           <Tooltip content={clearHistoryDisabledReason} align="end">
@@ -1624,7 +1515,7 @@ export default function BrandDetailPage() {
                       </Button>
                     </div>
                   </div>
-                  <div className="mt-4 relative max-w-xl">
+                  <div className="mt-5 relative max-w-xl">
                     <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                     <Input
                       value={findingsSearchQuery}
@@ -1645,7 +1536,7 @@ export default function BrandDetailPage() {
                     )}
                   </div>
                   {isFindingsSearchActive && (
-                    <p className="mt-2 text-xs text-white/80">
+                    <p className="mt-3 text-xs text-white/80">
                       {findingsSearchLoading
                         ? 'Searching across hits, non-hits, ignored, and bookmarked findings...'
                         : 'Showing only findings that match this search.'}
@@ -1674,7 +1565,7 @@ export default function BrandDetailPage() {
 
                 <div className="overflow-hidden rounded-b-2xl border border-gray-200 border-t-0 bg-white">
                   <div className="border-b border-gray-200 px-4 sm:px-6">
-                    <div className="flex items-end gap-6 overflow-x-auto">
+                    <div className="flex items-end gap-7 overflow-x-auto">
                       <button
                         type="button"
                         onClick={() => switchFindingsTab('scans')}
@@ -1724,7 +1615,7 @@ export default function BrandDetailPage() {
                     </div>
                   </div>
 
-                  <div className="bg-gray-50 px-4 py-5 sm:px-6">
+                  <div className="bg-gray-50 px-4 py-6 sm:px-6">
                     {activeTab === 'bookmarks' && (
                       visibleBookmarkedCount === 0 ? (
                         <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">

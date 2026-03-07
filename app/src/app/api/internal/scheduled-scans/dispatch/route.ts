@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { OAuth2Client } from 'google-auth-library';
 import { db } from '@/lib/firestore';
 import { errorResponse } from '@/lib/api-utils';
-import { ScanStartError, startScanForBrand } from '@/lib/scan-runner';
+import { buildAppUrl, ScanStartError, startScanForBrand } from '@/lib/scan-runner';
 
 const MAX_DUE_BRANDS_PER_DISPATCH = 20;
 const GOOGLE_ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
@@ -35,12 +35,13 @@ export async function POST(request: NextRequest) {
   }
   const normalizedSchedulerServiceAccountEmail = schedulerServiceAccountEmail.trim().toLowerCase();
 
-  const dispatcherAudience = `${request.nextUrl.origin}${request.nextUrl.pathname}`;
+  const publicAppUrl = buildAppUrl(request.headers);
+  const dispatcherAudience = `${publicAppUrl}${request.nextUrl.pathname}`;
   const acceptableAudiences = new Set([
     dispatcherAudience,
     dispatcherAudience.replace(/\/$/, ''),
-    request.nextUrl.origin,
-    request.nextUrl.origin.replace(/\/$/, ''),
+    publicAppUrl,
+    publicAppUrl.replace(/\/$/, ''),
   ].map(normalizeAudience));
   const oidcToken = extractBearerToken(request);
   if (!oidcToken) {

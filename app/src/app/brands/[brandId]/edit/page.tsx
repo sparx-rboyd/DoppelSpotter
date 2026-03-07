@@ -196,7 +196,7 @@ export default function EditBrandPage() {
               <ArrowLeft className="w-5 h-5" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-gray-900">Edit Brand Profile</h1>
+              <h1 className="text-2xl font-bold text-gray-900">Brand Settings</h1>
               <p className="text-sm text-gray-500 mt-0.5">Update your brand monitoring settings</p>
             </div>
           </div>
