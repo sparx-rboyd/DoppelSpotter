@@ -472,12 +472,18 @@ export function FindingCard({
           )}
 
           {/* AI analysis box */}
-          <div className="bg-brand-50/50 rounded-lg p-3 text-xs sm:text-sm text-gray-700 border border-brand-100/50 border-l-2 border-l-brand-500 flex items-start gap-3 mb-3">
-            <Sparkles className="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0" />
-            <p className="leading-relaxed">
-              <strong className="text-brand-900 font-semibold">AI analysis:</strong>{' '}
-              {renderHighlightedText(finding.llmAnalysis, highlightQuery)}
-            </p>
+          <div className="mb-3 rounded-xl border border-brand-100 bg-brand-50/70 px-4 py-4 border-l-2 border-l-brand-500">
+            <div className="flex items-start gap-3">
+              <Sparkles className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-500" />
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-700/80">
+                  AI analysis
+                </p>
+                <p className="mt-1 text-sm leading-6 text-gray-700">
+                  {renderHighlightedText(finding.llmAnalysis, highlightQuery)}
+                </p>
+              </div>
+            </div>
           </div>
 
           {isBookmarked && (
