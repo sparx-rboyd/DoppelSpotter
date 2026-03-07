@@ -229,7 +229,7 @@ export default function BrandDetailPage() {
   const [showNonHitsByScanId, setShowNonHitsByScanId] = useState<Record<string, boolean>>({});
   const [showIgnoredByScanId, setShowIgnoredByScanId] = useState<Record<string, boolean>>({});
   const [allBookmarkedFindings, setAllBookmarkedFindings] = useState<FindingSummary[]>([]);
-  const [showAllBookmarked, setShowAllBookmarked] = useState(false);
+  const [activeTab, setActiveTab] = useState<'scans' | 'bookmarks' | 'ignored'>('scans');
   const [allIgnoredFindings, setAllIgnoredFindings] = useState<FindingSummary[]>([]);
   const [showAllIgnored, setShowAllIgnored] = useState(false);
   const [findingsSearchQuery, setFindingsSearchQuery] = useState('');
@@ -1564,140 +1564,168 @@ export default function BrandDetailPage() {
               )}
 
 
-              {/* Findings panel */}
-              <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-                {/* Panel header */}
-                <div className="px-6 py-5 border-b border-brand-700 flex items-center justify-between gap-4 bg-brand-600">
-                  <div className="flex items-center gap-3">
-                    <div>
-                      <h2 className="text-base font-semibold text-white">Findings</h2>
-                      <p className="text-xs font-medium text-white/85">
-                        {scans.length === 0
-                          ? 'No scans yet'
-                          : `${scans.length} scan${scans.length !== 1 ? 's' : ''} · ${totalFindings} finding${totalFindings !== 1 ? 's' : ''} detected`}
-                      </p>
+                <div className="bg-white rounded-2xl border border-gray-200 overflow-hidden mb-6">
+                  {/* Panel header */}
+                  <div className="px-6 py-5 border-b border-brand-700 flex items-center justify-between gap-4 bg-brand-600">
+                    <div className="flex items-center gap-3">
+                      <div>
+                        <h2 className="text-base font-semibold text-white">Findings</h2>
+                        <p className="text-xs font-medium text-white/85">
+                          {scans.length === 0
+                            ? 'No scans yet'
+                            : `${scans.length} scan${scans.length !== 1 ? 's' : ''} · ${totalFindings} finding${totalFindings !== 1 ? 's' : ''} detected`}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {(totalFindings > 0 || totalNonHits > 0) && !confirmClear && (
-                      clearHistoryDisabledReason ? (
-                        <Tooltip content={clearHistoryDisabledReason} align="end">
-                          <button
-                            type="button"
-                            aria-disabled="true"
-                            onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                            }}
-                            className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 px-3 py-1.5 text-xs font-medium bg-white/5 text-white/50 opacity-70 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                    <div className="flex items-center gap-2">
+                      {(totalFindings > 0 || totalNonHits > 0) && !confirmClear && (
+                        clearHistoryDisabledReason ? (
+                          <Tooltip content={clearHistoryDisabledReason} align="end">
+                            <button
+                              type="button"
+                              aria-disabled="true"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                              }}
+                              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 px-3 py-1.5 text-xs font-medium bg-white/5 text-white/50 opacity-70 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                              Clear history
+                            </button>
+                          </Tooltip>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setConfirmClear(true)}
+                            className="border border-white/15 text-white/90 hover:text-white hover:bg-white/10"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                             Clear history
-                          </button>
-                        </Tooltip>
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setConfirmClear(true)}
-                          className="border border-white/15 text-white/90 hover:text-white hover:bg-white/10"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Clear history
-                        </Button>
-                      )
-                    )}
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={triggerScan}
-                      loading={scanning}
-                      disabled={scanning || clearing || confirmClear}
-                      className="border-white/20 bg-white !text-brand-700 hover:bg-brand-50 hover:border-white/30 disabled:hover:bg-white"
-                    >
-                      <Play className="w-4 h-4" />
-                      Run scan
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Inline clear all confirmation */}
-                {confirmClear && (
-                  <div className="px-6 py-4 bg-red-50 border-b border-red-100 flex items-center justify-between gap-4">
-                    <p className="text-sm text-red-800">
-                      Permanently delete all {totalFindings + totalNonHits + totalIgnored + totalSkipped} result{(totalFindings + totalNonHits + totalIgnored + totalSkipped) !== 1 ? 's' : ''} and scan history? This cannot be undone.
-                    </p>
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <Button variant="secondary" size="sm" onClick={() => setConfirmClear(false)} disabled={clearing}>
-                        Cancel
-                      </Button>
-                      <Button variant="danger" size="sm" onClick={clearHistory} loading={clearing} disabled={clearing}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                        Clear all
+                          </Button>
+                        )
+                      )}
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={triggerScan}
+                        loading={scanning}
+                        disabled={scanning || clearing || confirmClear}
+                        className="border-white/20 bg-white !text-brand-700 hover:bg-brand-50 hover:border-white/30 disabled:hover:bg-white"
+                      >
+                        <Play className="w-4 h-4" />
+                        Run scan
                       </Button>
                     </div>
                   </div>
-                )}
 
-                <div className="px-6 py-4 border-b border-gray-100 bg-white">
-                  <div className="relative max-w-xl">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <Input
-                      value={findingsSearchQuery}
-                      onChange={(e) => setFindingsSearchQuery(e.target.value)}
-                      placeholder="Search finding titles, URLs, and analyses"
-                      aria-label="Search findings"
-                      className="pl-9 pr-10"
-                    />
+                  {/* Inline clear all confirmation */}
+                  {confirmClear && (
+                    <div className="px-6 py-4 bg-red-50 border-b border-red-100 flex items-center justify-between gap-4">
+                      <p className="text-sm text-red-800">
+                        Permanently delete all {totalFindings + totalNonHits + totalIgnored + totalSkipped} result{(totalFindings + totalNonHits + totalIgnored + totalSkipped) !== 1 ? 's' : ''} and scan history? This cannot be undone.
+                      </p>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Button variant="secondary" size="sm" onClick={() => setConfirmClear(false)} disabled={clearing}>
+                          Cancel
+                        </Button>
+                        <Button variant="danger" size="sm" onClick={clearHistory} loading={clearing} disabled={clearing}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          Clear all
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="px-6 py-4 border-b border-gray-100 bg-white">
+                    <div className="relative max-w-xl">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <Input
+                        value={findingsSearchQuery}
+                        onChange={(e) => setFindingsSearchQuery(e.target.value)}
+                        placeholder="Search finding titles, URLs, and analyses"
+                        aria-label="Search findings"
+                        className="pl-9 pr-10"
+                      />
+                      {isFindingsSearchActive && (
+                        <button
+                          type="button"
+                          onClick={() => setFindingsSearchQuery('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition"
+                          aria-label="Clear findings search"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                     {isFindingsSearchActive && (
-                      <button
-                        type="button"
-                        onClick={() => setFindingsSearchQuery('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition"
-                        aria-label="Clear findings search"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+                      <p className="mt-2 text-xs text-gray-500">
+                        {findingsSearchLoading
+                          ? 'Searching across hits, non-hits, ignored, and bookmarked findings...'
+                          : 'Showing only findings that match this search.'}
+                      </p>
                     )}
                   </div>
-                  {isFindingsSearchActive && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      {findingsSearchLoading
-                        ? 'Searching across hits, non-hits, ignored, and bookmarked findings...'
-                        : 'Showing only findings that match this search.'}
-                    </p>
-                  )}
-                </div>
 
-                {(isFindingsSearchActive ? visibleBookmarkedFindings.length > 0 : allBookmarkedFindings.length > 0) && (
-                  <div className="border-b border-gray-100">
+                  {/* Tabs */}
+                  <div className="px-6 flex items-center gap-6 bg-white border-b border-gray-100">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (isFindingsSearchActive) return;
-                        setShowAllBookmarked((v) => !v);
-                      }}
+                      onClick={() => setActiveTab('scans')}
                       className={cn(
-                        "w-full px-6 py-5 flex items-center gap-3 transition text-left bg-amber-50",
-                        (isFindingsSearchActive || showAllBookmarked) ? "border-b border-amber-100" : "hover:bg-amber-100/70",
+                        "py-3 text-sm font-medium border-b-2 transition-colors",
+                        activeTab === 'scans' ? "border-brand-600 text-brand-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                       )}
-                      aria-expanded={isFindingsSearchActive || showAllBookmarked}
                     >
-                      {(isFindingsSearchActive || showAllBookmarked)
-                        ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                        : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-                      <Bookmark className="w-4 h-4 text-amber-600 flex-shrink-0" />
-                      <div>
-                        <h2 className="text-base font-semibold text-gray-900">Bookmarked findings</h2>
-                        <p className="text-xs text-gray-500">
-                          {(isFindingsSearchActive ? visibleBookmarkedFindings.length : allBookmarkedFindings.length)} bookmarked finding{(isFindingsSearchActive ? visibleBookmarkedFindings.length : allBookmarkedFindings.length) !== 1 ? 's' : ''} saved for follow-up
-                        </p>
-                      </div>
+                      Scans
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('bookmarks')}
+                      className={cn(
+                        "py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2",
+                        activeTab === 'bookmarks' ? "border-brand-600 text-brand-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                      )}
+                    >
+                      Bookmarks
+                      {(isFindingsSearchActive ? visibleBookmarkedFindings.length : allBookmarkedFindings.length) > 0 && (
+                        <Badge variant="default" className="px-1.5 py-0.5 text-[10px] leading-none bg-gray-100 text-gray-600 font-semibold rounded-full border-none">
+                          {isFindingsSearchActive ? visibleBookmarkedFindings.length : allBookmarkedFindings.length}
+                        </Badge>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('ignored')}
+                      className={cn(
+                        "py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2",
+                        activeTab === 'ignored' ? "border-brand-600 text-brand-700" : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+                      )}
+                    >
+                      Ignored URLs
+                      {(isFindingsSearchActive ? visibleIgnoredFindings.length : allIgnoredFindings.length) > 0 && (
+                        <Badge variant="default" className="px-1.5 py-0.5 text-[10px] leading-none bg-gray-100 text-gray-600 font-semibold rounded-full border-none">
+                          {isFindingsSearchActive ? visibleIgnoredFindings.length : allIgnoredFindings.length}
+                        </Badge>
+                      )}
+                    </button>
+                  </div>
+                </div>
 
-                    {(isFindingsSearchActive || showAllBookmarked) && (
-                      <div className="bg-gray-50 px-4 sm:px-6 py-5">
-                        <div className="space-y-3">
+                {/* Tab content */}
+                <div>
+                  {activeTab === 'bookmarks' && (
+                    <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                      {(isFindingsSearchActive ? visibleBookmarkedFindings.length : allBookmarkedFindings.length) === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-3">
+                          <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
+                            <Bookmark className="w-5 h-5 text-brand-600" />
+                          </div>
+                          <p className="text-sm text-gray-500">No bookmarked findings.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
                           {(['high', 'medium', 'low'] as const)
                             .filter((sev) => bookmarkedHits.some((finding) => finding.severity === sev))
                             .map((sev) => (
@@ -1706,7 +1734,7 @@ export default function BrandDetailPage() {
                                 severity={sev}
                                 findings={bookmarkedHits.filter((finding) => finding.severity === sev)}
                                 onBookmarkUpdate={handleBookmarkUpdate}
-                                forceExpanded={isFindingsSearchActive}
+                                forceExpanded={true}
                                 highlightQuery={activeHighlightQuery}
                               />
                             ))}
@@ -1736,14 +1764,38 @@ export default function BrandDetailPage() {
                             </div>
                           )}
                         </div>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      )}
+                    </div>
+                  )}
 
-                {/* Scan result sets */}
-                <div className="divide-y divide-gray-100">
-                  {/* Live findings — shown while a scan is in progress */}
+                  {activeTab === 'ignored' && (
+                    <div className="bg-white rounded-2xl border border-gray-200 p-6">
+                      {(isFindingsSearchActive ? visibleIgnoredFindings.length : allIgnoredFindings.length) === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-12 gap-3">
+                          <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
+                            <EyeOff className="w-5 h-5 text-brand-600" />
+                          </div>
+                          <p className="text-sm text-gray-500">No ignored URLs.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {visibleIgnoredFindings.map((finding) => (
+                            <FindingCard
+                              key={finding.id}
+                              finding={finding}
+                              highlightQuery={activeHighlightQuery}
+                              onIgnoreToggle={handleIgnoreToggle}
+                              onBookmarkUpdate={handleBookmarkUpdate}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {activeTab === 'scans' && (
+                    <div className="space-y-4">
+                      {/* Live findings — shown while a scan is in progress */}
                   {scanning && (!isFindingsSearchActive || visibleLiveScanFindings.length > 0) && (
                     <div className="bg-brand-50/40">
                       {/* Live row header */}
@@ -1797,14 +1849,14 @@ export default function BrandDetailPage() {
                       <span className="text-sm">Searching across all findings…</span>
                     </div>
                   ) : isFindingsSearchActive && !hasAnyVisibleSearchMatches ? (
-                    <div className="flex flex-col items-center justify-center py-12 gap-3">
+                    <div className="flex flex-col items-center justify-center py-12 gap-3 bg-white rounded-xl border border-gray-200 shadow-sm">
                       <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
                         <Search className="w-5 h-5 text-brand-600" />
                       </div>
                       <p className="text-sm text-gray-500">No findings match this search.</p>
                     </div>
                   ) : !isFindingsSearchActive && scansToRender.length === 0 && !scanning ? (
-                    <div className="flex flex-col items-center justify-center py-12 gap-3">
+                    <div className="flex flex-col items-center justify-center py-12 gap-3 bg-white rounded-xl border border-gray-200 shadow-sm">
                       <div className="w-10 h-10 bg-brand-50 rounded-xl flex items-center justify-center">
                         <Shield className="w-5 h-5 text-brand-600" />
                       </div>
@@ -1855,7 +1907,7 @@ export default function BrandDetailPage() {
                           : null;
 
                       return (
-                        <div key={scan.id}>
+                        <div key={scan.id} className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
                           {/* Scan row header */}
                           {isConfirmingDelete ? (
                             <div className="px-6 py-4 bg-red-50 flex items-center justify-between gap-4">
@@ -2125,6 +2177,7 @@ export default function BrandDetailPage() {
                     })
                   )}
                 </div>
+                )}
               </div>
               {/* Brand-level ignored URLs panel */}
               {(isFindingsSearchActive ? visibleIgnoredFindings.length > 0 : allIgnoredFindings.length > 0) && (

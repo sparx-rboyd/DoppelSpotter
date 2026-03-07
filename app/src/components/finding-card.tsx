@@ -342,10 +342,10 @@ export function FindingCard({
   return (
     <div
       className={cn(
-        'bg-white p-4 sm:p-5 rounded-xl border',
+        'bg-white p-4 sm:p-5 rounded-xl border shadow-sm',
         muted
           ? 'border-gray-200 opacity-75'
-          : 'border-gray-200 hover:border-gray-300 transition',
+          : 'border-gray-200 hover:border-gray-300 hover:shadow-md transition-all duration-200',
         className,
       )}
     >
@@ -366,7 +366,7 @@ export function FindingCard({
           <div className="flex flex-wrap items-center gap-2.5 mb-2.5">
             <h4
               className={cn(
-                'font-semibold text-sm',
+                'font-semibold text-base',
                 muted ? 'text-gray-500' : 'text-gray-900',
               )}
             >
@@ -450,13 +450,13 @@ export function FindingCard({
           </div>
 
           {finding.url && shouldShowMatchedUrl && (
-            <div className="mb-3 text-xs text-gray-500 break-all">
-              <span className="font-medium text-gray-600">URL:</span>{' '}
+            <div className="mb-4 flex items-start gap-2 text-xs text-gray-500 break-all bg-gray-50 p-2.5 rounded-lg border border-gray-100">
+              <span className="font-semibold text-gray-700 select-none uppercase tracking-wider text-[10px] mt-0.5">URL</span>
               <a
                 href={finding.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="underline decoration-gray-300 underline-offset-2 hover:decoration-gray-500 transition"
+                className="text-brand-600 hover:text-brand-700 hover:underline underline-offset-2 transition"
                 onClick={(e) => e.stopPropagation()}
               >
                 {renderHighlightedText(finding.url, highlightQuery)}
@@ -465,10 +465,10 @@ export function FindingCard({
           )}
 
           {/* AI analysis box */}
-          <div className="bg-gray-50 rounded-lg p-2 sm:p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2 mb-3">
+          <div className="bg-brand-50/50 rounded-lg p-3 text-xs sm:text-sm text-gray-700 border border-brand-100/50 border-l-2 border-l-brand-500 flex items-start gap-3 mb-3">
             <Sparkles className="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0" />
-            <p>
-              <strong>AI analysis:</strong>{' '}
+            <p className="leading-relaxed">
+              <strong className="text-brand-900 font-semibold">AI analysis:</strong>{' '}
               {renderHighlightedText(finding.llmAnalysis, highlightQuery)}
             </p>
           </div>

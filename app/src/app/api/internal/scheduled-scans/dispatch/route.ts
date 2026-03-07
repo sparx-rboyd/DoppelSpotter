@@ -8,6 +8,21 @@ const MAX_DUE_BRANDS_PER_DISPATCH = 20;
 const GOOGLE_ISSUERS = new Set(['accounts.google.com', 'https://accounts.google.com']);
 const oidcClient = new OAuth2Client();
 
+function extractBearerToken(request: NextRequest): string | null {
+  const candidateHeaders = [
+    request.headers.get('authorization'),
+    request.headers.get('x-serverless-authorization'),
+  ];
+
+  for (const headerValue of candidateHeaders) {
+    if (!headerValue?.startsWith('Bearer ')) continue;
+    const token = headerValue.slice('Bearer '.length).trim();
+    if (token) return token;
+  }
+
+  return null;
+}
+
 export async function POST(request: NextRequest) {
   const schedulerServiceAccountEmail = process.env.SCHEDULE_DISPATCH_SERVICE_ACCOUNT_EMAIL;
   if (!schedulerServiceAccountEmail) {
@@ -16,18 +31,28 @@ export async function POST(request: NextRequest) {
   }
   const normalizedSchedulerServiceAccountEmail = schedulerServiceAccountEmail.trim().toLowerCase();
 
-  const authorizationHeader = request.headers.get('authorization');
-  if (!authorizationHeader?.startsWith('Bearer ')) {
+  const dispatcherAudience = `${request.nextUrl.origin}${request.nextUrl.pathname}`;
+  const acceptableAudiences = [
+    dispatcherAudience,
+    dispatcherAudience.replace(/\/$/, ''),
+    request.nextUrl.origin,
+    request.nextUrl.origin.replace(/\/$/, ''),
+  ];
+  const oidcToken = extractBearerToken(request);
+  if (!oidcToken) {
+    console.error('[scheduled-scans] Missing bearer token on scheduler request', {
+      hasAuthorizationHeader: request.headers.has('authorization'),
+      hasServerlessAuthorizationHeader: request.headers.has('x-serverless-authorization'),
+      expectedEmail: schedulerServiceAccountEmail,
+      expectedAudience: dispatcherAudience,
+    });
     return errorResponse('Unauthorized', 401);
   }
-
-  const dispatcherAudience = `${request.nextUrl.origin}${request.nextUrl.pathname}`;
-  const oidcToken = authorizationHeader.slice('Bearer '.length).trim();
 
   try {
     const ticket = await oidcClient.verifyIdToken({
       idToken: oidcToken,
-      audience: dispatcherAudience,
+      audience: acceptableAudiences,
     });
     const payload = ticket.getPayload();
     const tokenEmail = payload?.email?.trim().toLowerCase();
