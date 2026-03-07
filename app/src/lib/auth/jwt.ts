@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { PASSWORD_RESET_TOKEN_MAX_AGE_SECONDS } from '@/lib/password-reset';
 
 export const AUTH_COOKIE_NAME = 'auth-token';
 
@@ -10,17 +11,54 @@ export interface AuthTokenPayload {
   exp?: number;
 }
 
-export function signToken(userId: string, email: string, sessionVersion = 0): string {
+export interface PasswordResetTokenPayload {
+  userId: string;
+  email: string;
+  sessionVersion?: number;
+  purpose: 'password-reset';
+  iat?: number;
+  exp?: number;
+}
+
+function getAuthJwtSecret(): string {
   const secret = process.env.AUTH_JWT_SECRET;
   if (!secret) throw new Error('AUTH_JWT_SECRET is not set');
-  return jwt.sign({ userId, email, sessionVersion }, secret, { expiresIn: '7d' });
+  return secret;
+}
+
+function getPasswordResetJwtSecret(): string {
+  return `${getAuthJwtSecret()}:password-reset`;
+}
+
+export function signToken(userId: string, email: string, sessionVersion = 0): string {
+  return jwt.sign({ userId, email, sessionVersion }, getAuthJwtSecret(), { expiresIn: '7d' });
 }
 
 export function verifyToken(token: string): AuthTokenPayload | null {
-  const secret = process.env.AUTH_JWT_SECRET;
-  if (!secret) throw new Error('AUTH_JWT_SECRET is not set');
   try {
-    return jwt.verify(token, secret) as AuthTokenPayload;
+    return jwt.verify(token, getAuthJwtSecret()) as AuthTokenPayload;
+  } catch {
+    return null;
+  }
+}
+
+export function signPasswordResetToken(userId: string, email: string, sessionVersion = 0): string {
+  return jwt.sign(
+    {
+      userId,
+      email,
+      sessionVersion,
+      purpose: 'password-reset',
+    },
+    getPasswordResetJwtSecret(),
+    { expiresIn: PASSWORD_RESET_TOKEN_MAX_AGE_SECONDS },
+  );
+}
+
+export function verifyPasswordResetToken(token: string): PasswordResetTokenPayload | null {
+  try {
+    const payload = jwt.verify(token, getPasswordResetJwtSecret()) as PasswordResetTokenPayload;
+    return payload.purpose === 'password-reset' ? payload : null;
   } catch {
     return null;
   }

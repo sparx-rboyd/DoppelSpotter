@@ -1,38 +1,35 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState, type FormEvent } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
-import { ScanEye } from 'lucide-react';
-import { useAuth } from '@/lib/auth/auth-context';
-import { resolveSafeReturnTo } from '@/lib/auth/redirects';
+import { useState, type FormEvent } from 'react';
+import { Mail, ScanEye } from 'lucide-react';
+import { PASSWORD_RESET_REQUEST_SUCCESS_MESSAGE, PASSWORD_RESET_TOKEN_MAX_AGE_LABEL } from '@/lib/password-reset';
 
-export default function LoginClient() {
-  const { user, loading: authLoading, signIn } = useAuth();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-
+export default function ForgotPasswordClient() {
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
-  const returnTo = resolveSafeReturnTo(searchParams.get('returnTo'));
 
-  useEffect(() => {
-    if (authLoading || !user) return;
-    router.replace(returnTo);
-  }, [authLoading, returnTo, router, user]);
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setError('');
+    setSuccess('');
+
     setLoading(true);
 
     try {
-      await signIn(email, password);
-      router.replace(returnTo);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'An error occurred.');
+      const response = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      setSuccess(data.message ?? PASSWORD_RESET_REQUEST_SUCCESS_MESSAGE);
+    } catch {
+      setError('Unable to request a password reset right now. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -47,7 +44,18 @@ export default function LoginClient() {
         </div>
 
         <div className="bg-white rounded-2xl border border-gray-200 p-8">
-          <h1 className="text-xl font-bold text-gray-900 mb-1">Sign in to your account</h1>
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-brand-50">
+              <Mail className="h-5 w-5 text-brand-600" />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-gray-900">Forgotten your password?</h1>
+              <p className="mt-1 text-sm leading-6 text-gray-600">
+                Enter your account email address and, if it matches an account, we&apos;ll send a reset
+                link.
+              </p>
+            </div>
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 mt-6">
             <div>
@@ -60,35 +68,20 @@ export default function LoginClient() {
                 autoComplete="email"
                 required
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(event) => setEmail(event.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
               />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                Password
-              </label>
-              <input
-                id="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                minLength={8}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
-              />
-              <div className="mt-2 flex justify-end">
-                <Link href="/forgot-password" className="text-sm font-medium text-brand-700 hover:text-brand-800">
-                  Forgotten your password?
-                </Link>
-              </div>
             </div>
 
             {error && (
               <p className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
                 {error}
+              </p>
+            )}
+
+            {success && (
+              <p className="text-sm text-green-700 bg-green-50 border border-green-100 rounded-lg px-3 py-2">
+                {success}.
               </p>
             )}
 
@@ -100,9 +93,16 @@ export default function LoginClient() {
               {loading ? (
                 <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
               ) : null}
-              Sign in
+              Send reset email
             </button>
           </form>
+
+          <p className="mt-5 text-sm text-gray-600">
+            Remembered it?{' '}
+            <Link href="/login" className="font-medium text-brand-700 hover:text-brand-800">
+              Back to sign in
+            </Link>
+          </p>
         </div>
       </div>
     </div>

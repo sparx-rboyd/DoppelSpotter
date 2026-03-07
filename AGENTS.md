@@ -37,7 +37,7 @@ using Apify actors for scraping and AI analysis for classification.
 │   └── src/
 │       ├── app/                  # Pages + API routes (App Router)
 │       │   └── api/
-│       │       ├── auth/         # login, logout, me, change-password (signup disabled — use add-user CLI)
+│       │       ├── auth/         # login, logout, me, forgot/reset password, change-password (signup disabled — use add-user CLI)
 │       │       ├── brands/       # CRUD + findings + scans per brand
 │       │       ├── findings/     # Cross-brand findings query
 │       │       ├── internal/     # Internal service-to-service routes (scheduled scan dispatch)
@@ -47,7 +47,7 @@ using Apify actors for scraping and AI analysis for classification.
 │           ├── apify/
 │           │   ├── actors.ts     # ACTOR_REGISTRY — all actor definitions + enable/disable
 │           │   └── client.ts     # Apify client: startActorRun, buildActorInput, fetchDatasetItems
-│           ├── mailersend.ts     # MailerSend email client for transactional scan-summary emails
+│           ├── mailersend.ts     # MailerSend email client for transactional emails
 │           ├── scan-runner.ts    # Shared manual + scheduled scan reservation and actor startup
 │           ├── scan-summary-emails.ts # Branded scan-summary email composition + idempotent delivery
 │           ├── scan-schedules.ts # Schedule validation, timezone-aware recurrence, next-run helpers
@@ -343,8 +343,8 @@ Users can add notes to any finding, regardless of whether it is bookmarked, igno
 | `WHOISXML_API_KEY` | WhoisXML Brand Alert API key (custom actor) |
 | `OPENROUTER_API_KEY` | OpenRouter API key |
 | `OPENROUTER_MODEL` | AI analysis model override (default: `anthropic/claude-3.5-haiku`) |
-| `MAILERSEND_API_TOKEN` | MailerSend API token used to send branded scan-summary emails |
-| `AUTH_JWT_SECRET` | JWT signing secret (7-day tokens) |
+| `MAILERSEND_API_TOKEN` | MailerSend API token used to send branded transactional emails |
+| `AUTH_JWT_SECRET` | JWT signing secret used for 7-day auth cookies and 1-hour password-reset links |
 | `SCHEDULE_DISPATCH_SERVICE_ACCOUNT_EMAIL` | Email of the dedicated Cloud Scheduler service account allowed to call the internal scheduled-scan dispatch route |
 | `GCP_PROJECT_ID` | Google Cloud project ID |
 | `FIRESTORE_DATABASE_ID` | Firestore DB (default: `(default)`) |
@@ -383,6 +383,18 @@ Authenticated users can open the top-right user menu to change their password. T
 - increments `users.sessionVersion`, stamps `users.passwordChangedAt`, and reissues the current browser's JWT
 - causes older cookies with a stale `sessionVersion` to be rejected by both `requireAuth()`-protected API routes and `GET /api/auth/me`
 - broadcasts an auth-sync event across tabs so other open tabs refresh their session state promptly after sign-in, sign-out, or password changes
+
+Unauthenticated users can also reset a forgotten password. The reset flow:
+
+- starts from the `Forgotten your password?` link on the login screen
+- uses `POST /api/auth/forgot-password` to accept an email address and always return a generic success message to avoid account enumeration
+- if a matching account exists, sends a MailerSend password-reset email with the same branded shell used by the scan-summary email
+- includes a JWT-based reset link to `GET /reset-password?token=...`
+- signs reset tokens with a password-reset-specific secret derived from `AUTH_JWT_SECRET`, so they cannot be reused as auth cookies
+- expires each reset token after 1 hour
+- posts the new password to `POST /api/auth/reset-password`
+- verifies the token signature, expiry, account email, and `users.sessionVersion` before changing the password
+- increments `users.sessionVersion` and stamps `users.passwordChangedAt`, invalidating older sessions after a successful reset
 
 To backfill denormalized severity counts onto existing scan documents (needed after adding the count fields for the first time, or to recompute from findings after manual data changes):
 

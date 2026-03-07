@@ -301,15 +301,6 @@ const styles = StyleSheet.create({
     fontSize: 9,
     lineHeight: 1.35,
   },
-  footer: {
-    bottom: 14,
-    color: BRAND.gray500,
-    fontSize: 7.5,
-    left: 22,
-    position: 'absolute',
-    right: 22,
-    textAlign: 'right',
-  },
 });
 
 async function getLogoDataUri(): Promise<string | null> {
@@ -515,12 +506,6 @@ function ScanExportPdfDocument({
             emptyMessage: 'No addressed low-severity findings were present in this scan.',
           })}
         </View>
-
-        <Text
-          fixed
-          style={styles.footer}
-          render={({ pageNumber, totalPages }) => `DoppelSpotter report - Page ${pageNumber} of ${totalPages}`}
-        />
       </Page>
     </Document>
   );
