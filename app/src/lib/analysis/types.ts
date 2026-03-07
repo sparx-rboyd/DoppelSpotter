@@ -82,6 +82,13 @@ export interface GoogleSuggestionOutput {
 }
 
 /**
+ * The structured JSON output expected from the final per-scan summary pass.
+ */
+export interface ScanSummaryOutput {
+  summary: string;
+}
+
+/**
  * Compact stored debug payload for Google findings.
  */
 export interface GoogleStoredFindingRawData extends Record<string, unknown> {
@@ -208,6 +215,25 @@ export function parseGoogleSuggestionOutput(raw: string, maxSuggestedSearches = 
 
     return {
       suggestedSearches: normalizeSuggestedSearches(parsed.suggestedSearches, maxSuggestedSearches),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse and validate the raw JSON string returned by the scan-summary pass.
+ */
+export function parseScanSummaryOutput(raw: string): ScanSummaryOutput | null {
+  try {
+    const stripped = stripJsonFences(raw);
+    const parsed = JSON.parse(stripped);
+    if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) {
+      return null;
+    }
+
+    return {
+      summary: parsed.summary.trim(),
     };
   } catch {
     return null;

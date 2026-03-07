@@ -1,22 +1,25 @@
 import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
-import { FieldValue, type QueryDocumentSnapshot } from '@google-cloud/firestore';
+import { FieldValue, type DocumentReference, type QueryDocumentSnapshot } from '@google-cloud/firestore';
 import { fetchDatasetItems, startDeepSearchRun } from '@/lib/apify/client';
 import { getActorConfig } from '@/lib/apify/actors';
 import { chatCompletion } from '@/lib/analysis/openrouter';
 import {
   SYSTEM_PROMPT,
   GOOGLE_CLASSIFICATION_SYSTEM_PROMPT,
+  SCAN_SUMMARY_SYSTEM_PROMPT,
   buildAnalysisPrompt,
   buildGoogleFinalSelectionSystemPrompt,
   buildGoogleFinalSelectionPrompt,
   buildGoogleChunkAnalysisPrompt,
+  buildScanSummaryPrompt,
 } from '@/lib/analysis/prompts';
 import {
   parseAnalysisOutput,
   parseGoogleChunkAnalysisOutput,
   parseGoogleSuggestionOutput,
+  parseScanSummaryOutput,
   type GoogleChunkAnalysisItem,
   type GoogleRunContext,
   type GoogleSearchCandidate,
@@ -25,7 +28,7 @@ import {
 } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo } from '@/lib/types';
 import { normalizeAllowAiDeepSearches, normalizeMaxAiDeepSearches } from '@/lib/brands';
-import { clearBrandActiveScanIfMatches } from '@/lib/scans';
+import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
 
 /** Maximum items to analyse per actor run — caps AI analysis cost and latency */
 const MAX_ITEMS_PER_RUN = 50;
@@ -650,6 +653,12 @@ type ScanFindingTotals = {
 
 type MarkActorRunCompleteOptions = {
   reconcilePersistedCounts?: boolean;
+};
+
+type ScanSummaryFindingInput = Pick<Finding, 'severity' | 'title' | 'llmAnalysis' | 'source' | 'url'>;
+
+type MarkActorRunCompleteResult = {
+  needsSummary: boolean;
 };
 
 function normalizeGoogleSerpRun({
@@ -1383,6 +1392,178 @@ function getSkippedDuplicateCount(actorRuns?: Record<string, ActorRunInfo>): num
   return Object.values(actorRuns).reduce((sum, run) => sum + (run.skippedDuplicateCount ?? 0), 0);
 }
 
+function formatScanSeverityBreakdown(counts: { high: number; medium: number; low: number }): string {
+  const parts: string[] = [];
+  if (counts.high > 0) parts.push(`${counts.high} high`);
+  if (counts.medium > 0) parts.push(`${counts.medium} medium`);
+  if (counts.low > 0) parts.push(`${counts.low} low`);
+
+  if (parts.length === 0) return 'no actionable findings';
+  if (parts.length === 1) return parts[0];
+  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
+  return `${parts[0]}, ${parts[1]} and ${parts[2]}`;
+}
+
+function buildFallbackScanAiSummary(findings: ScanSummaryFindingInput[]): string {
+  const counts = findings.reduce(
+    (acc, finding) => {
+      if (finding.severity === 'high') acc.high++;
+      else if (finding.severity === 'medium') acc.medium++;
+      else acc.low++;
+      return acc;
+    },
+    { high: 0, medium: 0, low: 0 },
+  );
+
+  const total = findings.length;
+  const sentences = [
+    `This scan surfaced ${total} actionable finding${total === 1 ? '' : 's'}: ${formatScanSeverityBreakdown(counts)}.`,
+  ];
+
+  if (counts.high > 0) {
+    sentences.push('The highest-risk items suggest potentially damaging brand misuse and should be prioritised for review.');
+  } else if (counts.medium > 0) {
+    sentences.push('The main concerns are suspicious associations that warrant manual review even though the evidence is less definitive.');
+  } else {
+    sentences.push('The findings appear lower-risk overall, but they still indicate ongoing third-party use of the brand that is worth monitoring.');
+  }
+
+  if (counts.high + counts.medium >= 2) {
+    sentences.push('The pattern does not appear isolated, which may point to broader or repeated misuse themes rather than a single one-off mention.');
+  }
+
+  return sentences.join(' ');
+}
+
+function truncateSummaryInput(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function sortFindingsForSummary(findings: ScanSummaryFindingInput[]): ScanSummaryFindingInput[] {
+  const rank = { high: 0, medium: 1, low: 2 } as const;
+  return [...findings].sort((left, right) => {
+    const severityDiff = rank[left.severity] - rank[right.severity];
+    if (severityDiff !== 0) return severityDiff;
+    return left.title.localeCompare(right.title);
+  });
+}
+
+async function buildScanAiSummary(scan: Scan): Promise<string> {
+  const findingsSnap = await db
+    .collection('findings')
+    .where('scanId', '==', scan.id)
+    .where('brandId', '==', scan.brandId)
+    .where('userId', '==', scan.userId)
+    .select('severity', 'title', 'llmAnalysis', 'source', 'url', 'isFalsePositive')
+    .get();
+
+  const findings = sortFindingsForSummary(
+    findingsSnap.docs
+      .map((doc) => doc.data() as ScanSummaryFindingInput & { isFalsePositive?: boolean })
+      .filter((finding) => finding.isFalsePositive !== true)
+      .map((finding) => ({
+        severity: finding.severity,
+        title: finding.title,
+        llmAnalysis: finding.llmAnalysis,
+        source: finding.source,
+        url: finding.url,
+      })),
+  );
+
+  if (findings.length === 0) {
+    return buildCountOnlyScanAiSummary(scan);
+  }
+
+  const brandDoc = await db.collection('brands').doc(scan.brandId).get();
+  const brandName = brandDoc.exists ? (brandDoc.data() as BrandProfile).name : 'Unknown brand';
+  const counts = findings.reduce(
+    (acc, finding) => {
+      if (finding.severity === 'high') acc.high++;
+      else if (finding.severity === 'medium') acc.medium++;
+      else acc.low++;
+      return acc;
+    },
+    { high: 0, medium: 0, low: 0 },
+  );
+
+  const prompt = buildScanSummaryPrompt({
+    brandName,
+    counts,
+    findings: findings.map((finding) => ({
+      severity: finding.severity,
+      source: finding.source,
+      title: truncateSummaryInput(finding.title, 120),
+      llmAnalysis: truncateSummaryInput(finding.llmAnalysis, 320),
+      ...(finding.url ? { url: truncateSummaryInput(finding.url, 200) } : {}),
+    })),
+  });
+
+  try {
+    const raw = await chatCompletion([
+      { role: 'system', content: SCAN_SUMMARY_SYSTEM_PROMPT },
+      { role: 'user', content: prompt },
+    ]);
+
+    const parsed = parseScanSummaryOutput(raw);
+    if (!parsed) {
+      throw new Error(`Failed to parse scan summary output: ${raw.slice(0, 200)}`);
+    }
+
+    return parsed.summary;
+  } catch (err) {
+    console.error(`[webhook] Scan summary generation failed for scan ${scan.id}:`, err);
+    return buildFallbackScanAiSummary(findings);
+  }
+}
+
+async function finalizeScanWithSummary(scanRef: DocumentReference, summary: string) {
+  await db.runTransaction(async (tx) => {
+    const freshSnap = await tx.get(scanRef);
+    if (!freshSnap.exists) return;
+
+    const fresh = scanFromSnapshot(freshSnap);
+    if (fresh.status === 'cancelled' || fresh.status === 'completed' || fresh.status === 'failed') {
+      return;
+    }
+    if (fresh.status !== 'summarising') {
+      return;
+    }
+
+    const brandRef = db.collection('brands').doc(fresh.brandId);
+    const brandSnap = await tx.get(brandRef);
+    const brand = brandSnap.exists ? (brandSnap.data() as BrandProfile) : undefined;
+
+    tx.update(scanRef, {
+      status: 'completed',
+      aiSummary: summary,
+      completedAt: FieldValue.serverTimestamp(),
+      summaryStartedAt: FieldValue.delete(),
+      ...(fresh.errorMessage ? { errorMessage: FieldValue.delete() } : {}),
+    });
+
+    await clearBrandActiveScanIfMatches(brandRef, fresh.id, tx, brand);
+  });
+}
+
+async function generateAndPersistScanSummary(scanRef: DocumentReference) {
+  const freshSnap = await scanRef.get();
+  if (!freshSnap.exists) return;
+
+  const fresh = scanFromSnapshot(freshSnap);
+  if (fresh.status !== 'summarising') return;
+
+  let summary: string;
+  try {
+    summary = await buildScanAiSummary(fresh);
+  } catch (err) {
+    console.error(`[webhook] Unexpected scan summary build error for scan ${fresh.id}:`, err);
+    summary = buildCountOnlyScanAiSummary(fresh);
+  }
+
+  await finalizeScanWithSummary(scanRef, summary);
+}
+
 function normalizeSuggestedSearchKey(query: string): string {
   return query.trim().replace(/\s+/g, ' ').toLowerCase();
 }
@@ -1536,7 +1717,7 @@ async function markActorRunComplete(
   newSkippedCount = 0,
   options: MarkActorRunCompleteOptions = {},
 ) {
-  await db.runTransaction(async (tx) => {
+  const result = await db.runTransaction<MarkActorRunCompleteResult>(async (tx) => {
     const freshSnap = await tx.get(scanDoc.ref);
     const fresh = freshSnap.data() as Scan;
 
@@ -1544,13 +1725,13 @@ async function markActorRunComplete(
     // do not overwrite the cancelled status or increment completion counters.
     if (fresh.status === 'cancelled') {
       console.log(`[webhook] markActorRunComplete: scan ${scanDoc.id} is cancelled — skipping`);
-      return;
+      return { needsSummary: false };
     }
 
     const existingRunStatus = fresh.actorRuns?.[runId]?.status;
     if (existingRunStatus === 'succeeded' || existingRunStatus === 'failed') {
       console.log(`[webhook] markActorRunComplete: run ${runId} already ${existingRunStatus} — skipping duplicate completion`);
-      return;
+      return { needsSummary: false };
     }
 
     // Read the current total from the fresh snapshot so any deep-search runs
@@ -1608,26 +1789,34 @@ async function markActorRunComplete(
         Object.values(actorRuns).some((r) => r.status === 'succeeded');
       const hasResults = hasPersistedScanResults(nextTotals);
 
-      updates.status = anySucceeded || hasResults ? 'completed' : 'failed';
-      updates.completedAt = FieldValue.serverTimestamp();
-
-      if (updates.status === 'failed') {
+      if (anySucceeded || hasResults) {
+        updates.status = 'summarising';
+        updates.summaryStartedAt = FieldValue.serverTimestamp();
+      } else {
+        updates.status = 'failed';
+        updates.completedAt = FieldValue.serverTimestamp();
         updates.errorMessage = 'All actor runs failed or were aborted';
-      } else if (fresh.errorMessage) {
-        updates.errorMessage = FieldValue.delete();
+        await clearBrandActiveScanIfMatches(db.collection('brands').doc(fresh.brandId), scanDoc.id, tx);
+      }
+
+      if (updates.status === 'summarising') {
+        console.log(`[webhook] Scan ${scanDoc.id} finished actor processing — generating summary`);
+      } else {
+        console.log(`[webhook] Scan ${scanDoc.id} is complete — status: ${updates.status}`);
       }
 
       if (!anySucceeded && hasResults) {
         console.warn(`[webhook] Scan ${scanDoc.id} completed after a processing error because persisted results were already available`);
       }
-
-      console.log(`[webhook] Scan ${scanDoc.id} is complete — status: ${updates.status}`);
-
-      await clearBrandActiveScanIfMatches(db.collection('brands').doc(fresh.brandId), scanDoc.id, tx);
     }
 
     tx.update(scanDoc.ref, updates);
+    return { needsSummary: allDone && updates.status === 'summarising' };
   });
+
+  if (result.needsSummary) {
+    await generateAndPersistScanSummary(scanDoc.ref);
+  }
 }
 
 /**

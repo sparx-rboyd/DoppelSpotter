@@ -9,6 +9,7 @@ import {
   isValidMaxAiDeepSearches,
 } from '@/lib/brands';
 import type { BrandProfile, BrandProfileCreateInput, BrandSummary } from '@/lib/types';
+import { buildBrandScanSchedule } from '@/lib/scan-schedules';
 
 // GET /api/brands — list all brands for the authenticated user
 export async function GET(request: NextRequest) {
@@ -57,6 +58,7 @@ export async function POST(request: NextRequest) {
     safeWords = [],
     allowAiDeepSearches = DEFAULT_ALLOW_AI_DEEP_SEARCHES,
     maxAiDeepSearches = DEFAULT_MAX_AI_DEEP_SEARCHES,
+    scanSchedule,
   } = body;
 
   if (!name || typeof name !== 'string' || name.trim().length === 0) {
@@ -69,6 +71,13 @@ export async function POST(request: NextRequest) {
 
   if (!isValidMaxAiDeepSearches(maxAiDeepSearches)) {
     return errorResponse('maxAiDeepSearches must be a whole number from 1 to 10');
+  }
+
+  let resolvedScanSchedule;
+  try {
+    resolvedScanSchedule = scanSchedule ? buildBrandScanSchedule(scanSchedule) : undefined;
+  } catch (error) {
+    return errorResponse(error instanceof Error ? error.message : 'Invalid scan schedule');
   }
 
   const docRef = db.collection('brands').doc();
@@ -84,6 +93,7 @@ export async function POST(request: NextRequest) {
     maxAiDeepSearches,
     watchWords: (watchWords as string[]).map((w) => String(w).trim().toLowerCase()).filter(Boolean),
     safeWords: (safeWords as string[]).map((w) => String(w).trim().toLowerCase()).filter(Boolean),
+    ...(resolvedScanSchedule ? { scanSchedule: resolvedScanSchedule } : {}),
     createdAt: now,
     updatedAt: now,
   };

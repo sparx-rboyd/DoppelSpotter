@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
+import { BrandScanScheduleFields } from '@/components/brand-scan-schedule-fields';
 import { Navbar } from '@/components/navbar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -19,7 +20,14 @@ import {
   MIN_AI_DEEP_SEARCHES,
   MAX_AI_DEEP_SEARCHES,
 } from '@/lib/brands';
-import type { BrandProfile } from '@/lib/types';
+import {
+  DEFAULT_SCAN_SCHEDULE_FREQUENCY,
+  DEFAULT_SCAN_SCHEDULE_START_TIME,
+  getBrowserTimeZone,
+  getDefaultScheduleStartDate,
+  getScheduleInputFromBrandSchedule,
+} from '@/lib/scan-schedules';
+import type { BrandProfile, BrandScanScheduleInput } from '@/lib/types';
 
 export default function EditBrandPage() {
   const { brandId } = useParams<{ brandId: string }>();
@@ -40,6 +48,13 @@ export default function EditBrandPage() {
   const [safeWords, setSafeWords] = useState<string[]>([]);
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
   const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
+  const [scanSchedule, setScanSchedule] = useState<BrandScanScheduleInput>(() => ({
+    enabled: false,
+    frequency: DEFAULT_SCAN_SCHEDULE_FREQUENCY,
+    timeZone: getBrowserTimeZone(),
+    startDate: getDefaultScheduleStartDate(),
+    startTime: DEFAULT_SCAN_SCHEDULE_START_TIME,
+  }));
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
 
@@ -59,6 +74,7 @@ export default function EditBrandPage() {
         setMaxAiDeepSearches(normalizeMaxAiDeepSearches(brand.maxAiDeepSearches));
         setWatchWords(brand.watchWords ?? []);
         setSafeWords(brand.safeWords ?? []);
+        setScanSchedule(getScheduleInputFromBrandSchedule(brand.scanSchedule));
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : 'Failed to load brand');
       } finally {
@@ -154,6 +170,7 @@ export default function EditBrandPage() {
           maxAiDeepSearches,
           watchWords,
           safeWords,
+          scanSchedule,
         }),
       });
 
@@ -355,6 +372,11 @@ export default function EditBrandPage() {
                       </div>
                     </div>
                   </div>
+
+                  <BrandScanScheduleFields
+                    value={scanSchedule}
+                    onChange={setScanSchedule}
+                  />
                 </CardContent>
               </Card>
 

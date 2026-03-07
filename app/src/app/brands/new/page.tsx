@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
+import { BrandScanScheduleFields } from '@/components/brand-scan-schedule-fields';
 import { Navbar } from '@/components/navbar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -17,6 +18,13 @@ import {
   MAX_AI_DEEP_SEARCHES,
   MIN_AI_DEEP_SEARCHES,
 } from '@/lib/brands';
+import {
+  DEFAULT_SCAN_SCHEDULE_FREQUENCY,
+  DEFAULT_SCAN_SCHEDULE_START_TIME,
+  getBrowserTimeZone,
+  getDefaultScheduleStartDate,
+} from '@/lib/scan-schedules';
+import type { BrandScanScheduleInput } from '@/lib/types';
 
 export default function NewBrandPage() {
   const router = useRouter();
@@ -33,6 +41,13 @@ export default function NewBrandPage() {
   const [safeWords, setSafeWords] = useState<string[]>([]);
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
   const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
+  const [scanSchedule, setScanSchedule] = useState<BrandScanScheduleInput>(() => ({
+    enabled: false,
+    frequency: DEFAULT_SCAN_SCHEDULE_FREQUENCY,
+    timeZone: getBrowserTimeZone(),
+    startDate: getDefaultScheduleStartDate(),
+    startTime: DEFAULT_SCAN_SCHEDULE_START_TIME,
+  }));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -122,6 +137,7 @@ export default function NewBrandPage() {
           maxAiDeepSearches,
           watchWords,
           safeWords,
+          scanSchedule,
         }),
       });
 
@@ -311,6 +327,11 @@ export default function NewBrandPage() {
                     </div>
                   </div>
                 </div>
+
+                <BrandScanScheduleFields
+                  value={scanSchedule}
+                  onChange={setScanSchedule}
+                />
               </CardContent>
             </Card>
 

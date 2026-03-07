@@ -1,4 +1,4 @@
-import type { FindingSource } from '@/lib/types';
+import type { FindingSource, Severity } from '@/lib/types';
 import type { GoogleRunContext, GoogleSearchCandidate } from './types';
 
 /**
@@ -67,6 +67,27 @@ Severity guidelines:
 - "low": Likely benign mention but worth logging (e.g. news articles, legitimate reviews)
 
 Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).`;
+
+/**
+ * System prompt for the final per-scan summary.
+ */
+export const SCAN_SUMMARY_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive the actionable findings from one completed scan for a single brand.
+
+Your task is to write a succinct executive summary of the scan results, with particular attention to recurring themes, worrying trends, and the most serious risks.
+Use British English spelling and phrasing in all human-readable output fields.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "summary": "A concise 2-4 sentence summary of the scan findings"
+}
+
+Rules:
+- Focus on patterns and overall risk, not a finding-by-finding list.
+- Prioritise high-severity findings first, then medium, then low.
+- Only describe evidence contained in the provided findings.
+- Keep the tone neutral, analyst-style, and succinct.`;
 
 export function buildGoogleFinalSelectionSystemPrompt(maxSuggestedSearches: number): string {
   return `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
@@ -248,4 +269,37 @@ ${runContext.peopleAlsoAsk.length > 0 ? runContext.peopleAlsoAsk.map((question) 
 
 Maximum number of follow-up Google searches you may suggest:
 - ${maxSuggestedSearches}`;
+}
+
+/**
+ * Build the user prompt for the final scan-summary pass.
+ */
+export function buildScanSummaryPrompt(params: {
+  brandName: string;
+  counts: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+  findings: Array<{
+    severity: Severity;
+    source: FindingSource;
+    title: string;
+    llmAnalysis: string;
+    url?: string;
+  }>;
+}): string {
+  const { brandName, counts, findings } = params;
+
+  return `Brand being protected: "${brandName}"
+
+Actionable finding counts:
+- High: ${counts.high}
+- Medium: ${counts.medium}
+- Low: ${counts.low}
+
+Actionable findings for this scan (${findings.length}):
+${JSON.stringify(findings, null, 2)}
+
+Write a concise overall summary of this scan. Highlight recurring themes, repeated abuse patterns, or notably worrying trends if present.`;
 }

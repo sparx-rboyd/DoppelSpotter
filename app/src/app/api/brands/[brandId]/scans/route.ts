@@ -50,6 +50,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     nonHitCount: scan.nonHitCount ?? 0,
     ignoredCount: scan.ignoredCount ?? 0,
     skippedCount: scan.skippedCount ?? 0,
+    aiSummary: scan.aiSummary,
   }));
 
   return NextResponse.json({ data: summaries });

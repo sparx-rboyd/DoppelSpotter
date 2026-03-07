@@ -3,7 +3,8 @@ import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
 import { isValidAllowAiDeepSearches, isValidMaxAiDeepSearches } from '@/lib/brands';
-import type { BrandProfile } from '@/lib/types';
+import { buildBrandScanSchedule } from '@/lib/scan-schedules';
+import type { BrandProfile, BrandProfileUpdateInput } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
 
@@ -34,7 +35,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (!doc.exists) return errorResponse('Brand not found', 404);
   if ((doc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
 
-  let body: Partial<Pick<BrandProfile, 'name' | 'keywords' | 'officialDomains' | 'allowAiDeepSearches' | 'maxAiDeepSearches' | 'watchWords' | 'safeWords'>>;
+  let body: BrandProfileUpdateInput;
   try {
     body = await request.json();
   } catch {
@@ -60,6 +61,13 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
   if (body.watchWords !== undefined) updates.watchWords = body.watchWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
   if (body.safeWords !== undefined) updates.safeWords = body.safeWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
+  if (body.scanSchedule !== undefined) {
+    try {
+      updates.scanSchedule = buildBrandScanSchedule(body.scanSchedule);
+    } catch (error) {
+      return errorResponse(error instanceof Error ? error.message : 'Invalid scan schedule');
+    }
+  }
 
   await db.collection('brands').doc(brandId).update(updates);
 

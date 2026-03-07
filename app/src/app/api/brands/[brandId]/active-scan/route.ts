@@ -2,7 +2,13 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import type { BrandProfile } from '@/lib/types';
-import { clearBrandActiveScanIfMatches, isScanInProgress, scanFromSnapshot } from '@/lib/scans';
+import {
+  clearBrandActiveScanIfMatches,
+  isScanInProgress,
+  recoverStuckPendingScan,
+  recoverStuckSummarisingScan,
+  scanFromSnapshot,
+} from '@/lib/scans';
 
 type Params = { params: Promise<{ brandId: string }> };
 
@@ -31,7 +37,30 @@ export async function GET(request: NextRequest, { params }: Params) {
     return NextResponse.json({ data: null });
   }
 
-  const scan = scanFromSnapshot(scanDoc);
+  let scan = scanFromSnapshot(scanDoc);
+  if (scan.status === 'pending') {
+    const recovered = await recoverStuckPendingScan(scanDoc.ref);
+    if (recovered) {
+      const refreshedScanDoc = await scanDoc.ref.get();
+      if (!refreshedScanDoc.exists) {
+        await clearBrandActiveScanIfMatches(brandRef, brand.activeScanId);
+        return NextResponse.json({ data: null });
+      }
+      scan = scanFromSnapshot(refreshedScanDoc);
+    }
+  }
+  if (scan.status === 'summarising') {
+    const recovered = await recoverStuckSummarisingScan(scanDoc.ref);
+    if (recovered) {
+      const refreshedScanDoc = await scanDoc.ref.get();
+      if (!refreshedScanDoc.exists) {
+        await clearBrandActiveScanIfMatches(brandRef, brand.activeScanId);
+        return NextResponse.json({ data: null });
+      }
+      scan = scanFromSnapshot(refreshedScanDoc);
+    }
+  }
+
   if (
     scan.brandId !== brandId ||
     scan.userId !== uid ||

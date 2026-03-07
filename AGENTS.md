@@ -40,12 +40,15 @@ using Apify actors for scraping and AI analysis for classification.
 │       │       ├── auth/         # login, logout, me (signup disabled — use add-user CLI)
 │       │       ├── brands/       # CRUD + findings + scans per brand
 │       │       ├── findings/     # Cross-brand findings query
+│       │       ├── internal/     # Internal service-to-service routes (scheduled scan dispatch)
 │       │       ├── scan/         # Trigger scan + poll status
 │       │       └── webhooks/apify/  # Apify webhook receiver → AI analysis pipeline
 │       └── lib/
 │           ├── apify/
 │           │   ├── actors.ts     # ACTOR_REGISTRY — all actor definitions + enable/disable
 │           │   └── client.ts     # Apify client: startActorRun, buildActorInput, fetchDatasetItems
+│           ├── scan-runner.ts    # Shared manual + scheduled scan reservation and actor startup
+│           ├── scan-schedules.ts # Schedule validation, timezone-aware recurrence, next-run helpers
 │           └── analysis/
 │               ├── prompts.ts    # SYSTEM_PROMPT + buildAnalysisPrompt()
 │               ├── openrouter.ts # AI analysis client: chatCompletion()
@@ -72,8 +75,21 @@ See `REVIEW.md` for full actor table and rationale.
 ## Scan Pipeline Flow
 
 ```
+Brand add/edit pages
+ └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
+ └─ scheduling is anchored from the chosen local start date/time and stored timezone
+
+POST /api/internal/scheduled-scans/dispatch
+ └─ validates a Google-signed OIDC bearer token from Cloud Scheduler
+ └─ checks both the token audience (dispatch URL) and the caller email against `SCHEDULE_DISPATCH_SERVICE_ACCOUNT_EMAIL`
+ └─ runs from Cloud Scheduler on a fixed cadence (recommended: every minute)
+ └─ queries due brands by `scanSchedule.enabled == true` and `scanSchedule.nextRunAt <= now`
+ └─ reuses the shared scan runner to reserve the new scan and advance `nextRunAt` atomically
+ └─ if the brand already has a pending/running/summarising scan, skips that occurrence and advances `nextRunAt` to the next future slot
+
 POST /api/scan
- └─ verifies ownership + checks `brands.activeScanId` inside a Firestore transaction
+ └─ verifies ownership, then delegates to the shared scan runner
+ └─ checks `brands.activeScanId` inside a Firestore transaction
  └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ reads CORE_ACTOR_IDS (or actorIds from request body)
@@ -91,11 +107,12 @@ DELETE /api/scan?scanId=xxx
 GET /api/brands/[brandId]/active-scan
  └─ verifies ownership
  └─ resolves `brands.activeScanId` to the current pending/running scan, if any
+ └─ recovers stale `pending` scans that never started any actor runs
  └─ clears stale pointers automatically if the referenced scan is missing or terminal
 
 GET /api/brands/[brandId]/scans
  └─ returns all terminal scans (completed|cancelled|failed) ordered newest-first
- └─ returns denormalized per-scan counts (high/medium/low/nonHit/ignored/skipped) from the scan document
+ └─ returns denormalized per-scan counts (high/medium/low/nonHit/ignored/skipped) plus `aiSummary` from the scan document
  └─ returns ScanSummary[] — lightweight shape used by the brand page to render per-scan result sets
 
 DELETE /api/brands/[brandId]/scans/[scanId]
@@ -130,6 +147,10 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ unexpected processing errors after partial finding writes reconcile scan counts from persisted findings, mark the affected run terminal, and let the scan complete normally when useful results already exist
       └─ deep-search runs complete via the same webhook, depth 1 — no further recursion
  └─ marks actor run complete; if all runs done → marks scan complete and clears `brands.activeScanId`
+      └─ completed scans pass through a short `summarising` state first
+      └─ once all actor-run findings are written, the webhook loads the scan's high/medium/low findings and asks the LLM for a succinct scan-level summary focused on recurring themes and worrying trends
+      └─ the final `scans.aiSummary` string is persisted on the scan document, then the scan flips to `completed` and clears `brands.activeScanId`
+      └─ `summaryStartedAt` marks when the final summary phase began; if a scan stays in `summarising` too long, polling routes will recover it with a deterministic fallback summary so the UI does not remain stuck indefinitely
 ```
 
 ---
@@ -140,6 +161,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **When:** After each Apify actor run completes, inside the webhook handler
 - **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
 - **Prompts:** `SYSTEM_PROMPT` + `buildAnalysisPrompt()` for per-item mode; `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for the final deep-search query chooser
+- **Scan-level summary:** after all actor runs finish, the webhook runs one final LLM pass over the scan's actionable findings and stores a concise `aiSummary` on the scan document for the brand page
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
 - **Per-item output:** structured JSON `{ severity, title, llmAnalysis, isFalsePositive }`
@@ -240,6 +262,7 @@ Users can bookmark any finding they want to follow up on, including AI-classifie
 | `OPENROUTER_API_KEY` | OpenRouter API key |
 | `OPENROUTER_MODEL` | AI analysis model override (default: `anthropic/claude-3.5-haiku`) |
 | `AUTH_JWT_SECRET` | JWT signing secret (7-day tokens) |
+| `SCHEDULE_DISPATCH_SERVICE_ACCOUNT_EMAIL` | Email of the dedicated Cloud Scheduler service account allowed to call the internal scheduled-scan dispatch route |
 | `GCP_PROJECT_ID` | Google Cloud project ID |
 | `FIRESTORE_DATABASE_ID` | Firestore DB (default: `(default)`) |
 | `APP_URL` | Public base URL — used to construct webhook callback URLs |
@@ -252,8 +275,8 @@ Users can bookmark any finding they want to follow up on, including AI-classifie
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, createdAt, updatedAt |
-| `scans` | id, brandId, userId, status (`pending`\|`running`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, skippedCount** (denormalized — written by webhook, updated on ignore/un-ignore / duplicate-skip tracking), startedAt, completedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
+| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, skippedCount, aiSummary?, summaryStartedAt?** (denormalized — written by webhook, updated on ignore/un-ignore / duplicate-skip tracking), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?**, rawLlmResponse?, createdAt |
 
 ---

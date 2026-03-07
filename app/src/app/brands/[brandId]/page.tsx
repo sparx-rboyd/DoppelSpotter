@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
   ChevronDown, ChevronRight, Pencil, Trash2, X, EyeOff, Bookmark,
+  Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
@@ -16,10 +17,15 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { InfoTooltip, Tooltip } from '@/components/ui/tooltip';
 import { normalizeAllowAiDeepSearches } from '@/lib/brands';
+import {
+  formatScanScheduleFrequency,
+  formatScheduledRunAt,
+} from '@/lib/scan-schedules';
 import { cn, formatScanDate } from '@/lib/utils';
 import type { ActorRunInfo, BrandProfile, FindingSummary, Scan, ScanSummary } from '@/lib/types';
 
 const POLL_INTERVAL_MS = 5_000;
+const ACTIVE_SCAN_IDLE_POLL_INTERVAL_MS = 20_000;
 const ACTIVE_SCAN_DELETE_TOOLTIP =
   "Scan history can't be changed while a scan is running because current results are compared against previous findings.";
 const CLEARING_HISTORY_DELETE_TOOLTIP = 'Please wait while scan history is being deleted.';
@@ -182,6 +188,26 @@ function SeverityGroup({
   );
 }
 
+function ScanSummaryPanel({ summary }: { summary: string }) {
+  return (
+    <div className="rounded-xl border border-brand-100 bg-brand-50/70 px-4 py-4">
+      <div className="flex items-start gap-3">
+        <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-white border border-brand-100">
+          <Sparkles className="w-4 h-4 text-brand-600" />
+        </div>
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-700/80">
+            AI summary
+          </p>
+          <p className="mt-1 text-sm leading-6 text-gray-700">
+            {summary}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function normalizeFindingsSearchText(value: string) {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
@@ -259,6 +285,14 @@ export default function BrandDetailPage() {
       // Non-critical
       return [];
     }
+  }
+
+  async function refreshBrandProfile() {
+    const brandRes = await fetch(`/api/brands/${brandId}`, { credentials: 'same-origin' });
+    if (!brandRes.ok) throw new Error('Brand not found');
+    const brandJson = await brandRes.json();
+    setBrand(brandJson.data);
+    return brandJson.data as BrandProfile;
   }
 
   async function loadScanFindings(scanId: string) {
@@ -426,7 +460,10 @@ export default function BrandDetailPage() {
 
       const json = await res.json();
       const scan = (json.data ?? null) as Scan | null;
-      if (scan && (scan.status === 'pending' || scan.status === 'running')) {
+      if (scan && (scan.status === 'pending' || scan.status === 'running' || scan.status === 'summarising')) {
+        void refreshBrandProfile().catch(() => {
+          // Non-critical
+        });
         attachToActiveScan(scan);
         return true;
       } else {
@@ -720,11 +757,7 @@ export default function BrandDetailPage() {
       void loadAllIgnoredFindings();
 
       try {
-        const brandRes = await fetch(`/api/brands/${brandId}`, { credentials: 'same-origin' });
-
-        if (!brandRes.ok) throw new Error('Brand not found');
-        const brandJson = await brandRes.json();
-        setBrand(brandJson.data);
+        await refreshBrandProfile();
 
         // Fetch scans list without auto-expanding until we know whether an
         // in-flight scan should own the active UI slot.
@@ -748,6 +781,17 @@ export default function BrandDetailPage() {
     return () => stopPolling();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandId]);
+
+  useEffect(() => {
+    if (loading || scanning) return;
+
+    const idlePoll = setInterval(() => {
+      void restoreActiveScan();
+    }, ACTIVE_SCAN_IDLE_POLL_INTERVAL_MS);
+
+    return () => clearInterval(idlePoll);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [brandId, loading, scanning]);
 
   useEffect(() => {
     if (!normalizeFindingsSearchText(findingsSearchQuery)) {
@@ -844,6 +888,9 @@ export default function BrandDetailPage() {
           await fetchScans({ autoExpandScanId: scanId });
           // Transition: live section disappears; the scan row (already expanded
           // with a loading spinner from loadScanFindings) becomes visible.
+          await refreshBrandProfile().catch(() => {
+            // Non-critical
+          });
           setScanning(false);
           setCancelling(false);
           setActiveScanId(null);
@@ -859,6 +906,9 @@ export default function BrandDetailPage() {
           setLiveScanFindings([]);
           setError(scan.errorMessage ?? 'Scan failed');
           setActiveScan(null);
+          await refreshBrandProfile().catch(() => {
+            // Non-critical
+          });
           await fetchScans();
         } else if (scan.status === 'cancelled') {
           stopPolling();
@@ -868,6 +918,9 @@ export default function BrandDetailPage() {
           setActiveScanId(null);
           setLiveScanFindings([]);
           setActiveScan(null);
+          await refreshBrandProfile().catch(() => {
+            // Non-critical
+          });
           await fetchScans();
         } else {
           // Scan still running — refresh live findings
@@ -1039,9 +1092,6 @@ export default function BrandDetailPage() {
     allDeepSearchRuns.length,
     allRuns.reduce((max, run) => Math.max(max, (run.searchDepth ?? 0) === 0 ? run.suggestedSearches?.length ?? 0 : 0), 0),
   );
-  const completedDeepSearchCount = allDeepSearchRuns.filter(
-    (r) => r.status === 'succeeded' || r.status === 'failed',
-  ).length;
   const skippedDuplicateCount = allRuns.reduce((sum, run) => sum + (run.skippedDuplicateCount ?? 0), 0);
   const isAiDeepSearchEnabled = normalizeAllowAiDeepSearches(brand?.allowAiDeepSearches);
 
@@ -1122,6 +1172,9 @@ export default function BrandDetailPage() {
   }
 
   function getScanStatusLabel(): ReactNode {
+    if (activeScan?.status === 'summarising') {
+      return 'Summarising findings';
+    }
     if (!activeRun) return 'Starting scan';
 
     if (isDeepSearchActive) {
@@ -1162,8 +1215,7 @@ export default function BrandDetailPage() {
   function getDeepSearchProgressSubtext(): string | null {
     const announcement = getDeepSearchSelectionAnnouncement();
     if (!announcement) return null;
-    if (allDeepSearchRuns.length === 0) return announcement;
-    return `${announcement} ${completedDeepSearchCount}/${identifiedDeepSearchCount} follow up search${identifiedDeepSearchCount !== 1 ? 'es' : ''} complete.`;
+    return announcement;
   }
 
   function getRunProgressFraction(run: ActorRunInfo): number {
@@ -1189,6 +1241,7 @@ export default function BrandDetailPage() {
   function getRawOverallScanProgressPct(): number {
     if (!scanning) return 0;
     if (!activeScan) return 8;
+    if (activeScan.status === 'summarising') return 96;
     if (allRuns.length === 0) return 10;
 
     const totalFraction =
@@ -1209,6 +1262,7 @@ export default function BrandDetailPage() {
 
   const progressScanKey = activeScanId ?? activeScan?.id ?? null;
   const rawOverallScanProgressPct = getRawOverallScanProgressPct();
+  const isSummarisingFindings = activeScan?.status === 'summarising';
 
   useEffect(() => {
     if (!progressScanKey) {
@@ -1334,6 +1388,7 @@ export default function BrandDetailPage() {
                 const domains = brand.officialDomains;
                 const watchWords = brand.watchWords ?? [];
                 const safeWords = brand.safeWords ?? [];
+                const scanSchedule = brand.scanSchedule;
 
                 type Section = 'keywords' | 'officialDomains' | 'watchWords' | 'safeWords';
                 function toggleSection(section: Section) {
@@ -1430,6 +1485,22 @@ export default function BrandDetailPage() {
                           : <span className="text-sm text-gray-400">{activeSection.emptyLabel}</span>}
                       </div>
                     )}
+
+                    <div className="mt-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-gray-700">Scheduled scans</span>
+                        {scanSchedule?.enabled ? (
+                          <Badge variant="brand">{formatScanScheduleFrequency(scanSchedule.frequency)}</Badge>
+                        ) : (
+                          <Badge variant="default">Off</Badge>
+                        )}
+                      </div>
+                      <p className="mt-1 text-sm text-gray-500">
+                        {scanSchedule?.enabled
+                          ? `Next due ${formatScheduledRunAt(scanSchedule.nextRunAt, scanSchedule.timeZone)}.`
+                          : 'Scheduling is currently disabled for this brand.'}
+                      </p>
+                    </div>
                   </div>
                 );
               })()}
@@ -1467,12 +1538,12 @@ export default function BrandDetailPage() {
                       style={{ width: `${displayedScanProgressPct}%` }}
                     />
                   </div>
-                  {!cancelling && getDeepSearchProgressSubtext() && (
+                  {!cancelling && !isSummarisingFindings && getDeepSearchProgressSubtext() && (
                     <p className="mt-3 text-xs text-brand-700/80">
                       {getDeepSearchProgressSubtext()}
                     </p>
                   )}
-                  {!cancelling && getSkippedDuplicateSubtext() && (
+                  {!cancelling && !isSummarisingFindings && getSkippedDuplicateSubtext() && (
                     <p className="mt-2 text-xs text-brand-700/80">
                       {getSkippedDuplicateSubtext()}
                     </p>
@@ -1897,6 +1968,12 @@ export default function BrandDetailPage() {
                                 </div>
                               ) : (
                                 <>
+                                  {scan.aiSummary && (
+                                    <div className="mb-4">
+                                      <ScanSummaryPanel summary={scan.aiSummary} />
+                                    </div>
+                                  )}
+
                                   {/* Real findings grouped by severity */}
                                   {!hits || hits.length === 0 ? (
                                     !isFindingsSearchActive && (

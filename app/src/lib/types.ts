@@ -9,6 +9,35 @@ export interface UserRecord {
   createdAt: Timestamp;
 }
 
+// ─── Scheduling ─────────────────────────────────────────────────────────────
+
+export type ScanScheduleFrequency = 'daily' | 'weekly' | 'fortnightly' | 'monthly';
+
+export interface BrandScanSchedule {
+  enabled: boolean;
+  frequency: ScanScheduleFrequency;
+  /** IANA timezone identifier, e.g. Europe/London */
+  timeZone: string;
+  /** The original user-selected local date/time, stored as a UTC instant. */
+  startAt: Timestamp;
+  /** The next due occurrence, precomputed so scheduled dispatch can query efficiently. */
+  nextRunAt: Timestamp;
+  /** When a scheduled scan last successfully reserved a new scan. */
+  lastTriggeredAt?: Timestamp;
+  /** The most recent scan started by the scheduler for this brand. */
+  lastScheduledScanId?: string;
+}
+
+export interface BrandScanScheduleInput {
+  enabled: boolean;
+  frequency: ScanScheduleFrequency;
+  timeZone: string;
+  /** YYYY-MM-DD in the selected timezone */
+  startDate: string;
+  /** HH:mm in the selected timezone */
+  startTime: string;
+}
+
 // ─── Brand Profile ─────────────────────────────────────────────────────────
 
 export interface BrandProfile {
@@ -27,11 +56,33 @@ export interface BrandProfile {
   watchWords?: string[];
   /** Terms the brand owner is comfortable being associated with; AI analysis treats results containing these with reduced caution. */
   safeWords?: string[];
+  /** Optional recurring schedule for automatic scans. */
+  scanSchedule?: BrandScanSchedule;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
 
-export type BrandProfileCreateInput = Omit<BrandProfile, 'id' | 'userId' | 'createdAt' | 'updatedAt'>;
+export interface BrandProfileCreateInput {
+  name: string;
+  keywords?: string[];
+  officialDomains?: string[];
+  allowAiDeepSearches?: boolean;
+  maxAiDeepSearches?: number;
+  watchWords?: string[];
+  safeWords?: string[];
+  scanSchedule?: BrandScanScheduleInput;
+}
+
+export interface BrandProfileUpdateInput {
+  name?: string;
+  keywords?: string[];
+  officialDomains?: string[];
+  allowAiDeepSearches?: boolean;
+  maxAiDeepSearches?: number;
+  watchWords?: string[];
+  safeWords?: string[];
+  scanSchedule?: BrandScanScheduleInput;
+}
 
 export interface BrandSummary {
   id: string;
@@ -92,7 +143,7 @@ export interface Finding extends FindingSummary {
 
 // ─── Scans ─────────────────────────────────────────────────────────────────
 
-export type ScanStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type ScanStatus = 'pending' | 'running' | 'summarising' | 'completed' | 'failed' | 'cancelled';
 
 export type ActorRunStatus =
   | 'pending'
@@ -149,6 +200,10 @@ export interface Scan {
   ignoredCount?: number;
   /** Number of duplicate URLs skipped because they already appeared in previous scans. */
   skippedCount?: number;
+  /** Succinct AI-generated overview of the scan's high/medium/low findings. */
+  aiSummary?: string;
+  /** When the final scan-level summary step began. */
+  summaryStartedAt?: Timestamp;
   errorMessage?: string;
   startedAt: Timestamp;
   completedAt?: Timestamp;
@@ -168,6 +223,7 @@ export interface ScanSummary {
   nonHitCount: number;
   ignoredCount: number;
   skippedCount: number;
+  aiSummary?: string;
 }
 
 // ─── AI Analysis ───────────────────────────────────────────────────────────
