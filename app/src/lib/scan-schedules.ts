@@ -144,10 +144,41 @@ export function getDefaultScheduleStartDate(now = new Date()): string {
   return DateTime.fromJSDate(now).toFormat('yyyy-LL-dd');
 }
 
+export function getMinimumScheduleStart(timeZone: string, now = new Date()): DateTime {
+  return DateTime.fromJSDate(now, { zone: timeZone })
+    .plus({ minutes: 1 })
+    .startOf('minute');
+}
+
+export function getDefaultScheduleStartInput(
+  timeZone = getBrowserTimeZone(),
+  now = new Date(),
+): Pick<BrandScanScheduleInput, 'startDate' | 'startTime'> {
+  const start = getMinimumScheduleStart(timeZone, now);
+  return {
+    startDate: start.toFormat('yyyy-LL-dd'),
+    startTime: start.toFormat('HH:mm'),
+  };
+}
+
 export function parseScheduleStart(input: Pick<BrandScanScheduleInput, 'startDate' | 'startTime' | 'timeZone'>): DateTime {
   return DateTime.fromISO(`${input.startDate}T${input.startTime}`, {
     zone: input.timeZone,
   });
+}
+
+export function isScheduleStartInPast(
+  input: Pick<BrandScanScheduleInput, 'startDate' | 'startTime' | 'timeZone'>,
+  now = new Date(),
+): boolean {
+  const start = parseScheduleStart(input);
+  const reference = DateTime.fromJSDate(now, { zone: input.timeZone });
+
+  if (!start.isValid || !reference.isValid) {
+    return false;
+  }
+
+  return start <= reference;
 }
 
 export function computeInitialScheduledRun(anchor: ScheduleAnchorLike, now: AnyTimestampLike = new Date()): Date {
@@ -233,12 +264,13 @@ export function getScheduleInputFromBrandSchedule(
   fallbackTimeZone = getBrowserTimeZone(),
 ): BrandScanScheduleInput {
   if (!schedule) {
+    const defaultStart = getDefaultScheduleStartInput(fallbackTimeZone);
     return {
       enabled: false,
       frequency: DEFAULT_SCAN_SCHEDULE_FREQUENCY,
       timeZone: fallbackTimeZone,
-      startDate: getDefaultScheduleStartDate(),
-      startTime: DEFAULT_SCAN_SCHEDULE_START_TIME,
+      startDate: defaultStart.startDate,
+      startTime: defaultStart.startTime,
     };
   }
 

@@ -3,10 +3,16 @@ import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
 import { isValidAllowAiDeepSearches, isValidMaxAiDeepSearches } from '@/lib/brands';
-import { buildBrandScanSchedule } from '@/lib/scan-schedules';
+import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
+import {
+  buildBrandScanSchedule,
+  getScheduleInputFromBrandSchedule,
+  isScheduleStartInPast,
+} from '@/lib/scan-schedules';
 import type { BrandProfile, BrandProfileUpdateInput } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
+const DELETE_BATCH_LIMIT = 500;
 
 // GET /api/brands/[brandId]
 export async function GET(request: NextRequest, { params }: Params) {
@@ -33,7 +39,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const doc = await db.collection('brands').doc(brandId).get();
 
   if (!doc.exists) return errorResponse('Brand not found', 404);
-  if ((doc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
+  const existingBrand = doc.data() as BrandProfile;
+  if (existingBrand.userId !== uid) return errorResponse('Forbidden', 403);
 
   let body: BrandProfileUpdateInput;
   try {
@@ -68,6 +75,20 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (body.watchWords !== undefined) updates.watchWords = body.watchWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
   if (body.safeWords !== undefined) updates.safeWords = body.safeWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
   if (body.scanSchedule !== undefined) {
+    const existingScheduleInput = existingBrand.scanSchedule
+      ? getScheduleInputFromBrandSchedule(existingBrand.scanSchedule)
+      : null;
+    const isKeepingExistingPastStart = Boolean(
+      existingScheduleInput?.enabled &&
+      body.scanSchedule.timeZone === existingScheduleInput.timeZone &&
+      body.scanSchedule.startDate === existingScheduleInput.startDate &&
+      body.scanSchedule.startTime === existingScheduleInput.startTime,
+    );
+
+    if (body.scanSchedule.enabled && isScheduleStartInPast(body.scanSchedule) && !isKeepingExistingPastStart) {
+      return errorResponse('Scheduled scan start date and time must be in the future');
+    }
+
     try {
       updates.scanSchedule = buildBrandScanSchedule(body.scanSchedule);
     } catch (error) {
@@ -87,12 +108,42 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (error) return error;
 
   const { brandId } = await params;
-  const doc = await db.collection('brands').doc(brandId).get();
+  const brandRef = db.collection('brands').doc(brandId);
+  const doc = await brandRef.get();
 
   if (!doc.exists) return errorResponse('Brand not found', 404);
   if ((doc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
 
-  await db.collection('brands').doc(brandId).delete();
+  const [scanSnapshot, findingsSnapshot] = await Promise.all([
+    db
+      .collection('scans')
+      .where('brandId', '==', brandId)
+      .where('userId', '==', uid)
+      .get(),
+    db
+      .collection('findings')
+      .where('brandId', '==', brandId)
+      .where('userId', '==', uid)
+      .get(),
+  ]);
+
+  const activeScan = scanSnapshot.docs
+    .map(scanFromSnapshot)
+    .find((scan) => isScanInProgress(scan.status));
+
+  if (activeScan) {
+    return errorResponse('Cannot delete a brand while a scan is still in progress', 409);
+  }
+
+  const docsToDelete = [...findingsSnapshot.docs, ...scanSnapshot.docs, doc];
+
+  for (let index = 0; index < docsToDelete.length; index += DELETE_BATCH_LIMIT) {
+    const batch = db.batch();
+    docsToDelete
+      .slice(index, index + DELETE_BATCH_LIMIT)
+      .forEach((snapshot) => batch.delete(snapshot.ref));
+    await batch.commit();
+  }
 
   return new NextResponse(null, { status: 204 });
 }

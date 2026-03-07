@@ -9,7 +9,7 @@ import {
   isValidMaxAiDeepSearches,
 } from '@/lib/brands';
 import type { BrandProfile, BrandProfileCreateInput, BrandSummary, Scan, ScanStatus } from '@/lib/types';
-import { buildBrandScanSchedule } from '@/lib/scan-schedules';
+import { buildBrandScanSchedule, isScheduleStartInPast } from '@/lib/scan-schedules';
 
 const TERMINAL_SCAN_STATUSES: ScanStatus[] = ['completed', 'cancelled', 'failed'];
 const IN_PROGRESS_SCAN_STATUSES: ScanStatus[] = ['pending', 'running', 'summarising'];
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
     name,
     keywords = [],
     officialDomains = [],
-    sendScanSummaryEmails = false,
+    sendScanSummaryEmails = true,
     watchWords = [],
     safeWords = [],
     allowAiDeepSearches = DEFAULT_ALLOW_AI_DEEP_SEARCHES,
@@ -134,6 +134,9 @@ export async function POST(request: NextRequest) {
 
   if (!isValidMaxAiDeepSearches(maxAiDeepSearches)) {
     return errorResponse('maxAiDeepSearches must be a whole number from 1 to 10');
+  }
+  if (scanSchedule?.enabled && isScheduleStartInPast(scanSchedule)) {
+    return errorResponse('Scheduled scan start date and time must be in the future');
   }
 
   let resolvedScanSchedule;

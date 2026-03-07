@@ -122,6 +122,11 @@ DELETE /api/brands/[brandId]/scans/[scanId]
  └─ verifies ownership; returns 409 if scan is pending/running
  └─ batch-deletes all findings for the scan, then deletes the scan doc
 
+DELETE /api/brands/[brandId]
+ └─ verifies ownership
+ └─ returns 409 if any scan for the brand is still pending/running/summarising
+ └─ batch-deletes all findings and scans for the brand before deleting the brand doc
+
 GET /api/brands/[brandId]/findings?scanId=xxx
  └─ optional scanId param filters findings to a single scan (used for lazy loading in the UI)
 

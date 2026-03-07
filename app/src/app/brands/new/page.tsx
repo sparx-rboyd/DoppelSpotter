@@ -20,9 +20,9 @@ import {
 } from '@/lib/brands';
 import {
   DEFAULT_SCAN_SCHEDULE_FREQUENCY,
-  DEFAULT_SCAN_SCHEDULE_START_TIME,
   getBrowserTimeZone,
-  getDefaultScheduleStartDate,
+  getDefaultScheduleStartInput,
+  isScheduleStartInPast,
 } from '@/lib/scan-schedules';
 import type { BrandScanScheduleInput } from '@/lib/types';
 
@@ -39,16 +39,21 @@ export default function NewBrandPage() {
   const [watchWords, setWatchWords] = useState<string[]>([]);
   const [safeWordInput, setSafeWordInput] = useState('');
   const [safeWords, setSafeWords] = useState<string[]>([]);
-  const [sendScanSummaryEmails, setSendScanSummaryEmails] = useState(false);
+  const [sendScanSummaryEmails, setSendScanSummaryEmails] = useState(true);
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
   const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
-  const [scanSchedule, setScanSchedule] = useState<BrandScanScheduleInput>(() => ({
-    enabled: false,
-    frequency: DEFAULT_SCAN_SCHEDULE_FREQUENCY,
-    timeZone: getBrowserTimeZone(),
-    startDate: getDefaultScheduleStartDate(),
-    startTime: DEFAULT_SCAN_SCHEDULE_START_TIME,
-  }));
+  const [scanSchedule, setScanSchedule] = useState<BrandScanScheduleInput>(() => {
+    const timeZone = getBrowserTimeZone();
+    const defaultStart = getDefaultScheduleStartInput(timeZone);
+
+    return {
+      enabled: false,
+      frequency: DEFAULT_SCAN_SCHEDULE_FREQUENCY,
+      timeZone,
+      startDate: defaultStart.startDate,
+      startTime: defaultStart.startTime,
+    };
+  });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -121,6 +126,10 @@ export default function NewBrandPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
+    if (scanSchedule.enabled && isScheduleStartInPast(scanSchedule)) {
+      setError('Scheduled scan start date and time must be in the future');
+      return;
+    }
 
     setLoading(true);
     setError('');
@@ -295,73 +304,78 @@ export default function NewBrandPage() {
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4">
-                  <div className="flex min-w-0 flex-col gap-1">
-                    <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-                      Allow AI analysis to request deeper searches
-                      <InfoTooltip content="Deeper searches allow AI analysis to perform additional searches if it sees something in the search results that gives cause for concern. Deeper searches result in slower scans." />
+                <div className="rounded-xl border border-gray-200 bg-white">
+                  <div className="flex items-center justify-between gap-4 p-4">
+                    <div className="flex min-w-0 flex-col gap-1">
+                      <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                        Allow AI analysis to request deeper searches
+                        <InfoTooltip content="Deeper searches allow AI analysis to perform additional searches if it sees something in the search results that gives cause for concern. Deeper searches result in slower scans." />
+                      </div>
                     </div>
-                  </div>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={allowAiDeepSearches}
-                    aria-label="Allow AI analysis to request deeper searches"
-                    onClick={() => setAllowAiDeepSearches((prev) => !prev)}
-                    className={`inline-flex items-center gap-3 rounded-full border px-3 py-2 text-sm font-medium transition ${
-                      allowAiDeepSearches
-                        ? 'border-brand-600 bg-brand-50 text-brand-700'
-                        : 'border-gray-300 bg-gray-50 text-gray-600'
-                    }`}
-                  >
-                    <span>{allowAiDeepSearches ? 'On' : 'Off'}</span>
-                    <span
-                      className={`relative inline-flex h-6 w-11 rounded-full transition ${
-                        allowAiDeepSearches ? 'bg-brand-600' : 'bg-gray-300'
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={allowAiDeepSearches}
+                      aria-label="Allow AI analysis to request deeper searches"
+                      onClick={() => setAllowAiDeepSearches((prev) => !prev)}
+                      className={`inline-flex items-center gap-3 rounded-full border px-3 py-2 text-sm font-medium transition ${
+                        allowAiDeepSearches
+                          ? 'border-brand-600 bg-brand-50 text-brand-700'
+                          : 'border-gray-300 bg-gray-50 text-gray-600'
                       }`}
                     >
+                      <span>{allowAiDeepSearches ? 'On' : 'Off'}</span>
                       <span
-                        className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
-                          allowAiDeepSearches ? 'left-[22px]' : 'left-0.5'
+                        className={`relative inline-flex h-6 w-11 rounded-full transition ${
+                          allowAiDeepSearches ? 'bg-brand-600' : 'bg-gray-300'
                         }`}
-                      />
-                    </span>
-                  </button>
-                </div>
-
-                <div className="flex flex-col gap-3">
-                  <label htmlFor="max-ai-deep-searches" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-                    AI deep searches
-                    <InfoTooltip content="The maximum number of follow-up Google searches that AI analysis is permitted to run. More searches increase coverage, but scans will be slower." />
-                  </label>
-                  <div className={`rounded-xl border border-gray-200 bg-white p-4 transition ${allowAiDeepSearches ? '' : 'opacity-60'}`}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <p className="text-sm text-gray-500">Fewer searches</p>
-                        <p className="text-xs text-gray-400">Faster</p>
-                      </div>
-                      <span className="text-sm font-semibold text-gray-900">{maxAiDeepSearches} searches</span>
-                      <div className="min-w-0 text-right">
-                        <p className="text-sm text-gray-500">More searches</p>
-                        <p className="text-xs text-gray-400">Slower</p>
-                      </div>
-                    </div>
-                    <input
-                      id="max-ai-deep-searches"
-                      type="range"
-                      min={MIN_AI_DEEP_SEARCHES}
-                      max={MAX_AI_DEEP_SEARCHES}
-                      step={1}
-                      value={maxAiDeepSearches}
-                      disabled={!allowAiDeepSearches}
-                      onChange={(e) => setMaxAiDeepSearches(Number(e.target.value))}
-                      className="mt-4 w-full accent-brand-600 disabled:cursor-not-allowed disabled:opacity-60"
-                    />
-                    <div className="mt-2 flex justify-between text-xs text-gray-500">
-                      <span>{MIN_AI_DEEP_SEARCHES}</span>
-                      <span>{MAX_AI_DEEP_SEARCHES}</span>
-                    </div>
+                      >
+                        <span
+                          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
+                            allowAiDeepSearches ? 'left-[22px]' : 'left-0.5'
+                          }`}
+                        />
+                      </span>
+                    </button>
                   </div>
+
+                  {allowAiDeepSearches && (
+                    <div className="border-t border-gray-100 px-4 pb-4 pt-4">
+                      <div className="ml-1 border-l border-gray-200 pl-4">
+                        <label htmlFor="max-ai-deep-searches" className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
+                          AI deep searches
+                          <InfoTooltip content="The maximum number of follow-up Google searches that AI analysis is permitted to run. More searches increase coverage, but scans will be slower." />
+                        </label>
+                        <div className="mt-3">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <p className="text-sm text-gray-500">Fewer searches</p>
+                              <p className="text-xs text-gray-400">Faster</p>
+                            </div>
+                            <span className="text-sm font-semibold text-gray-900">{maxAiDeepSearches} searches</span>
+                            <div className="min-w-0 text-right">
+                              <p className="text-sm text-gray-500">More searches</p>
+                              <p className="text-xs text-gray-400">Slower</p>
+                            </div>
+                          </div>
+                          <input
+                            id="max-ai-deep-searches"
+                            type="range"
+                            min={MIN_AI_DEEP_SEARCHES}
+                            max={MAX_AI_DEEP_SEARCHES}
+                            step={1}
+                            value={maxAiDeepSearches}
+                            onChange={(e) => setMaxAiDeepSearches(Number(e.target.value))}
+                            className="mt-4 w-full accent-brand-600"
+                          />
+                          <div className="mt-2 flex justify-between text-xs text-gray-500">
+                            <span>{MIN_AI_DEEP_SEARCHES}</span>
+                            <span>{MAX_AI_DEEP_SEARCHES}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <BrandScanScheduleFields
