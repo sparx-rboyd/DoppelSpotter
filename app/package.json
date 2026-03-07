@@ -15,7 +15,9 @@
     "backfill-scan-counts": "tsx scripts/backfill-scan-counts.ts"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
     "@google-cloud/firestore": "^8.3.0",
+    "@react-pdf/renderer": "^4.3.2",
     "apify-client": "^2.11.2",
     "bcryptjs": "^3.0.3",
     "google-auth-library": "^10.6.1",

@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
-  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check,
+  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check, Download,
   Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -78,22 +78,22 @@ const SEVERITY_COUNT_TEXT_CLASSES = {
 function SeverityPills({ high, medium, low }: { high: number; medium: number; low: number }) {
   if (high === 0 && medium === 0 && low === 0) return null;
   return (
-    <span className="flex items-center gap-2">
+    <span className="flex flex-wrap items-center gap-1.5">
       {high > 0 && (
-        <Badge variant="danger">
-          <AlertCircle className="w-3.5 h-3.5" />
+        <Badge variant="danger" className="gap-1 px-2 py-0.5 text-[11px]">
+          <AlertCircle className="w-3 h-3" />
           {high} High
         </Badge>
       )}
       {medium > 0 && (
-        <Badge variant="warning">
-          <AlertTriangle className="w-3.5 h-3.5" />
+        <Badge variant="warning" className="gap-1 px-2 py-0.5 text-[11px]">
+          <AlertTriangle className="w-3 h-3" />
           {medium} Medium
         </Badge>
       )}
       {low > 0 && (
-        <Badge variant="success">
-          <Info className="w-3.5 h-3.5" />
+        <Badge variant="success" className="gap-1 px-2 py-0.5 text-[11px]">
+          <Info className="w-3 h-3" />
           {low} Low
         </Badge>
       )}
@@ -265,6 +265,22 @@ function getScanResultSetIdFromUrl(url: string) {
   }
 }
 
+function parseDownloadFilename(headerValue: string | null) {
+  if (!headerValue) return null;
+
+  const utf8Match = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match) {
+    try {
+      return decodeURIComponent(utf8Match[1]);
+    } catch {
+      return utf8Match[1];
+    }
+  }
+
+  const basicMatch = headerValue.match(/filename="?([^";]+)"?/i);
+  return basicMatch?.[1] ?? null;
+}
+
 function scrollToScanResultSet(scanId: string, attempt = 0) {
   if (typeof window === 'undefined') return;
 
@@ -315,6 +331,8 @@ export default function BrandDetailPage() {
   const [findingsSearchLoading, setFindingsSearchLoading] = useState(false);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
+  const [exportingCsvScanId, setExportingCsvScanId] = useState<string | null>(null);
+  const [exportingPdfScanId, setExportingPdfScanId] = useState<string | null>(null);
   const [copiedScanLinkId, setCopiedScanLinkId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
@@ -1519,6 +1537,56 @@ export default function BrandDetailPage() {
     }
   }
 
+  async function downloadScanExport(scan: ScanSummary, format: 'csv' | 'pdf') {
+    if (typeof window === 'undefined') return;
+
+    const setExportingScanId = format === 'csv' ? setExportingCsvScanId : setExportingPdfScanId;
+    const endpoint = format === 'csv'
+      ? `/api/brands/${brandId}/scans/${scan.id}/export`
+      : `/api/brands/${brandId}/scans/${scan.id}/export/pdf`;
+    const errorMessage = format === 'csv'
+      ? 'Failed to export scan findings as CSV'
+      : 'Failed to export scan findings as PDF';
+
+    setExportingScanId(scan.id);
+    setError('');
+
+    try {
+      const res = await fetch(endpoint, {
+        credentials: 'same-origin',
+      });
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? errorMessage);
+      }
+
+      const blob = await res.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const filename = parseDownloadFilename(res.headers.get('content-disposition')) ?? `scan-${scan.id}-findings.${format}`;
+      const link = document.createElement('a');
+
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : errorMessage);
+    } finally {
+      setExportingScanId((current) => (current === scan.id ? null : current));
+    }
+  }
+
+  async function exportScanFindings(scan: ScanSummary) {
+    await downloadScanExport(scan, 'csv');
+  }
+
+  async function exportScanPdf(scan: ScanSummary) {
+    await downloadScanExport(scan, 'pdf');
+  }
+
   // ---------------------------------------------------------------------------
   // Progress bar helpers
   // ---------------------------------------------------------------------------
@@ -2355,64 +2423,92 @@ export default function BrandDetailPage() {
                                     </div>
                                   </div>
                                 ) : (
-                                  <div className="group flex items-center gap-4 px-6 py-4 transition hover:bg-gray-50">
+                                  <div className="group flex items-start gap-3 px-6 py-4 transition hover:bg-gray-50">
                                     <button
                                       type="button"
                                       onClick={() => {
                                         if (isFindingsSearchActive) return;
                                         toggleScanExpand(scan.id);
                                       }}
-                                      className="flex min-w-0 flex-1 items-center gap-4 text-left"
+                                      className="flex min-w-0 flex-1 items-start gap-4 text-left"
                                       aria-expanded={isExpanded}
                                     >
                                       {isExpanded
-                                        ? <ChevronDown className="w-4 h-4 text-gray-400 flex-shrink-0" />
-                                        : <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />}
-                                      <span className="text-sm font-semibold text-gray-500 flex-shrink-0">
-                                        {formatScanDate(scan.startedAt)}
-                                      </span>
-                                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                                        {hasFindings ? (
-                                          <SeverityPills
-                                            high={displayedHighCount}
-                                            medium={displayedMediumCount}
-                                            low={displayedLowCount}
-                                          />
-                                        ) : (
-                                          <span className="text-xs text-gray-400">No findings</span>
-                                        )}
-                                        {displayedNonHitCount > 0 && (
-                                          <span className="text-xs text-gray-400">
-                                            · {displayedNonHitCount} non-hit{displayedNonHitCount !== 1 ? 's' : ''}
-                                          </span>
-                                        )}
-                                        {displayedAddressedCount > 0 && (
-                                          <span className="text-xs text-gray-400">
-                                            · {displayedAddressedCount} addressed
-                                          </span>
-                                        )}
-                                        {displayedIgnoredCount > 0 && (
-                                          <span className="text-xs text-gray-400">
-                                            · {displayedIgnoredCount} ignored
-                                          </span>
-                                        )}
-                                        {(scan.skippedCount ?? 0) > 0 && (
-                                          <span className="inline-flex items-center gap-1 text-xs text-gray-400">
-                                            · {scan.skippedCount} skipped
-                                            <InfoTooltip
-                                              content="Findings that appeared in previous scans were skipped."
-                                              iconClassName="text-gray-300 hover:text-gray-400"
+                                        ? <ChevronDown className="mt-0.5 w-4 h-4 text-gray-400 flex-shrink-0" />
+                                        : <ChevronRight className="mt-0.5 w-4 h-4 text-gray-400 flex-shrink-0" />}
+                                      <span className="flex min-w-0 flex-1 flex-col gap-2.5">
+                                        <span className="text-sm font-semibold text-gray-500">
+                                          {formatScanDate(scan.startedAt)}
+                                        </span>
+                                        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                          {hasFindings ? (
+                                            <SeverityPills
+                                              high={displayedHighCount}
+                                              medium={displayedMediumCount}
+                                              low={displayedLowCount}
                                             />
-                                          </span>
-                                        )}
-                                        {scan.status === 'cancelled' && (
-                                          <span className="text-xs italic text-gray-400">· cancelled</span>
-                                        )}
-                                        {scan.status === 'failed' && (
-                                          <span className="text-xs italic text-red-400">· failed</span>
-                                        )}
+                                          ) : (
+                                            <span className="text-xs text-gray-400">No findings</span>
+                                          )}
+                                          {displayedNonHitCount > 0 && (
+                                            <span className="text-xs text-gray-400">
+                                              · {displayedNonHitCount} non-hit{displayedNonHitCount !== 1 ? 's' : ''}
+                                            </span>
+                                          )}
+                                          {displayedAddressedCount > 0 && (
+                                            <span className="text-xs text-gray-400">
+                                              · {displayedAddressedCount} addressed
+                                            </span>
+                                          )}
+                                          {displayedIgnoredCount > 0 && (
+                                            <span className="text-xs text-gray-400">
+                                              · {displayedIgnoredCount} ignored
+                                            </span>
+                                          )}
+                                          {(scan.skippedCount ?? 0) > 0 && (
+                                            <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+                                              · {scan.skippedCount} skipped
+                                              <InfoTooltip
+                                                content="Findings that appeared in previous scans were skipped."
+                                                iconClassName="text-gray-300 hover:text-gray-400"
+                                              />
+                                            </span>
+                                          )}
+                                          {scan.status === 'cancelled' && (
+                                            <span className="text-xs italic text-gray-400">· cancelled</span>
+                                          )}
+                                          {scan.status === 'failed' && (
+                                            <span className="text-xs italic text-red-400">· failed</span>
+                                          )}
+                                        </span>
                                       </span>
                                     </button>
+
+                                    <div className="flex flex-shrink-0 items-center gap-2">
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        loading={exportingCsvScanId === scan.id}
+                                        disabled={exportingCsvScanId !== null && exportingCsvScanId !== scan.id}
+                                        onClick={() => void exportScanFindings(scan)}
+                                        className="flex-shrink-0"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                        Export CSV
+                                      </Button>
+
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        loading={exportingPdfScanId === scan.id}
+                                        disabled={exportingPdfScanId !== null && exportingPdfScanId !== scan.id}
+                                        onClick={() => void exportScanPdf(scan)}
+                                        className="flex-shrink-0"
+                                      >
+                                        <Download className="w-3.5 h-3.5" />
+                                        Export PDF
+                                      </Button>
+                                    </div>
 
                                     {showDebug && (
                                       <Tooltip
@@ -2449,7 +2545,7 @@ export default function BrandDetailPage() {
                                             e.preventDefault();
                                             e.stopPropagation();
                                           }}
-                                          className="inline-flex items-center justify-center rounded-md p-1.5 text-gray-300 opacity-40 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-300 opacity-50 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
@@ -2457,7 +2553,9 @@ export default function BrandDetailPage() {
                                     ) : (
                                       <button
                                         type="button"
-                                        onClick={() => {
+                                        onClick={(e) => {
+                                          e.preventDefault();
+                                          e.stopPropagation();
                                           if (requiresDeleteScanConfirmation) {
                                             setConfirmDeleteScanId(scan.id);
                                             setConfirmClear(false);
@@ -2467,7 +2565,7 @@ export default function BrandDetailPage() {
                                           void deleteScan(scan.id);
                                           setConfirmClear(false);
                                         }}
-                                        className="flex-shrink-0 rounded-md p-1.5 text-gray-300 opacity-0 transition hover:bg-red-50 hover:text-red-500 focus:opacity-100 group-hover:opacity-100"
+                                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
                                         aria-label="Delete scan"
                                       >
                                         <Trash2 className="w-3.5 h-3.5" />

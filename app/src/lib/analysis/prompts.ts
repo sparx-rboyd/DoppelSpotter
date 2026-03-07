@@ -89,6 +89,20 @@ Rules:
 - Only describe evidence contained in the provided findings.
 - Keep the tone neutral, analyst-style, and succinct.`;
 
+/**
+ * Format the exact chat messages sent to the LLM into a readable transcript
+ * that can be stored on findings for later debug inspection.
+ */
+export function formatLlmPromptForDebug(systemPrompt: string, userPrompt: string): string {
+  return [
+    '[system]',
+    systemPrompt,
+    '',
+    '[user]',
+    userPrompt,
+  ].join('\n');
+}
+
 export function buildGoogleFinalSelectionSystemPrompt(maxSuggestedSearches: number): string {
   return `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
 

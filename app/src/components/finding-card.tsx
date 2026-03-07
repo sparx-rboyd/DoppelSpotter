@@ -755,6 +755,18 @@ export function FindingCard({
             {showDebug && (
               <div className="space-y-1.5">
                 <ExpandableSection
+                  icon={Sparkles}
+                  label="LLM analysis prompt"
+                  onOpen={ensureDebugFinding}
+                  loading={debugLoading}
+                  error={debugError}
+                >
+                  {debugFinding?.llmAnalysisPrompt
+                    ? debugFinding.llmAnalysisPrompt
+                    : '(not available — AI analysis may have failed before the request was sent, or this is a legacy finding)'}
+                </ExpandableSection>
+
+                <ExpandableSection
                   icon={MessageSquare}
                   label="Raw AI response"
                   onOpen={ensureDebugFinding}

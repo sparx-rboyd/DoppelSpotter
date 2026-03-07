@@ -154,6 +154,8 @@ export interface Finding extends FindingSummary {
   rawData: Record<string, unknown>;
   /** Timestamp when the finding was ignored by the user. */
   ignoredAt?: Timestamp;
+  /** The exact system + user prompt transcript sent for AI analysis. */
+  llmAnalysisPrompt?: string;
   /** The raw JSON string returned by AI analysis before parsing. */
   rawLlmResponse?: string;
 }

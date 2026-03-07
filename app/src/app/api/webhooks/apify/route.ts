@@ -14,6 +14,7 @@ import {
   buildGoogleFinalSelectionPrompt,
   buildGoogleChunkAnalysisPrompt,
   buildScanSummaryPrompt,
+  formatLlmPromptForDebug,
 } from '@/lib/analysis/prompts';
 import {
   parseAnalysisOutput,
@@ -370,8 +371,20 @@ async function handleSucceededRun({
   } else {
     // Analyse each item sequentially to avoid rate-limiting OpenRouter
     for (const item of itemsToAnalyse) {
+      const prompt = buildAnalysisPrompt({
+        brandName: brand.name,
+        keywords: brand.keywords,
+        officialDomains: brand.officialDomains,
+        watchWords: brand.watchWords,
+        safeWords: brand.safeWords,
+        acknowledgedUrls,
+        source,
+        rawData: item,
+      });
+      const llmAnalysisPrompt = formatLlmPromptForDebug(SYSTEM_PROMPT, prompt);
+
       try {
-        const analysisResult = await analyseItem({ brand, source, actorId, item, acknowledgedUrls });
+        const analysisResult = await analyseItem({ prompt });
         const findingRef = db.collection('findings').doc();
         const finding: Omit<Finding, 'id'> = {
           scanId: scan.id ?? scanDoc.id,
@@ -392,6 +405,7 @@ async function handleSucceededRun({
             isIgnored: true,
             ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
           }),
+          llmAnalysisPrompt,
           rawLlmResponse: analysisResult.rawLlmResponse,
           createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
         };
@@ -421,6 +435,7 @@ async function handleSucceededRun({
           url: extractUrl(item),
           rawData: item,
           isFalsePositive: false,
+          llmAnalysisPrompt,
           createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
         };
         await findingRef.set(fallbackFinding);
@@ -566,13 +581,24 @@ async function analyseAndWriteBatch({
     chunks,
     GOOGLE_ANALYSIS_CONCURRENCY,
     async (chunk, chunkIndex): Promise<GoogleChunkAnalysisResult> => {
+      const prompt = buildGoogleChunkAnalysisPrompt({
+        brandName: brand.name,
+        keywords: brand.keywords,
+        officialDomains: brand.officialDomains,
+        watchWords: brand.watchWords,
+        safeWords: brand.safeWords,
+        acknowledgedUrls,
+        source,
+        candidates: chunk,
+        runContext: normalizedRun.runContext,
+      });
+      const llmAnalysisPrompt = formatLlmPromptForDebug(GOOGLE_CLASSIFICATION_SYSTEM_PROMPT, prompt);
+
       try {
         const chunkResult = await analyseGoogleChunk({
-          brand,
-          source,
           candidates: chunk,
-          runContext: normalizedRun.runContext,
-          acknowledgedUrls,
+          prompt,
+          llmAnalysisPrompt,
         });
 
         return chunkResult;
@@ -583,7 +609,11 @@ async function analyseAndWriteBatch({
         for (const candidate of chunk) {
           fallbackOutcomes.set(candidate.normalizedUrl, {
             candidate,
-            outcome: buildGoogleFallbackOutcome('AI analysis failed for this chunk. Raw data is preserved for manual review.'),
+            outcome: buildGoogleFallbackOutcome(
+              'AI analysis failed for this chunk. Raw data is preserved for manual review.',
+              undefined,
+              llmAnalysisPrompt,
+            ),
           });
         }
 
@@ -641,6 +671,7 @@ type GoogleFindingOutcome = {
   title: string;
   analysis: string;
   isFalsePositive: boolean;
+  llmAnalysisPrompt?: string;
   rawLlmResponse?: string;
   classificationSource: 'llm' | 'fallback';
 };
@@ -773,30 +804,14 @@ function normalizeGoogleSerpRun({
 }
 
 async function analyseGoogleChunk({
-  brand,
-  source,
   candidates,
-  runContext,
-  acknowledgedUrls,
+  prompt,
+  llmAnalysisPrompt,
 }: {
-  brand: BrandProfile;
-  source: Finding['source'];
   candidates: GoogleSearchCandidate[];
-  runContext: GoogleRunContext;
-  acknowledgedUrls?: string[];
+  prompt: string;
+  llmAnalysisPrompt: string;
 }): Promise<GoogleChunkAnalysisResult> {
-  const prompt = buildGoogleChunkAnalysisPrompt({
-    brandName: brand.name,
-    keywords: brand.keywords,
-    officialDomains: brand.officialDomains,
-    watchWords: brand.watchWords,
-    safeWords: brand.safeWords,
-    acknowledgedUrls,
-    source,
-    candidates,
-    runContext,
-  });
-
   const raw = await chatCompletion([
     { role: 'system', content: GOOGLE_CLASSIFICATION_SYSTEM_PROMPT },
     { role: 'user', content: prompt },
@@ -815,8 +830,12 @@ async function analyseGoogleChunk({
     outcomes.set(candidate.normalizedUrl, {
       candidate,
       outcome: item
-        ? buildGoogleFindingOutcome(item, raw)
-        : buildGoogleFallbackOutcome('AI analysis returned no assessment for this result. Raw data is preserved for manual review.', raw),
+        ? buildGoogleFindingOutcome(item, raw, llmAnalysisPrompt)
+        : buildGoogleFallbackOutcome(
+            'AI analysis returned no assessment for this result. Raw data is preserved for manual review.',
+            raw,
+            llmAnalysisPrompt,
+          ),
     });
   }
 
@@ -956,6 +975,9 @@ async function upsertGoogleFinding({
           isIgnored: true,
           ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
         }),
+      ...(typeof preferredOutcome.llmAnalysisPrompt === 'string' && {
+        llmAnalysisPrompt: preferredOutcome.llmAnalysisPrompt,
+      }),
         ...(typeof preferredOutcome.rawLlmResponse === 'string' && {
           rawLlmResponse: preferredOutcome.rawLlmResponse,
         }),
@@ -974,6 +996,11 @@ async function upsertGoogleFinding({
       rawData: mergedRawData,
       isFalsePositive: preferredOutcome.isFalsePositive,
     };
+
+    const llmAnalysisPrompt = preferredOutcome.llmAnalysisPrompt ?? existing.llmAnalysisPrompt;
+    if (typeof llmAnalysisPrompt === 'string') {
+      updates.llmAnalysisPrompt = llmAnalysisPrompt;
+    }
 
     const rawLlmResponse = preferredOutcome.rawLlmResponse ?? existing.rawLlmResponse;
     if (typeof rawLlmResponse === 'string') {
@@ -1114,30 +1141,10 @@ async function triggerDeepSearches({
  * Returns parsed fields plus the raw AI response string for storage / debugging.
  */
 async function analyseItem({
-  brand,
-  source,
-  actorId,
-  item,
-  acknowledgedUrls,
+  prompt,
 }: {
-  brand: BrandProfile;
-  source: Finding['source'];
-  actorId: string;
-  item: Record<string, unknown>;
-  acknowledgedUrls?: string[];
+  prompt: string;
 }): Promise<{ severity: Finding['severity']; title: string; llmAnalysis: string; isFalsePositive: boolean; rawLlmResponse: string }> {
-  void actorId;
-  const prompt = buildAnalysisPrompt({
-    brandName: brand.name,
-    keywords: brand.keywords,
-    officialDomains: brand.officialDomains,
-    watchWords: brand.watchWords,
-    safeWords: brand.safeWords,
-    acknowledgedUrls,
-    source,
-    rawData: item,
-  });
-
   const raw = await chatCompletion([
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: prompt },
@@ -1151,23 +1158,33 @@ async function analyseItem({
   return { ...parsed, rawLlmResponse: raw };
 }
 
-function buildGoogleFindingOutcome(item: GoogleChunkAnalysisItem, rawLlmResponse: string): GoogleFindingOutcome {
+function buildGoogleFindingOutcome(
+  item: GoogleChunkAnalysisItem,
+  rawLlmResponse: string,
+  llmAnalysisPrompt: string,
+): GoogleFindingOutcome {
   return {
     severity: item.severity,
     title: item.title,
     analysis: item.analysis,
     isFalsePositive: item.isFalsePositive,
+    llmAnalysisPrompt,
     rawLlmResponse,
     classificationSource: 'llm',
   };
 }
 
-function buildGoogleFallbackOutcome(message: string, rawLlmResponse?: string): GoogleFindingOutcome {
+function buildGoogleFallbackOutcome(
+  message: string,
+  rawLlmResponse?: string,
+  llmAnalysisPrompt?: string,
+): GoogleFindingOutcome {
   return {
     severity: 'medium',
     title: 'Unanalysed result — review manually',
     analysis: message,
     isFalsePositive: false,
+    llmAnalysisPrompt,
     rawLlmResponse,
     classificationSource: 'fallback',
   };
@@ -1289,6 +1306,7 @@ function choosePreferredGoogleOutcome(existing: Finding | null, next: GoogleFind
     title: existing.title,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,
+    llmAnalysisPrompt: existing.llmAnalysisPrompt,
     rawLlmResponse: existing.rawLlmResponse,
     classificationSource: existingSource,
   };
