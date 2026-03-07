@@ -332,12 +332,12 @@ export default function NewBrandPage() {
                     <InfoTooltip content="The number of search result pages to request (10 results per page). More pages increases coverage, but scans will be slower." />
                   </label>
                   <div className="mt-3">
-                    <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-end justify-between gap-4">
                       <div className="min-w-0">
                         <p className="text-sm text-gray-500">Fewer pages</p>
                         <p className="text-xs text-gray-400">Faster</p>
                       </div>
-                      <span className="text-sm font-semibold text-gray-900">
+                      <span className="text-xs text-gray-400">
                         {searchResultPages} {searchResultPages === 1 ? 'page' : 'pages'}
                       </span>
                       <div className="min-w-0 text-right">
@@ -395,19 +395,19 @@ export default function NewBrandPage() {
                 </div>
 
                 {allowAiDeepSearches && (
-                  <div className="border-t border-gray-100 pt-4">
-                    <div className="ml-1 border-l border-gray-200 pl-4">
+                  <div className="-mx-6 border-t border-gray-100 bg-gray-50 px-6 py-4">
+                    <div>
                       <label htmlFor="max-ai-deep-searches" className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
                         AI deep searches
                         <InfoTooltip content="The maximum number of follow-up Google searches that AI analysis is permitted to run. More searches increase coverage, but scans will be slower." />
                       </label>
                       <div className="mt-3">
-                        <div className="flex items-start justify-between gap-4">
+                        <div className="flex items-end justify-between gap-4">
                           <div className="min-w-0">
                             <p className="text-sm text-gray-500">Fewer searches</p>
                             <p className="text-xs text-gray-400">Faster</p>
                           </div>
-                          <span className="text-sm font-semibold text-gray-900">{maxAiDeepSearches} searches</span>
+                          <span className="text-xs text-gray-400">{maxAiDeepSearches} searches</span>
                           <div className="min-w-0 text-right">
                             <p className="text-sm text-gray-500">More searches</p>
                             <p className="text-xs text-gray-400">Slower</p>

@@ -760,51 +760,49 @@ export function BrandScanScheduleFields({
       </div>
 
       {value.enabled && (
-        <div className="mt-3 border-t border-gray-100 pt-4">
-          <div className="ml-1 border-l border-gray-200 pl-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <SelectField
-                id="schedule-frequency"
-                label="Frequency"
-                tooltip="The selected start date anchors weekly, fortnightly, and monthly repeats."
-                value={value.frequency}
-                options={FREQUENCY_OPTIONS}
-                onChange={(nextValue) => updateValue({ frequency: nextValue as BrandScanScheduleInput['frequency'] })}
-                labelTone="subtle"
-              />
+        <div className="mt-3 -mx-6 border-t border-gray-100 bg-gray-50 px-6 py-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <SelectField
+              id="schedule-frequency"
+              label="Frequency"
+              tooltip="The selected start date anchors weekly, fortnightly, and monthly repeats."
+              value={value.frequency}
+              options={FREQUENCY_OPTIONS}
+              onChange={(nextValue) => updateValue({ frequency: nextValue as BrandScanScheduleInput['frequency'] })}
+              labelTone="subtle"
+            />
 
-              <SelectField
-                id="schedule-timezone"
-                label="Timezone"
-                tooltip="Scheduled scans stay pinned to this local timezone, including through daylight saving changes."
-                value={value.timeZone}
-                options={timeZones}
-                onChange={(nextValue) => updateValue({ timeZone: nextValue })}
-                searchable
-                searchPlaceholder="Search timezones"
-                labelTone="subtle"
-              />
+            <SelectField
+              id="schedule-timezone"
+              label="Timezone"
+              tooltip="Scheduled scans stay pinned to this local timezone, including through daylight saving changes."
+              value={value.timeZone}
+              options={timeZones}
+              onChange={(nextValue) => updateValue({ timeZone: nextValue })}
+              searchable
+              searchPlaceholder="Search timezones"
+              labelTone="subtle"
+            />
 
-              <DateField
-                id="schedule-start-date"
-                label="Start date"
-                tooltip="The first local date used to anchor the repeating schedule."
-                value={value.startDate}
-                onChange={(nextValue) => updateValue({ startDate: nextValue })}
-                minDate={minimumDate}
-                labelTone="subtle"
-              />
+            <DateField
+              id="schedule-start-date"
+              label="Start date"
+              tooltip="The first local date used to anchor the repeating schedule."
+              value={value.startDate}
+              onChange={(nextValue) => updateValue({ startDate: nextValue })}
+              minDate={minimumDate}
+              labelTone="subtle"
+            />
 
-              <TimeField
-                id="schedule-start-time"
-                label="Time"
-                tooltip="Scheduled scans will run within 10 minutes of the scheduled start time."
-                value={value.startTime}
-                onChange={(nextValue) => updateValue({ startTime: nextValue })}
-                minTime={minimumTime}
-                labelTone="subtle"
-              />
-            </div>
+            <TimeField
+              id="schedule-start-time"
+              label="Time"
+              tooltip="Scheduled scans will run within 10 minutes of the scheduled start time."
+              value={value.startTime}
+              onChange={(nextValue) => updateValue({ startTime: nextValue })}
+              minTime={minimumTime}
+              labelTone="subtle"
+            />
           </div>
         </div>
       )}
