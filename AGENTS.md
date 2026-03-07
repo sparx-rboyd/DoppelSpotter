@@ -267,19 +267,33 @@ Users can mark any real finding as addressed once they have completed the follow
 
 ## Bookmarked Findings
 
-Users can bookmark any finding they want to follow up on, including AI-classified non-hits. Bookmark state is stored directly on the finding document with `isBookmarked`, `bookmarkedAt`, and optional `bookmarkNote`.
+Users can bookmark any finding they want to follow up on, including AI-classified non-hits. Bookmark state is stored directly on the finding document with `isBookmarked` and `bookmarkedAt`.
 
 **Behaviour:**
 - Bookmarks are per finding document, not URL-scoped like ignore/un-ignore
-- Bookmark notes are optional and can be added, edited, or deleted after bookmarking
 - The brand page loads a cross-scan "Bookmarked findings" panel above the scan result sets; it is hidden when empty and collapsed by default
 - The bookmark panel groups bookmarked items into `high`, `medium`, `low`, and `Non-hits`, while still showing any existing ignored/non-hit badges on the cards themselves
 - Users can unbookmark findings both from their original location and from the bookmark panel
 - Because bookmark state lives on the finding document, deleting a scan automatically removes any bookmarks attached to findings from that scan
 
 **API:**
-- `PATCH /api/brands/[brandId]/findings/[findingId]` — body may include `{ isBookmarked: boolean, bookmarkNote?: string | null }`
+- `PATCH /api/brands/[brandId]/findings/[findingId]` — body may include `{ isBookmarked: boolean }`
 - `GET /api/brands/[brandId]/findings?bookmarkedOnly=true` — returns bookmarked findings across all scans for the brand
+
+---
+
+## Finding Notes
+
+Users can add notes to any finding, regardless of whether it is bookmarked, ignored, addressed, or AI-classified as a non-hit. Notes are stored per finding document in the existing `bookmarkNote` field for backwards compatibility.
+
+**Behaviour:**
+- Every finding card exposes a note action
+- Existing notes render beneath the AI analysis and can be edited or deleted in place
+- Notes are per finding document, not URL-scoped, so matching URLs across scans keep independent notes
+- Unbookmarking a finding does not remove its note
+
+**API:**
+- `PATCH /api/brands/[brandId]/findings/[findingId]` — body may include `{ bookmarkNote?: string | null }`
 
 ---
 
@@ -309,7 +323,7 @@ Users can bookmark any finding they want to follow up on, including AI-classifie
 | `users` | id, email, passwordHash, createdAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?**, rawLlmResponse?, createdAt |
+| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 
 ---
 

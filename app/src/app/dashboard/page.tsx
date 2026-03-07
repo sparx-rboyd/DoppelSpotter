@@ -15,6 +15,38 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  async function handleFindingNoteUpdate(triggerFinding: FindingSummary, note: string | null) {
+    const res = await fetch(`/api/brands/${triggerFinding.brandId}/findings/${triggerFinding.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ bookmarkNote: note }),
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error ?? 'Failed to update note');
+    }
+
+    const json = await res.json().catch(() => ({}));
+    const responseData = (json.data ?? {}) as {
+      isBookmarked?: boolean;
+      bookmarkNote?: string | null;
+    };
+    const isBookmarked = responseData.isBookmarked ?? triggerFinding.isBookmarked ?? false;
+    const bookmarkNote = responseData.bookmarkNote ?? null;
+
+    setFindings((prev) => prev.map((finding) => (
+      finding.id === triggerFinding.id
+        ? {
+            ...finding,
+            isBookmarked,
+            bookmarkedAt: isBookmarked ? finding.bookmarkedAt : undefined,
+            bookmarkNote: bookmarkNote ?? undefined,
+          }
+        : finding
+    )));
+  }
+
   useEffect(() => {
     async function fetchFindings() {
       setError('');
@@ -107,7 +139,11 @@ export default function DashboardPage() {
             {!loading && !error && findings.length > 0 && (
               <div className="p-4 sm:p-6 space-y-4">
                 {findings.map((finding) => (
-                  <FindingCard key={finding.id} finding={finding} />
+                  <FindingCard
+                    key={finding.id}
+                    finding={finding}
+                    onNoteUpdate={handleFindingNoteUpdate}
+                  />
                 ))}
               </div>
             )}

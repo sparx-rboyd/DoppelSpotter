@@ -38,7 +38,6 @@ import { Tooltip } from './ui/tooltip';
 
 type BookmarkUpdate = {
   isBookmarked?: boolean;
-  bookmarkNote?: string | null;
 };
 
 interface FindingCardProps {
@@ -51,10 +50,10 @@ interface FindingCardProps {
   onAddressToggle?: (finding: FindingSummary, isAddressed: boolean) => Promise<void>;
   /** Called when the user reclassifies a finding into another category. */
   onReclassify?: (finding: FindingSummary, category: FindingCategory) => Promise<void>;
-  /**
-   * Called when the user bookmarks/unbookmarks a finding or updates its note.
-   */
+  /** Called when the user bookmarks or unbookmarks a finding. */
   onBookmarkUpdate?: (finding: FindingSummary, updates: BookmarkUpdate) => Promise<void>;
+  /** Called when the user adds, edits, or deletes a note for this finding. */
+  onNoteUpdate?: (finding: FindingSummary, note: string | null) => Promise<void>;
 }
 
 function escapeRegExp(value: string) {
@@ -274,6 +273,7 @@ export function FindingCard({
   onAddressToggle,
   onReclassify,
   onBookmarkUpdate,
+  onNoteUpdate,
 }: FindingCardProps) {
   const src = sourceConfig[finding.source] ?? sourceConfig.unknown;
   const Icon = src.icon;
@@ -281,6 +281,7 @@ export function FindingCard({
   const isIgnored = finding.isIgnored === true;
   const isAddressed = finding.isAddressed === true;
   const isBookmarked = finding.isBookmarked === true;
+  const hasNote = Boolean(finding.bookmarkNote?.trim());
   const muted = isFalsePositive || isIgnored || isAddressed;
   const severityMeta = severityConfig[finding.severity];
   const SeverityIcon = severityMeta.icon;
@@ -295,8 +296,9 @@ export function FindingCard({
   const [isReclassifyDialogOpen, setIsReclassifyDialogOpen] = useState(false);
   const [selectedReclassificationCategory, setSelectedReclassificationCategory] = useState<FindingCategory | null>(null);
   const [bookmarking, setBookmarking] = useState(false);
-  const [editingBookmarkNote, setEditingBookmarkNote] = useState(false);
-  const [bookmarkNoteDraft, setBookmarkNoteDraft] = useState(finding.bookmarkNote ?? '');
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteDraft, setNoteDraft] = useState(finding.bookmarkNote ?? '');
+  const [savingNote, setSavingNote] = useState(false);
   const [debugFinding, setDebugFinding] = useState<Finding | null>(null);
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugError, setDebugError] = useState('');
@@ -312,10 +314,10 @@ export function FindingCard({
   }, []);
 
   useEffect(() => {
-    if (!editingBookmarkNote) {
-      setBookmarkNoteDraft(finding.bookmarkNote ?? '');
+    if (!editingNote) {
+      setNoteDraft(finding.bookmarkNote ?? '');
     }
-  }, [editingBookmarkNote, finding.bookmarkNote]);
+  }, [editingNote, finding.bookmarkNote]);
 
   useEffect(() => {
     if (!isReclassifyDialogOpen) return undefined;
@@ -382,43 +384,41 @@ export function FindingCard({
     const nextIsBookmarked = !isBookmarked;
     setBookmarking(true);
     try {
-      await onBookmarkUpdate(finding, {
-        isBookmarked: nextIsBookmarked,
-        bookmarkNote: nextIsBookmarked ? undefined : null,
-      });
-      if (nextIsBookmarked) {
-        setEditingBookmarkNote(finding.bookmarkNote ? false : true);
-      } else {
-        setEditingBookmarkNote(false);
-        setBookmarkNoteDraft('');
-      }
+      await onBookmarkUpdate(finding, { isBookmarked: nextIsBookmarked });
     } finally {
       setBookmarking(false);
     }
   }
 
-  async function saveBookmarkNote(e: React.MouseEvent) {
+  function openNoteEditor(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!onBookmarkUpdate || bookmarking) return;
-    setBookmarking(true);
+    if (!onNoteUpdate) return;
+    setNoteDraft(finding.bookmarkNote ?? '');
+    setEditingNote(true);
+  }
+
+  async function saveNote(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!onNoteUpdate || savingNote) return;
+    setSavingNote(true);
     try {
-      await onBookmarkUpdate(finding, { bookmarkNote: bookmarkNoteDraft });
-      setEditingBookmarkNote(false);
+      await onNoteUpdate(finding, noteDraft);
+      setEditingNote(false);
     } finally {
-      setBookmarking(false);
+      setSavingNote(false);
     }
   }
 
-  async function deleteBookmarkNote(e: React.MouseEvent) {
+  async function deleteNote(e: React.MouseEvent) {
     e.stopPropagation();
-    if (!onBookmarkUpdate || bookmarking) return;
-    setBookmarking(true);
+    if (!onNoteUpdate || savingNote) return;
+    setSavingNote(true);
     try {
-      await onBookmarkUpdate(finding, { bookmarkNote: null });
-      setBookmarkNoteDraft('');
-      setEditingBookmarkNote(false);
+      await onNoteUpdate(finding, null);
+      setNoteDraft('');
+      setEditingNote(false);
     } finally {
-      setBookmarking(false);
+      setSavingNote(false);
     }
   }
 
@@ -612,6 +612,28 @@ export function FindingCard({
                   </button>
                 </Tooltip>
               )}
+              {onNoteUpdate && (
+                <Tooltip content={hasNote ? 'Edit note' : 'Add note'}>
+                  <button
+                    type="button"
+                    onClick={openNoteEditor}
+                    disabled={savingNote}
+                    aria-label={hasNote ? 'Edit note' : 'Add note'}
+                    className={cn(
+                      'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
+                      hasNote
+                        ? 'border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100'
+                        : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
+                    )}
+                  >
+                    {savingNote ? (
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <Pencil className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+                </Tooltip>
+              )}
             </div>
 
             {finding.url && shouldShowMatchedUrl && (
@@ -644,76 +666,65 @@ export function FindingCard({
               </div>
             </div>
 
-            {isBookmarked && (
+            {(hasNote || editingNote) && (
               <div className="mb-3 rounded-lg border border-brand-100 bg-brand-50/60 p-3">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-2 min-w-0">
                     <StickyNote className="w-4 h-4 text-brand-600 mt-0.5 flex-shrink-0" />
                     <div className="min-w-0">
-                      <p className="text-xs font-semibold text-brand-900">Bookmark note</p>
-                      {!editingBookmarkNote && finding.bookmarkNote && (
+                      <p className="text-xs font-semibold text-brand-900">Note</p>
+                      {!editingNote && hasNote && (
                         <p className="mt-1 text-xs sm:text-sm text-brand-900 whitespace-pre-wrap break-words">
                           {finding.bookmarkNote}
                         </p>
                       )}
-                      {!editingBookmarkNote && !finding.bookmarkNote && (
-                        <p className="mt-1 text-xs text-brand-700/55">
-                          Add a reminder to yourself
-                        </p>
-                      )}
                     </div>
                   </div>
-                  {onBookmarkUpdate && !editingBookmarkNote && (
+                  {onNoteUpdate && !editingNote && hasNote && (
                     <div className="flex items-center gap-1 flex-shrink-0">
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setBookmarkNoteDraft(finding.bookmarkNote ?? '');
-                          setEditingBookmarkNote(true);
-                        }}
+                        onClick={openNoteEditor}
                         className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 transition"
                       >
                         <Pencil className="w-3.5 h-3.5" />
-                        {finding.bookmarkNote ? 'Edit note' : 'Add note'}
+                        Edit note
                       </button>
-                      {finding.bookmarkNote && (
-                        <button
-                          type="button"
-                          onClick={deleteBookmarkNote}
-                          disabled={bookmarking}
-                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 transition disabled:opacity-60"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                          Delete note
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={deleteNote}
+                        disabled={savingNote}
+                        className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-brand-700 hover:bg-brand-100 transition disabled:opacity-60"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Delete note
+                      </button>
                     </div>
                   )}
                 </div>
 
-                {editingBookmarkNote && onBookmarkUpdate && (
+                {editingNote && onNoteUpdate && (
                   <div className="mt-3">
                     <textarea
-                      value={bookmarkNoteDraft}
-                      onChange={(e) => setBookmarkNoteDraft(e.target.value)}
+                      value={noteDraft}
+                      onChange={(e) => setNoteDraft(e.target.value)}
                       onClick={(e) => e.stopPropagation()}
                       rows={3}
                       maxLength={2000}
-                      placeholder="Add a reminder to yourself..."
+                      placeholder="Add a note..."
                       className="w-full rounded-lg border border-brand-100 bg-white px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500"
                     />
                     <div className="mt-2 flex items-center justify-between gap-3">
                       <span className="text-[11px] text-brand-800/70">
-                        {bookmarkNoteDraft.trim().length}/2000
+                        {noteDraft.trim().length}/2000
                       </span>
                       <div className="flex items-center gap-2">
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
-                            setEditingBookmarkNote(false);
-                            setBookmarkNoteDraft(finding.bookmarkNote ?? '');
+                            setEditingNote(false);
+                            setNoteDraft(finding.bookmarkNote ?? '');
                           }}
                           className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-white transition"
                         >
@@ -722,11 +733,11 @@ export function FindingCard({
                         </button>
                         <button
                           type="button"
-                          onClick={saveBookmarkNote}
-                          disabled={bookmarking}
+                          onClick={saveNote}
+                          disabled={savingNote}
                           className="inline-flex items-center gap-1 rounded-md bg-brand-600 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition disabled:opacity-60"
                         >
-                          {bookmarking ? (
+                          {savingNote ? (
                             <Loader2 className="w-3.5 h-3.5 animate-spin" />
                           ) : (
                             <Check className="w-3.5 h-3.5" />

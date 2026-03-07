@@ -142,7 +142,7 @@ export interface FindingSummary {
   addressedAt?: Timestamp;
   /** Timestamp when the finding was bookmarked by the user. */
   bookmarkedAt?: Timestamp;
-  /** Optional reminder note attached to a bookmarked finding. */
+  /** Optional user note attached to this finding. */
   bookmarkNote?: string;
   createdAt: Timestamp;
 }

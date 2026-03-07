@@ -170,11 +170,11 @@ export async function GET(request: NextRequest, { params }: Params) {
 //   isIgnored?: boolean;
 //   isAddressed?: boolean;
 //   isBookmarked?: boolean;
-//   bookmarkNote?: string | null;
+//   bookmarkNote?: string | null; // generic per-finding note (legacy field name)
 //   reclassifiedCategory?: 'high' | 'medium' | 'low' | 'non-hit';
 // }
 // Ignoring, addressing, and category reclassification are URL-scoped, but bookmark
-// state and bookmark notes are stored on the individual finding document only.
+// state and notes are stored on the individual finding document only.
 export async function PATCH(request: NextRequest, { params }: Params) {
   const { uid, error } = requireAuth(request);
   if (error) return error;
@@ -248,11 +248,6 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 
   const bookmarkUpdates: Record<string, unknown> = {};
-  const nextIsBookmarked = hasBookmarkUpdate ? body.isBookmarked === true : finding.isBookmarked === true;
-
-  if (hasBookmarkNoteUpdate && normalizedBookmarkNote && !nextIsBookmarked) {
-    return errorResponse('Cannot add a bookmark note to an unbookmarked finding');
-  }
 
   if (hasBookmarkUpdate) {
     bookmarkUpdates.isBookmarked = body.isBookmarked === true;
@@ -262,11 +257,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       }
     } else {
       bookmarkUpdates.bookmarkedAt = FieldValue.delete();
-      bookmarkUpdates.bookmarkNote = FieldValue.delete();
     }
   }
 
-  if (hasBookmarkNoteUpdate && nextIsBookmarked) {
+  if (hasBookmarkNoteUpdate) {
     bookmarkUpdates.bookmarkNote = normalizedBookmarkNote
       ? normalizedBookmarkNote
       : FieldValue.delete();
@@ -476,11 +470,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     await findingDoc.ref.update(bookmarkUpdates);
   }
 
-  const finalBookmarkNote = hasBookmarkUpdate && body.isBookmarked === false
-    ? null
-    : hasBookmarkNoteUpdate
-      ? normalizedBookmarkNote
-      : finding.bookmarkNote ?? null;
+  const finalBookmarkNote = hasBookmarkNoteUpdate
+    ? normalizedBookmarkNote
+    : finding.bookmarkNote ?? null;
   const updatedTriggerFinding = affectedFindings.find((affectedFinding) => affectedFinding.id === findingId);
 
   return NextResponse.json({

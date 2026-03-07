@@ -33,7 +33,6 @@ const SCAN_RESULT_SET_HASH_PREFIX = 'scan-result-set-';
 
 type BookmarkUpdate = {
   isBookmarked?: boolean;
-  bookmarkNote?: string | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -119,6 +118,7 @@ function SeverityGroup({
   onAddressToggle,
   onReclassify,
   onBookmarkUpdate,
+  onNoteUpdate,
   forceExpanded = false,
   highlightQuery,
 }: {
@@ -128,6 +128,7 @@ function SeverityGroup({
   onAddressToggle?: (finding: FindingSummary, isAddressed: boolean) => Promise<void>;
   onReclassify?: (finding: FindingSummary, category: FindingCategory) => Promise<void>;
   onBookmarkUpdate?: (finding: FindingSummary, updates: BookmarkUpdate) => Promise<void>;
+  onNoteUpdate?: (finding: FindingSummary, note: string | null) => Promise<void>;
   forceExpanded?: boolean;
   highlightQuery?: string;
 }) {
@@ -198,6 +199,7 @@ function SeverityGroup({
               onAddressToggle={onAddressToggle}
               onReclassify={onReclassify}
               onBookmarkUpdate={onBookmarkUpdate}
+              onNoteUpdate={onNoteUpdate}
             />
           ))}
         </div>
@@ -584,10 +586,55 @@ export default function BrandDetailPage() {
   }
 
   // ---------------------------------------------------------------------------
-  // Ignore / un-ignore a real finding; reclassify any finding category
+  // Finding actions — bookmark, note, ignore, address, and reclassify
   // ---------------------------------------------------------------------------
 
-  async function handleBookmarkUpdate(triggerFinding: FindingSummary, updates: BookmarkUpdate) {
+  function applyFindingMetadataUpdate(
+    triggerFinding: FindingSummary,
+    responseData: {
+      isBookmarked?: boolean;
+      bookmarkNote?: string | null;
+    },
+  ) {
+    const isBookmarked = responseData.isBookmarked ?? triggerFinding.isBookmarked ?? false;
+    const bookmarkNote = responseData.bookmarkNote ?? null;
+
+    const applyMetadataUpdate = (finding: FindingSummary): FindingSummary => ({
+      ...finding,
+      isBookmarked,
+      bookmarkedAt: isBookmarked ? finding.bookmarkedAt : undefined,
+      bookmarkNote: bookmarkNote ?? undefined,
+    });
+
+    setScanFindings((prev) => updateFindingMap(prev, triggerFinding.id, applyMetadataUpdate));
+    setScanNonHits((prev) => updateFindingMap(prev, triggerFinding.id, applyMetadataUpdate));
+    setScanIgnored((prev) => updateFindingMap(prev, triggerFinding.id, applyMetadataUpdate));
+    setLiveScanFindings((prev) => updateFindingList(prev, triggerFinding.id, applyMetadataUpdate));
+    setAllAddressedFindings((prev) => updateFindingList(prev, triggerFinding.id, applyMetadataUpdate));
+    setAllIgnoredFindings((prev) => updateFindingList(prev, triggerFinding.id, applyMetadataUpdate));
+    setAllBookmarkedFindings((prev) => {
+      if (!isBookmarked) {
+        return prev.filter((finding) => finding.id !== triggerFinding.id);
+      }
+
+      const existing = prev.find((finding) => finding.id === triggerFinding.id);
+      const updatedFinding = applyMetadataUpdate(existing ?? triggerFinding);
+      if (!existing) {
+        return [updatedFinding, ...prev];
+      }
+
+      return prev.map((finding) => (finding.id === triggerFinding.id ? updatedFinding : finding));
+    });
+  }
+
+  async function updateFindingMetadata(
+    triggerFinding: FindingSummary,
+    updates: {
+      isBookmarked?: boolean;
+      bookmarkNote?: string | null;
+    },
+    failureMessage: string,
+  ) {
     const res = await fetch(`/api/brands/${brandId}/findings/${triggerFinding.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -596,7 +643,7 @@ export default function BrandDetailPage() {
     });
     if (!res.ok) {
       const json = await res.json().catch(() => ({}));
-      throw new Error(json.error ?? 'Failed to update bookmark');
+      throw new Error(json.error ?? failureMessage);
     }
 
     const json = await res.json().catch(() => ({}));
@@ -604,31 +651,15 @@ export default function BrandDetailPage() {
       isBookmarked?: boolean;
       bookmarkNote?: string | null;
     };
-    const isBookmarked = responseData.isBookmarked ?? triggerFinding.isBookmarked ?? false;
-    const bookmarkNote = responseData.bookmarkNote ?? null;
+    applyFindingMetadataUpdate(triggerFinding, responseData);
+  }
 
-    const applyBookmarkUpdate = (finding: FindingSummary): FindingSummary => ({
-      ...finding,
-      isBookmarked,
-      bookmarkedAt: isBookmarked ? finding.bookmarkedAt : undefined,
-      bookmarkNote: bookmarkNote ?? undefined,
-    });
+  async function handleBookmarkUpdate(triggerFinding: FindingSummary, updates: BookmarkUpdate) {
+    await updateFindingMetadata(triggerFinding, updates, 'Failed to update bookmark');
+  }
 
-    setScanFindings((prev) => updateFindingMap(prev, triggerFinding.id, applyBookmarkUpdate));
-    setScanNonHits((prev) => updateFindingMap(prev, triggerFinding.id, applyBookmarkUpdate));
-    setScanIgnored((prev) => updateFindingMap(prev, triggerFinding.id, applyBookmarkUpdate));
-    setLiveScanFindings((prev) => updateFindingList(prev, triggerFinding.id, applyBookmarkUpdate));
-    setAllAddressedFindings((prev) => updateFindingList(prev, triggerFinding.id, applyBookmarkUpdate));
-    setAllIgnoredFindings((prev) => updateFindingList(prev, triggerFinding.id, applyBookmarkUpdate));
-    setAllBookmarkedFindings((prev) => {
-      if (!isBookmarked) {
-        return prev.filter((finding) => finding.id !== triggerFinding.id);
-      }
-
-      const existing = prev.find((finding) => finding.id === triggerFinding.id);
-      const updatedFinding = applyBookmarkUpdate(existing ?? triggerFinding);
-      return [updatedFinding, ...prev.filter((finding) => finding.id !== triggerFinding.id)];
-    });
+  async function handleFindingNoteUpdate(triggerFinding: FindingSummary, note: string | null) {
+    await updateFindingMetadata(triggerFinding, { bookmarkNote: note }, 'Failed to update note');
   }
 
   async function handleIgnoreToggle(triggerFinding: FindingSummary, isIgnored: boolean) {
@@ -2026,6 +2057,7 @@ export default function BrandDetailPage() {
                                 onAddressToggle={handleAddressedToggle}
                                 onReclassify={handleReclassifyFinding}
                                 onBookmarkUpdate={handleBookmarkUpdate}
+                                onNoteUpdate={handleFindingNoteUpdate}
                                 forceExpanded={true}
                                 highlightQuery={activeHighlightQuery}
                               />
@@ -2051,6 +2083,7 @@ export default function BrandDetailPage() {
                                     highlightQuery={activeHighlightQuery}
                                     onReclassify={handleReclassifyFinding}
                                     onBookmarkUpdate={handleBookmarkUpdate}
+                                    onNoteUpdate={handleFindingNoteUpdate}
                                   />
                                 ))}
                               </div>
@@ -2081,6 +2114,7 @@ export default function BrandDetailPage() {
                                 findings={visibleAddressedFindings.filter((finding) => finding.severity === sev)}
                                 onAddressToggle={handleAddressedToggle}
                                 onBookmarkUpdate={handleBookmarkUpdate}
+                                onNoteUpdate={handleFindingNoteUpdate}
                                 forceExpanded={true}
                                 highlightQuery={activeHighlightQuery}
                               />
@@ -2109,6 +2143,7 @@ export default function BrandDetailPage() {
                               onIgnoreToggle={handleIgnoreToggle}
                               onReclassify={handleReclassifyFinding}
                               onBookmarkUpdate={handleBookmarkUpdate}
+                              onNoteUpdate={handleFindingNoteUpdate}
                             />
                           ))}
                         </div>
@@ -2196,6 +2231,7 @@ export default function BrandDetailPage() {
                                         findings={visibleLiveScanFindings.filter((f) => f.severity === sev)}
                                         onReclassify={handleReclassifyFinding}
                                         onBookmarkUpdate={handleBookmarkUpdate}
+                                        onNoteUpdate={handleFindingNoteUpdate}
                                         forceExpanded={isFindingsSearchActive}
                                         highlightQuery={activeHighlightQuery}
                                       />
@@ -2479,6 +2515,7 @@ export default function BrandDetailPage() {
                                                   onAddressToggle={handleAddressedToggle}
                                                   onReclassify={handleReclassifyFinding}
                                                   onBookmarkUpdate={handleBookmarkUpdate}
+                                                  onNoteUpdate={handleFindingNoteUpdate}
                                                   forceExpanded={isFindingsSearchActive}
                                                   highlightQuery={activeHighlightQuery}
                                                 />
@@ -2527,6 +2564,7 @@ export default function BrandDetailPage() {
                                                       highlightQuery={activeHighlightQuery}
                                                       onReclassify={handleReclassifyFinding}
                                                       onBookmarkUpdate={handleBookmarkUpdate}
+                                                      onNoteUpdate={handleFindingNoteUpdate}
                                                     />
                                                   ))
                                                 )}
@@ -2578,6 +2616,7 @@ export default function BrandDetailPage() {
                                                       onIgnoreToggle={handleIgnoreToggle}
                                                       onReclassify={handleReclassifyFinding}
                                                       onBookmarkUpdate={handleBookmarkUpdate}
+                                                      onNoteUpdate={handleFindingNoteUpdate}
                                                     />
                                                   ))
                                                 )}
