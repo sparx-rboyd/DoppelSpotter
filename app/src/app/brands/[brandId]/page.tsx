@@ -12,6 +12,7 @@ import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { FindingCard } from '@/components/finding-card';
+import { SelectDropdown } from '@/components/ui/select-dropdown';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -230,6 +231,10 @@ function normalizeFindingsSearchText(value: string) {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+function normalizeFindingsTaxonomyValue(value?: string) {
+  return value?.toLowerCase().replace(/\s+/g, ' ').trim() ?? '';
+}
+
 function getScanResultSetAnchorId(scanId: string) {
   return `${SCAN_RESULT_SET_HASH_PREFIX}${scanId}`;
 }
@@ -329,6 +334,12 @@ export default function BrandDetailPage() {
   const [allIgnoredFindings, setAllIgnoredFindings] = useState<FindingSummary[]>([]);
   const [findingsSearchQuery, setFindingsSearchQuery] = useState('');
   const [findingsSearchLoading, setFindingsSearchLoading] = useState(false);
+  const [findingTaxonomyOptions, setFindingTaxonomyOptions] = useState<{ platforms: string[]; themes: string[] }>({
+    platforms: [],
+    themes: [],
+  });
+  const [selectedFindingPlatform, setSelectedFindingPlatform] = useState('');
+  const [selectedFindingTheme, setSelectedFindingTheme] = useState('');
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
   const [exportingCsvScanId, setExportingCsvScanId] = useState<string | null>(null);
@@ -352,6 +363,17 @@ export default function BrandDetailPage() {
   const pendingScanNonHitsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanIgnoredLoadsRef = useRef<Record<string, Promise<void>>>({});
   const [displayedScanProgressPct, setDisplayedScanProgressPct] = useState(0);
+  const normalizedFindingsSearchQuery = normalizeFindingsSearchText(findingsSearchQuery);
+  const normalizedSelectedFindingPlatform = normalizeFindingsTaxonomyValue(selectedFindingPlatform);
+  const normalizedSelectedFindingTheme = normalizeFindingsTaxonomyValue(selectedFindingTheme);
+  const isFindingsSearchActive = normalizedFindingsSearchQuery.length > 0;
+  const hasActiveFindingPlatformFilter = normalizedSelectedFindingPlatform.length > 0;
+  const hasActiveFindingThemeFilter = normalizedSelectedFindingTheme.length > 0;
+  const isAnyFindingFilterActive =
+    isFindingsSearchActive
+    || hasActiveFindingPlatformFilter
+    || hasActiveFindingThemeFilter;
+  const activeHighlightQuery = isFindingsSearchActive ? findingsSearchQuery : undefined;
 
   function stopPolling() {
     if (pollRef.current) {
@@ -497,6 +519,21 @@ export default function BrandDetailPage() {
       if (res.ok) {
         const json = await res.json();
         setAllBookmarkedFindings(json.data ?? []);
+      }
+    } catch {
+      // Non-critical
+    }
+  }
+
+  async function loadFindingTaxonomyOptions() {
+    try {
+      const res = await fetch(`/api/brands/${brandId}/findings/taxonomy`, { credentials: 'same-origin' });
+      if (res.ok) {
+        const json = await res.json();
+        setFindingTaxonomyOptions({
+          platforms: json.data?.platforms ?? [],
+          themes: json.data?.themes ?? [],
+        });
       }
     } catch {
       // Non-critical
@@ -1139,6 +1176,7 @@ export default function BrandDetailPage() {
       void loadAllBookmarkedFindings();
       void loadAllAddressedFindings();
       void loadAllIgnoredFindings();
+      void loadFindingTaxonomyOptions();
 
       try {
         await refreshBrandProfile();
@@ -1212,7 +1250,7 @@ export default function BrandDetailPage() {
   }, [brandId, loading, scanning]);
 
   useEffect(() => {
-    if (!normalizeFindingsSearchText(findingsSearchQuery)) {
+    if (!isAnyFindingFilterActive) {
       setFindingsSearchLoading(false);
       return;
     }
@@ -1261,7 +1299,29 @@ export default function BrandDetailPage() {
       cancelled = true;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [findingsSearchQuery, scans, scanFindings, scanNonHits, scanIgnored]);
+  }, [isAnyFindingFilterActive, scans, scanFindings, scanNonHits, scanIgnored]);
+
+  useEffect(() => {
+    if (
+      normalizedSelectedFindingPlatform
+      && !findingTaxonomyOptions.platforms.some(
+        (platform) => normalizeFindingsTaxonomyValue(platform) === normalizedSelectedFindingPlatform,
+      )
+    ) {
+      setSelectedFindingPlatform('');
+    }
+  }, [findingTaxonomyOptions.platforms, normalizedSelectedFindingPlatform]);
+
+  useEffect(() => {
+    if (
+      normalizedSelectedFindingTheme
+      && !findingTaxonomyOptions.themes.some(
+        (theme) => normalizeFindingsTaxonomyValue(theme) === normalizedSelectedFindingTheme,
+      )
+    ) {
+      setSelectedFindingTheme('');
+    }
+  }, [findingTaxonomyOptions.themes, normalizedSelectedFindingTheme]);
 
   useEffect(() => {
     return () => {
@@ -1329,6 +1389,7 @@ export default function BrandDetailPage() {
           await refreshBrandProfile().catch(() => {
             // Non-critical
           });
+          void loadFindingTaxonomyOptions();
           setScanning(false);
           setCancelling(false);
           setActiveScanId(null);
@@ -1470,6 +1531,7 @@ export default function BrandDetailPage() {
       setAllAddressedFindings((prev) => prev.filter((finding) => finding.scanId !== scanId));
       setExpandedScanIds((prev) => prev.filter((id) => id !== scanId));
       setScans((prev) => prev.filter((s) => s.id !== scanId));
+      void loadFindingTaxonomyOptions();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete scan');
     } finally {
@@ -1501,6 +1563,7 @@ export default function BrandDetailPage() {
       setAllBookmarkedFindings([]);
       setAllAddressedFindings([]);
       setAllIgnoredFindings([]);
+      setFindingTaxonomyOptions({ platforms: [], themes: [] });
       setExpandedScanIds([]);
       setActiveScan(null);
     } catch (err) {
@@ -1799,21 +1862,21 @@ export default function BrandDetailPage() {
     );
   }
 
-  const normalizedFindingsSearchQuery = normalizeFindingsSearchText(findingsSearchQuery);
-  const isFindingsSearchActive = normalizedFindingsSearchQuery.length > 0;
-  const activeHighlightQuery = isFindingsSearchActive ? findingsSearchQuery : undefined;
-
-  function matchesFindingsSearch(finding: FindingSummary) {
-    if (!isFindingsSearchActive) return true;
-
-    return normalizeFindingsSearchText(
+  function matchesFindingFilters(finding: FindingSummary) {
+    const matchesSearch = !isFindingsSearchActive || normalizeFindingsSearchText(
       `${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis}`,
     ).includes(normalizedFindingsSearchQuery);
+    const matchesPlatform = !hasActiveFindingPlatformFilter
+      || normalizeFindingsTaxonomyValue(finding.platform) === normalizedSelectedFindingPlatform;
+    const matchesTheme = !hasActiveFindingThemeFilter
+      || normalizeFindingsTaxonomyValue(finding.theme) === normalizedSelectedFindingTheme;
+
+    return matchesSearch && matchesPlatform && matchesTheme;
   }
 
-  function filterFindingsForSearch(findings?: FindingSummary[]) {
+  function filterFindings(findings?: FindingSummary[]) {
     if (!findings) return findings;
-    return isFindingsSearchActive ? findings.filter(matchesFindingsSearch) : findings;
+    return isAnyFindingFilterActive ? findings.filter(matchesFindingFilters) : findings;
   }
 
   const totalFindings = scans.reduce((sum, s) => sum + s.highCount + s.mediumCount + s.lowCount, 0);
@@ -1824,26 +1887,39 @@ export default function BrandDetailPage() {
   const totalResultsCount = totalFindings + totalNonHits + totalAddressed + totalIgnored + totalSkipped;
   const requiresClearHistoryConfirmation = totalResultsCount > 0;
   const isAwaitingClearHistoryConfirmation = confirmClear && requiresClearHistoryConfirmation;
-  const visibleBookmarkedFindings = filterFindingsForSearch(allBookmarkedFindings) ?? [];
+  const activeFindingsFilterLabel = isFindingsSearchActive && (hasActiveFindingPlatformFilter || hasActiveFindingThemeFilter)
+    ? 'search and filters'
+    : isFindingsSearchActive
+      ? 'search'
+      : 'filters';
+  const findingPlatformOptions = [
+    { value: '', label: 'All platforms' },
+    ...findingTaxonomyOptions.platforms.map((platform) => ({ value: platform, label: platform })),
+  ];
+  const findingThemeOptions = [
+    { value: '', label: 'All themes' },
+    ...findingTaxonomyOptions.themes.map((theme) => ({ value: theme, label: theme })),
+  ];
+  const visibleBookmarkedFindings = filterFindings(allBookmarkedFindings) ?? [];
   const bookmarkedHits = visibleBookmarkedFindings.filter((finding) => !finding.isFalsePositive);
   const bookmarkedNonHits = sortBySeverity(visibleBookmarkedFindings.filter((finding) => finding.isFalsePositive));
   const visibleBookmarkedCount = visibleBookmarkedFindings.length;
-  const visibleAddressedFindings = filterFindingsForSearch(allAddressedFindings) ?? [];
+  const visibleAddressedFindings = filterFindings(allAddressedFindings) ?? [];
   const visibleAddressedCount = visibleAddressedFindings.length;
-  const visibleIgnoredFindings = filterFindingsForSearch(allIgnoredFindings) ?? [];
+  const visibleIgnoredFindings = filterFindings(allIgnoredFindings) ?? [];
   const visibleIgnoredCount = visibleIgnoredFindings.length;
-  const visibleLiveScanFindings = filterFindingsForSearch(liveScanFindings) ?? [];
+  const visibleLiveScanFindings = filterFindings(liveScanFindings) ?? [];
   const scansToRender = anchorTargetScanId
     ? scans
-    : isFindingsSearchActive
+    : isAnyFindingFilterActive
       ? scans.filter((scan) => {
-          const hits = filterFindingsForSearch(scanFindings[scan.id]) ?? [];
-          const nonHits = filterFindingsForSearch(scanNonHits[scan.id]) ?? [];
-          const ignored = filterFindingsForSearch(scanIgnored[scan.id]) ?? [];
+          const hits = filterFindings(scanFindings[scan.id]) ?? [];
+          const nonHits = filterFindings(scanNonHits[scan.id]) ?? [];
+          const ignored = filterFindings(scanIgnored[scan.id]) ?? [];
           return hits.length > 0 || nonHits.length > 0 || ignored.length > 0;
         })
       : scans;
-  const hasVisibleScanSearchMatches = (
+  const hasVisibleScanMatches = (
     visibleLiveScanFindings.length > 0
     || scansToRender.length > 0
   );
@@ -1989,31 +2065,51 @@ export default function BrandDetailPage() {
                       </Button>
                     </div>
                   </div>
-                  <div className="mt-5 relative max-w-xl">
-                    <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                    <Input
-                      value={findingsSearchQuery}
-                      onChange={(e) => setFindingsSearchQuery(e.target.value)}
-                      placeholder="Search finding titles, URLs, and analyses"
-                      aria-label="Search findings"
-                      className="pl-9 pr-10 border-white/20 bg-white text-gray-900 placeholder:text-gray-400"
-                    />
-                    {isFindingsSearchActive && (
-                      <button
-                        type="button"
-                        onClick={() => setFindingsSearchQuery('')}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition"
-                        aria-label="Clear findings search"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    )}
+                  <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center">
+                    <div className="relative max-w-xl flex-1">
+                      <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                      <Input
+                        value={findingsSearchQuery}
+                        onChange={(e) => setFindingsSearchQuery(e.target.value)}
+                        placeholder="Search finding titles, URLs, and analyses"
+                        aria-label="Search findings"
+                        className="pl-9 pr-10 border-white/20 bg-white text-gray-900 placeholder:text-gray-400"
+                      />
+                      {isFindingsSearchActive && (
+                        <button
+                          type="button"
+                          onClick={() => setFindingsSearchQuery('')}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition"
+                          aria-label="Clear findings search"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-3 sm:flex-row lg:flex-shrink-0">
+                      <SelectDropdown
+                        id="findings-platform-filter"
+                        ariaLabel="Filter findings by platform"
+                        value={selectedFindingPlatform}
+                        options={findingPlatformOptions}
+                        onChange={setSelectedFindingPlatform}
+                        triggerClassName="min-w-[11rem] border-white/20"
+                      />
+                      <SelectDropdown
+                        id="findings-theme-filter"
+                        ariaLabel="Filter findings by theme"
+                        value={selectedFindingTheme}
+                        options={findingThemeOptions}
+                        onChange={setSelectedFindingTheme}
+                        triggerClassName="min-w-[11rem] border-white/20"
+                      />
+                    </div>
                   </div>
-                  {isFindingsSearchActive && (
+                  {isAnyFindingFilterActive && (
                     <p className="mt-3 text-xs text-white/80">
                       {findingsSearchLoading
-                        ? 'Searching across hits, non-hits, ignored, addressed, and bookmarked findings...'
-                        : 'Showing only findings that match this search.'}
+                        ? 'Filtering across hits, non-hits, ignored, addressed, and bookmarked findings...'
+                        : `Showing only findings that match the current ${activeFindingsFilterLabel}.`}
                     </p>
                   )}
                 </div>
@@ -2117,7 +2213,7 @@ export default function BrandDetailPage() {
                             <Bookmark className="w-5 h-5 text-brand-600" />
                           </div>
                           <p className="text-sm text-gray-500">
-                            {isFindingsSearchActive ? 'No bookmarked findings match this search.' : 'No bookmarked findings yet.'}
+                            {isAnyFindingFilterActive ? `No bookmarked findings match the current ${activeFindingsFilterLabel}.` : 'No bookmarked findings yet.'}
                           </p>
                         </div>
                       ) : (
@@ -2175,7 +2271,7 @@ export default function BrandDetailPage() {
                             <Check className="w-5 h-5 text-brand-600" />
                           </div>
                           <p className="text-sm text-gray-500">
-                            {isFindingsSearchActive ? 'No addressed findings match this search.' : 'No addressed findings yet.'}
+                            {isAnyFindingFilterActive ? `No addressed findings match the current ${activeFindingsFilterLabel}.` : 'No addressed findings yet.'}
                           </p>
                         </div>
                       ) : (
@@ -2205,7 +2301,7 @@ export default function BrandDetailPage() {
                             <EyeOff className="w-5 h-5 text-brand-600" />
                           </div>
                           <p className="text-sm text-gray-500">
-                            {isFindingsSearchActive ? 'No ignored findings match this search.' : 'No ignored findings yet.'}
+                            {isAnyFindingFilterActive ? `No ignored findings match the current ${activeFindingsFilterLabel}.` : 'No ignored findings yet.'}
                           </p>
                         </div>
                       ) : (
@@ -2292,7 +2388,7 @@ export default function BrandDetailPage() {
                                 <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
                                   <Loader2 className="w-4 h-4 animate-spin" />
                                   <span className="text-sm">
-                                    {isFindingsSearchActive ? 'No live findings match this search yet.' : 'Waiting for first results…'}
+                                    {isAnyFindingFilterActive ? `No live findings match the current ${activeFindingsFilterLabel} yet.` : 'Waiting for first results…'}
                                   </span>
                                 </div>
                               ) : (
@@ -2307,7 +2403,7 @@ export default function BrandDetailPage() {
                                         onReclassify={handleReclassifyFinding}
                                         onBookmarkUpdate={handleBookmarkUpdate}
                                         onNoteUpdate={handleFindingNoteUpdate}
-                                        forceExpanded={isFindingsSearchActive}
+                                        forceExpanded={isAnyFindingFilterActive}
                                         highlightQuery={activeHighlightQuery}
                                       />
                                     ))}
@@ -2317,19 +2413,19 @@ export default function BrandDetailPage() {
                           </div>
                         )}
 
-                        {isFindingsSearchActive && findingsSearchLoading ? (
+                        {isAnyFindingFilterActive && findingsSearchLoading ? (
                           <div className="flex items-center justify-center gap-2 py-12 text-gray-400">
                             <Loader2 className="w-4 h-4 animate-spin" />
-                            <span className="text-sm">Searching across all findings…</span>
+                            <span className="text-sm">Filtering across all findings…</span>
                           </div>
-                        ) : isFindingsSearchActive && !hasVisibleScanSearchMatches ? (
+                        ) : isAnyFindingFilterActive && !hasVisibleScanMatches ? (
                           <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
                             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
                               <Search className="w-5 h-5 text-brand-600" />
                             </div>
-                            <p className="text-sm text-gray-500">No findings match this search.</p>
+                            <p className="text-sm text-gray-500">No findings match the current {activeFindingsFilterLabel}.</p>
                           </div>
-                        ) : !isFindingsSearchActive && scansToRender.length === 0 && !scanning ? (
+                        ) : !isAnyFindingFilterActive && scansToRender.length === 0 && !scanning ? (
                           <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
                             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
                               <Shield className="w-5 h-5 text-brand-600" />
@@ -2338,22 +2434,22 @@ export default function BrandDetailPage() {
                           </div>
                         ) : (
                           scansToRender.map((scan) => {
-                            const hits = filterFindingsForSearch(scanFindings[scan.id]);
-                            const nonHits = filterFindingsForSearch(scanNonHits[scan.id]);
-                            const ignored = filterFindingsForSearch(scanIgnored[scan.id]);
+                            const hits = filterFindings(scanFindings[scan.id]);
+                            const nonHits = filterFindings(scanNonHits[scan.id]);
+                            const ignored = filterFindings(scanIgnored[scan.id]);
                             const matchingHitCount = hits?.length ?? 0;
                             const matchingNonHitCount = nonHits?.length ?? 0;
                             const matchingIgnoredCount = ignored?.length ?? 0;
                             const isExpanded = anchorTargetScanId
                               ? anchorTargetScanId === scan.id
-                              : isFindingsSearchActive
+                              : isAnyFindingFilterActive
                                 ? matchingHitCount + matchingNonHitCount + matchingIgnoredCount > 0
                                 : expandedScanIds.includes(scan.id);
                             const isLoading = loadingScanIds.includes(scan.id);
-                            const showNonHits = isFindingsSearchActive
+                            const showNonHits = isAnyFindingFilterActive
                               ? matchingNonHitCount > 0
                               : showNonHitsByScanId[scan.id] ?? false;
-                            const showIgnored = isFindingsSearchActive
+                            const showIgnored = isAnyFindingFilterActive
                               ? matchingIgnoredCount > 0
                               : showIgnoredByScanId[scan.id] ?? false;
                             const scanResultsCount =
@@ -2367,25 +2463,25 @@ export default function BrandDetailPage() {
                             const requiresDeleteScanConfirmation = scanResultsCount > 0;
                             const isConfirmingDelete = confirmDeleteScanId === scan.id;
                             const isDeleting = deletingScanId === scan.id;
-                            const hasFindings = isFindingsSearchActive
+                            const hasFindings = isAnyFindingFilterActive
                               ? matchingHitCount > 0
                               : scan.highCount + scan.mediumCount + scan.lowCount > 0;
-                            const displayedHighCount = isFindingsSearchActive
+                            const displayedHighCount = isAnyFindingFilterActive
                               ? hits?.filter((f) => f.severity === 'high').length ?? 0
                               : scan.highCount;
-                            const displayedMediumCount = isFindingsSearchActive
+                            const displayedMediumCount = isAnyFindingFilterActive
                               ? hits?.filter((f) => f.severity === 'medium').length ?? 0
                               : scan.mediumCount;
-                            const displayedLowCount = isFindingsSearchActive
+                            const displayedLowCount = isAnyFindingFilterActive
                               ? hits?.filter((f) => f.severity === 'low').length ?? 0
                               : scan.lowCount;
-                            const displayedNonHitCount = isFindingsSearchActive
+                            const displayedNonHitCount = isAnyFindingFilterActive
                               ? matchingNonHitCount
                               : scan.nonHitCount;
-                            const displayedAddressedCount = isFindingsSearchActive
+                            const displayedAddressedCount = isAnyFindingFilterActive
                               ? 0
                               : (scan.addressedCount ?? 0);
-                            const displayedIgnoredCount = isFindingsSearchActive
+                            const displayedIgnoredCount = isAnyFindingFilterActive
                               ? matchingIgnoredCount
                               : (scan.ignoredCount ?? 0);
                             const deleteDisabledReason = scanning
@@ -2434,7 +2530,7 @@ export default function BrandDetailPage() {
                                     <button
                                       type="button"
                                       onClick={() => {
-                                        if (isFindingsSearchActive) return;
+                                        if (isAnyFindingFilterActive) return;
                                         toggleScanExpand(scan.id);
                                       }}
                                       className="flex min-w-0 flex-1 items-start gap-4 text-left"
@@ -2597,7 +2693,7 @@ export default function BrandDetailPage() {
                                         )}
 
                                         {!hits || hits.length === 0 ? (
-                                          !isFindingsSearchActive && (
+                                          !isAnyFindingFilterActive && (
                                             <div className="flex flex-col items-center justify-center gap-2 py-8">
                                               <Shield className="w-5 h-5 text-brand-300" />
                                               <p className="text-sm text-gray-400">
@@ -2621,7 +2717,7 @@ export default function BrandDetailPage() {
                                                   onReclassify={handleReclassifyFinding}
                                                   onBookmarkUpdate={handleBookmarkUpdate}
                                                   onNoteUpdate={handleFindingNoteUpdate}
-                                                  forceExpanded={isFindingsSearchActive}
+                                                  forceExpanded={isAnyFindingFilterActive}
                                                   highlightQuery={activeHighlightQuery}
                                                 />
                                               ))}
@@ -2633,7 +2729,7 @@ export default function BrandDetailPage() {
                                             <button
                                               type="button"
                                               onClick={() => {
-                                                if (isFindingsSearchActive) return;
+                                                if (isAnyFindingFilterActive) return;
                                                 const next = !showNonHitsByScanId[scan.id];
                                                 setShowNonHitsByScanId((prev) => ({ ...prev, [scan.id]: next }));
                                                 if (next) loadScanNonHits(scan.id);
@@ -2683,7 +2779,7 @@ export default function BrandDetailPage() {
                                             <button
                                               type="button"
                                               onClick={() => {
-                                                if (isFindingsSearchActive) return;
+                                                if (isAnyFindingFilterActive) return;
                                                 const next = !showIgnoredByScanId[scan.id];
                                                 setShowIgnoredByScanId((prev) => ({ ...prev, [scan.id]: next }));
                                                 if (next) loadScanIgnored(scan.id);

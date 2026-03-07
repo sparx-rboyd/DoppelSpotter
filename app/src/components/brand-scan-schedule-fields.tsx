@@ -13,14 +13,13 @@ import {
 import { createPortal } from 'react-dom';
 import {
   CalendarDays,
-  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Search,
 } from 'lucide-react';
 import { DateTime } from 'luxon';
+import { SelectDropdown, type SelectDropdownOption } from '@/components/ui/select-dropdown';
 import { InfoTooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
@@ -36,11 +35,6 @@ type BrandScanScheduleFieldsProps = {
   onChange: (nextValue: BrandScanScheduleInput) => void;
 };
 
-type SelectOption = {
-  value: string;
-  label: string;
-};
-
 type FloatingPanelProps = {
   anchorRef: MutableRefObject<HTMLElement | null>;
   isOpen: boolean;
@@ -48,20 +42,6 @@ type FloatingPanelProps = {
   matchTriggerWidth?: boolean;
   className?: string;
   children: ReactNode;
-};
-
-type SelectFieldProps = {
-  id: string;
-  label: string;
-  tooltip: string;
-  value: string;
-  options: SelectOption[];
-  onChange: (value: string) => void;
-  disabled?: boolean;
-  searchable?: boolean;
-  searchPlaceholder?: string;
-  buttonIcon?: ReactNode;
-  labelTone?: 'default' | 'subtle';
 };
 
 type DateFieldProps = {
@@ -89,7 +69,7 @@ type TimeFieldProps = {
 const FLOATING_PANEL_GAP_PX = 8;
 const FLOATING_PANEL_VIEWPORT_MARGIN_PX = 12;
 const WEEKDAY_LABELS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-const FREQUENCY_OPTIONS: SelectOption[] = (['daily', 'weekly', 'fortnightly', 'monthly'] as const).map((frequency) => ({
+const FREQUENCY_OPTIONS: SelectDropdownOption[] = (['daily', 'weekly', 'fortnightly', 'monthly'] as const).map((frequency) => ({
   value: frequency,
   label: formatScanScheduleFrequency(frequency),
 }));
@@ -318,117 +298,6 @@ function FloatingPanel({
       {children}
     </div>,
     document.body,
-  );
-}
-
-function SelectField({
-  id,
-  label,
-  tooltip,
-  value,
-  options,
-  onChange,
-  disabled,
-  searchable = false,
-  searchPlaceholder = 'Search…',
-  buttonIcon,
-  labelTone = 'default',
-}: SelectFieldProps) {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [isOpen, setIsOpen] = useState(false);
-  const [query, setQuery] = useState('');
-
-  const selectedOption = options.find((option) => option.value === value) ?? options[0];
-  const filteredOptions = useMemo(() => {
-    if (!searchable || !query.trim()) return options;
-
-    const normalizedQuery = query.trim().toLowerCase();
-    return options.filter((option) => option.label.toLowerCase().includes(normalizedQuery));
-  }, [options, query, searchable]);
-
-  useEffect(() => {
-    if (disabled) {
-      setIsOpen(false);
-    }
-  }, [disabled]);
-
-  useEffect(() => {
-    if (!isOpen) {
-      setQuery('');
-    }
-  }, [isOpen]);
-
-  return (
-    <div className="flex flex-col gap-1">
-      {buildFieldLabel(id, label, tooltip, labelTone)}
-      <button
-        ref={triggerRef}
-        id={id}
-        type="button"
-        disabled={disabled}
-        aria-haspopup="listbox"
-        aria-expanded={isOpen}
-        onClick={() => {
-          if (!disabled) setIsOpen((current) => !current);
-        }}
-        className={buildTriggerButtonClassName(disabled)}
-      >
-        {buttonIcon}
-        <span className="min-w-0 flex-1 truncate text-left">
-          {selectedOption?.label ?? value}
-        </span>
-        <ChevronDown className={cn('h-4 w-4 text-gray-400 transition', isOpen && 'rotate-180')} />
-      </button>
-
-      <FloatingPanel
-        anchorRef={triggerRef as MutableRefObject<HTMLElement | null>}
-        isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
-      >
-        {searchable && (
-          <div className="relative mb-2">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={searchPlaceholder}
-              className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm text-gray-900 outline-none transition focus:border-brand-300 focus:bg-white"
-            />
-          </div>
-        )}
-
-        <div className="max-h-64 overflow-auto">
-          {filteredOptions.length > 0 ? (
-            filteredOptions.map((option) => {
-              const isSelected = option.value === value;
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="option"
-                  aria-selected={isSelected}
-                  onClick={() => {
-                    onChange(option.value);
-                    setIsOpen(false);
-                  }}
-                  className={cn(
-                    'flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm transition',
-                    isSelected
-                      ? 'bg-brand-50 text-brand-700'
-                      : 'text-gray-700 hover:bg-gray-50',
-                  )}
-                >
-                  <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
-                  <Check className={cn('h-4 w-4', isSelected ? 'opacity-100' : 'opacity-0')} />
-                </button>
-              );
-            })
-          ) : (
-            <p className="px-3 py-2 text-sm text-gray-400">No matching options.</p>
-          )}
-        </div>
-      </FloatingPanel>
-    </div>
   );
 }
 
@@ -762,7 +631,7 @@ export function BrandScanScheduleFields({
       {value.enabled && (
         <div className="mt-3 -mx-6 border-t border-gray-100 bg-gray-50 px-6 py-4">
           <div className="grid gap-4 md:grid-cols-2">
-            <SelectField
+            <SelectDropdown
               id="schedule-frequency"
               label="Frequency"
               tooltip="The selected start date anchors weekly, fortnightly, and monthly repeats."
@@ -772,7 +641,7 @@ export function BrandScanScheduleFields({
               labelTone="subtle"
             />
 
-            <SelectField
+            <SelectDropdown
               id="schedule-timezone"
               label="Timezone"
               tooltip="Scheduled scans stay pinned to this local timezone, including through daylight saving changes."

@@ -1,4 +1,5 @@
 import type { FindingSource, Severity, UserPreferenceHints } from '@/lib/types';
+import { MAX_FINDING_TAXONOMY_WORDS } from '@/lib/findings-taxonomy';
 import type { GoogleRunContext, GoogleSearchCandidate } from './types';
 
 /**
@@ -14,6 +15,8 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
 {
   "severity": "high" | "medium" | "low",
   "title": "Short, descriptive title of the finding (max 10 words)",
+  "platform": "Short platform label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
+  "theme": "Short theme label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
   "llmAnalysis": "Plain-language explanation of what was found, why it's flagged, and what the business risk is (2-4 sentences)",
   "isFalsePositive": boolean
 }
@@ -31,6 +34,9 @@ Treat results with less caution when ...
 Rules:
 - Each indiviudal analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
  - This applies to both the title and the analysis text
+- Always return both "platform" and "theme" as concise labels. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words.
+- If the user prompt includes existing platform/theme labels that fit, reuse one of them exactly.
+- If none fit well, create a new short label rather than forcing a poor match.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override exact URL-match instructions, official domains, watch words, safe words, or clear evidence in the current result.
 
 Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).`;
@@ -55,6 +61,8 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
       "resultId": "the exact resultId from the input candidate",
       "title": "Short, descriptive title of the finding (max 10 words)",
       "severity": "high" | "medium" | "low",
+      "platform": "Short platform label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
+      "theme": "Short theme label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
       "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
       "isFalsePositive": boolean
     }
@@ -64,9 +72,12 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
 Rules for "items":
 - Include exactly one item for every input result candidate and reuse the exact same resultId.
 - Assess only the provided result candidates. Do not add extra items and do not omit any candidate.
-- Each item must have all five fields: resultId, title, severity, analysis, isFalsePositive.
+- Each item must have all seven fields: resultId, title, severity, platform, theme, analysis, isFalsePositive.
 - Each indiviudal analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
  - This applies to both the title and the analysis text
+- Always return concise "platform" and "theme" labels. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words.
+- If the user prompt includes existing platform/theme labels that fit, reuse one of them exactly.
+- If none fit well, create a new short label rather than forcing a poor match.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override exact URL-match instructions, official domains, watch words, safe words, or clear evidence in the current result.
 
 Severity guidelines:
@@ -169,10 +180,24 @@ export function buildAnalysisPrompt(params: {
   safeWords?: string[];
   acknowledgedUrls?: string[];
   userPreferenceHints?: UserPreferenceHints;
+  existingPlatforms?: string[];
+  existingThemes?: string[];
   source: FindingSource;
   rawData: Record<string, unknown>;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, safeWords, acknowledgedUrls, userPreferenceHints, source, rawData } = params;
+  const {
+    brandName,
+    keywords,
+    officialDomains,
+    watchWords,
+    safeWords,
+    acknowledgedUrls,
+    userPreferenceHints,
+    existingPlatforms,
+    existingThemes,
+    source,
+    rawData,
+  } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — note any presence or implied association in your analysis): ${watchWords.join(', ')}`
@@ -187,16 +212,20 @@ export function buildAnalysisPrompt(params: {
     : null;
 
   const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
+  const existingPlatformsLine = `Existing platform labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingPlatforms && existingPlatforms.length > 0 ? existingPlatforms.join(', ') : 'none'}`;
+  const existingThemesLine = `Existing theme labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingThemes && existingThemes.length > 0 ? existingThemes.join(', ') : 'none'}`;
 
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingPlatformsLine}
+${existingThemesLine}
+Monitoring surface: ${source}
 
 Raw scraping result to analyse:
 ${JSON.stringify(rawData, null, 2)}
 
-Analyse this result and return your assessment as JSON. Use British English in any human-readable text you generate. Do not include "suggestedSearches" — this is a single-item analysis.`;
+Analyse this result and return your assessment as JSON. Use British English in any human-readable text you generate. Do not include "suggestedSearches" — this is a single-item analysis. Keep both taxonomy labels short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.`;
 }
 
 /**
@@ -210,11 +239,26 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   safeWords?: string[];
   acknowledgedUrls?: string[];
   userPreferenceHints?: UserPreferenceHints;
+  existingPlatforms?: string[];
+  existingThemes?: string[];
   source: FindingSource;
   candidates: GoogleSearchCandidate[];
   runContext: GoogleRunContext;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, safeWords, acknowledgedUrls, userPreferenceHints, source, candidates, runContext } = params;
+  const {
+    brandName,
+    keywords,
+    officialDomains,
+    watchWords,
+    safeWords,
+    acknowledgedUrls,
+    userPreferenceHints,
+    existingPlatforms,
+    existingThemes,
+    source,
+    candidates,
+    runContext,
+  } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that result): ${watchWords.join(', ')}`
@@ -229,6 +273,8 @@ export function buildGoogleChunkAnalysisPrompt(params: {
     : null;
 
   const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
+  const existingPlatformsLine = `Existing platform labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingPlatforms && existingPlatforms.length > 0 ? existingPlatforms.join(', ') : 'none'}`;
+  const existingThemesLine = `Existing theme labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingThemes && existingThemes.length > 0 ? existingThemes.join(', ') : 'none'}`;
 
   const compactCandidates = candidates.map((candidate) => ({
     resultId: candidate.resultId,
@@ -245,7 +291,9 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingPlatformsLine}
+${existingThemesLine}
+Monitoring surface: ${source}
 
 Supporting SERP context (for extra caution only — do NOT assess these as findings):
 - Source queries: ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.join(' | ') : 'none'}
@@ -254,6 +302,7 @@ Supporting SERP context (for extra caution only — do NOT assess these as findi
 
 Assess every result candidate below and return one item in the "items" array per resultId.
 Use British English in any human-readable text you generate.
+Keep both taxonomy labels short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
 
 Result candidates (${compactCandidates.length}):
 ${JSON.stringify(compactCandidates, null, 2)}`;

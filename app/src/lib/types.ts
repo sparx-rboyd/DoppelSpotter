@@ -137,6 +137,10 @@ export interface FindingSummary {
   source: FindingSource;
   severity: Severity;
   title: string;
+  /** Short LLM-assigned platform label (preferably 1 word, max 3 words). */
+  platform?: string;
+  /** Short LLM-assigned theme label (preferably 1 word, max 3 words). */
+  theme?: string;
   llmAnalysis: string;
   url?: string;
   /** Set to true for AI-classified false positives (not real threats). */
@@ -303,6 +307,8 @@ export interface ScanSummary {
 export interface AnalysisResult {
   severity: Severity;
   title: string;
+  platform?: string;
+  theme?: string;
   llmAnalysis: string;
   isFalsePositive: boolean;
 }

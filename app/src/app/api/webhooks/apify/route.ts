@@ -30,6 +30,7 @@ import {
 } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo } from '@/lib/types';
 import { normalizeAllowAiDeepSearches, normalizeMaxAiDeepSearches } from '@/lib/brands';
+import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
 
@@ -329,6 +330,10 @@ async function handleSucceededRun({
       currentScanId: scan.id ?? scanDoc.id,
     })
     : new Set<string>();
+  const existingTaxonomy = await loadBrandFindingTaxonomy({
+    brandId: scan.brandId,
+    userId: scan.userId,
+  });
 
   // Fetch raw scraping results from Apify's dataset
   let items: Record<string, unknown>[];
@@ -382,6 +387,7 @@ async function handleSucceededRun({
       acknowledgedUrls,
       userPreferenceHints,
       previousFindingUrls,
+      existingTaxonomy,
     });
     newFindingCount = findingCount;
     skippedDuplicateCount = batchSkippedDuplicateCount;
@@ -428,6 +434,8 @@ async function handleSucceededRun({
         safeWords: brand.safeWords,
         acknowledgedUrls,
         userPreferenceHints,
+        existingPlatforms: existingTaxonomy.platforms,
+        existingThemes: existingTaxonomy.themes,
         source,
         rawData: item,
       });
@@ -444,6 +452,8 @@ async function handleSucceededRun({
           actorId,
           severity: analysisResult.severity,
           title: analysisResult.title,
+          ...(analysisResult.platform ? { platform: analysisResult.platform } : {}),
+          ...(analysisResult.theme ? { theme: analysisResult.theme } : {}),
           description: analysisResult.llmAnalysis,
           llmAnalysis: analysisResult.llmAnalysis,
           url: extractUrl(item),
@@ -580,6 +590,7 @@ async function analyseAndWriteBatch({
   acknowledgedUrls,
   userPreferenceHints,
   previousFindingUrls,
+  existingTaxonomy,
 }: {
   scanDoc: ScanDocHandle;
   scan: Scan;
@@ -594,6 +605,7 @@ async function analyseAndWriteBatch({
   acknowledgedUrls?: string[];
   userPreferenceHints?: Scan['userPreferenceHints'];
   previousFindingUrls?: ReadonlySet<string>;
+  existingTaxonomy: { platforms: string[]; themes: string[] };
 }): Promise<{
   findingCount: number;
   suggestedSearches?: string[];
@@ -641,6 +653,8 @@ async function analyseAndWriteBatch({
         safeWords: brand.safeWords,
         acknowledgedUrls,
         userPreferenceHints,
+        existingPlatforms: existingTaxonomy.platforms,
+        existingThemes: existingTaxonomy.themes,
         source,
         candidates: chunk,
         runContext: normalizedRun.runContext,
@@ -722,6 +736,8 @@ async function analyseAndWriteBatch({
 type GoogleFindingOutcome = {
   severity: Finding['severity'];
   title: string;
+  platform?: string;
+  theme?: string;
   analysis: string;
   isFalsePositive: boolean;
   llmAnalysisPrompt?: string;
@@ -1019,6 +1035,8 @@ async function upsertGoogleFinding({
         actorId,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
+        ...(preferredOutcome.platform ? { platform: preferredOutcome.platform } : {}),
+        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.normalizedUrl,
@@ -1043,6 +1061,8 @@ async function upsertGoogleFinding({
     const updates: Record<string, unknown> = {
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
+      platform: preferredOutcome.platform ?? existing.platform ?? FieldValue.delete(),
+      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.normalizedUrl,
@@ -1197,7 +1217,15 @@ async function analyseItem({
   prompt,
 }: {
   prompt: string;
-}): Promise<{ severity: Finding['severity']; title: string; llmAnalysis: string; isFalsePositive: boolean; rawLlmResponse: string }> {
+}): Promise<{
+  severity: Finding['severity'];
+  title: string;
+  platform?: string;
+  theme?: string;
+  llmAnalysis: string;
+  isFalsePositive: boolean;
+  rawLlmResponse: string;
+}> {
   const raw = await chatCompletion([
     { role: 'system', content: SYSTEM_PROMPT },
     { role: 'user', content: prompt },
@@ -1219,6 +1247,8 @@ function buildGoogleFindingOutcome(
   return {
     severity: item.severity,
     title: item.title,
+    platform: item.platform,
+    theme: item.theme,
     analysis: item.analysis,
     isFalsePositive: item.isFalsePositive,
     llmAnalysisPrompt,
@@ -1357,6 +1387,8 @@ function choosePreferredGoogleOutcome(existing: Finding | null, next: GoogleFind
   const existingOutcome: GoogleFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
+    platform: existing.platform,
+    theme: existing.theme,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,
     llmAnalysisPrompt: existing.llmAnalysisPrompt,

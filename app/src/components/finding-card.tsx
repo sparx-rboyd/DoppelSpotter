@@ -636,6 +636,27 @@ export function FindingCard({
               )}
             </div>
 
+            {(finding.platform || finding.theme) && (
+              <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+                {finding.platform && (
+                  <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5">
+                    <span className="font-medium text-gray-500">Platform:</span>
+                    <span className="ml-1 text-gray-700">
+                      {renderHighlightedText(finding.platform, highlightQuery)}
+                    </span>
+                  </span>
+                )}
+                {finding.theme && (
+                  <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5">
+                    <span className="font-medium text-gray-500">Theme:</span>
+                    <span className="ml-1 text-gray-700">
+                      {renderHighlightedText(finding.theme, highlightQuery)}
+                    </span>
+                  </span>
+                )}
+              </div>
+            )}
+
             {finding.url && shouldShowMatchedUrl && (
               <div className="mb-4 flex items-start gap-2 text-xs text-gray-500 break-all bg-gray-50 p-2.5 rounded-lg border border-gray-100">
                 <span className="font-semibold text-gray-700 select-none uppercase tracking-wider text-[10px] mt-0.5">URL</span>

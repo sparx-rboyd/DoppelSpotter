@@ -1,4 +1,5 @@
 import type { Severity } from '@/lib/types';
+import { normalizeFindingTaxonomyLabel } from '@/lib/findings-taxonomy';
 
 /**
  * The structured JSON output expected from AI analysis for each finding.
@@ -6,6 +7,8 @@ import type { Severity } from '@/lib/types';
 export interface AnalysisOutput {
   severity: Severity;
   title: string;
+  platform?: string;
+  theme?: string;
   llmAnalysis: string;
   isFalsePositive: boolean;
 }
@@ -62,6 +65,8 @@ export interface GoogleChunkAnalysisItem {
   resultId: string;
   title: string;
   severity: Severity;
+  platform?: string;
+  theme?: string;
   analysis: string;
   isFalsePositive: boolean;
 }
@@ -138,6 +143,8 @@ export function parseAnalysisOutput(raw: string): AnalysisOutput | null {
     return {
       severity: parsed.severity as Severity,
       title: parsed.title,
+      platform: normalizeFindingTaxonomyLabel(parsed.platform),
+      theme: normalizeFindingTaxonomyLabel(parsed.theme),
       llmAnalysis: parsed.llmAnalysis,
       isFalsePositive: parsed.isFalsePositive,
     };
@@ -189,6 +196,8 @@ export function parseGoogleChunkAnalysisOutput(
           resultId,
           title: (item.title as string).trim(),
           severity: item.severity as Severity,
+          platform: normalizeFindingTaxonomyLabel(item.platform),
+          theme: normalizeFindingTaxonomyLabel(item.theme),
           analysis: (item.analysis as string).trim(),
           isFalsePositive: item.isFalsePositive as boolean,
         };
