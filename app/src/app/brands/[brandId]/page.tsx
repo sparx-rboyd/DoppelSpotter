@@ -1436,6 +1436,8 @@ export default function BrandDetailPage() {
   const totalIgnored = scans.reduce((sum, s) => sum + (s.ignoredCount ?? 0), 0);
   const totalSkipped = scans.reduce((sum, s) => sum + (s.skippedCount ?? 0), 0);
   const totalResultsCount = totalFindings + totalNonHits + totalIgnored + totalSkipped;
+  const requiresClearHistoryConfirmation = totalResultsCount > 0;
+  const isAwaitingClearHistoryConfirmation = confirmClear && requiresClearHistoryConfirmation;
   const visibleBookmarkedFindings = filterFindingsForSearch(allBookmarkedFindings) ?? [];
   const bookmarkedHits = visibleBookmarkedFindings.filter((finding) => !finding.isFalsePositive);
   const bookmarkedNonHits = sortBySeverity(visibleBookmarkedFindings.filter((finding) => finding.isFalsePositive));
@@ -1462,7 +1464,7 @@ export default function BrandDetailPage() {
     : clearing
       ? CLEARING_HISTORY_DELETE_TOOLTIP
       : null;
-  const showClearHistoryAction = activeTab === 'scans' && scans.length > 0 && !confirmClear;
+  const showClearHistoryAction = activeTab === 'scans' && scans.length > 0 && !isAwaitingClearHistoryConfirmation;
 
   // ---------------------------------------------------------------------------
   // Render
@@ -1527,51 +1529,6 @@ export default function BrandDetailPage() {
                 </div>
               )}
 
-              {/* Scan progress banner */}
-              {scanning && (
-                <div className="mb-6 bg-brand-50 border border-brand-200 rounded-xl px-5 py-4">
-                  <div className="flex items-center justify-between gap-4 mb-3">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
-                      <span className="text-sm font-medium text-brand-700 truncate">
-                        {cancelling ? 'Cancelling scan' : getScanStatusLabel()}
-                      </span>
-                      {isDeepSearchActive && !cancelling && (
-                        <span className="flex-shrink-0 inline-flex items-center gap-1 bg-brand-100 text-brand-700 text-xs font-medium px-2 py-0.5 rounded-full">
-                          Deep search
-                        </span>
-                      )}
-                    </div>
-                    {!cancelling && (
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={cancelScan}
-                        className="flex-shrink-0 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        Cancel
-                      </Button>
-                    )}
-                  </div>
-                  <div className="h-1.5 bg-brand-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-brand-600 rounded-full transition-all duration-500"
-                      style={{ width: `${displayedScanProgressPct}%` }}
-                    />
-                  </div>
-                  {!cancelling && !isSummarisingFindings && getDeepSearchProgressSubtext() && (
-                    <p className="mt-3 text-xs text-brand-700/80">
-                      {getDeepSearchProgressSubtext()}
-                    </p>
-                  )}
-                  {!cancelling && !isSummarisingFindings && getSkippedDuplicateSubtext() && (
-                    <p className="mt-2 text-xs text-brand-700/80">
-                      {getSkippedDuplicateSubtext()}
-                    </p>
-                  )}
-                </div>
-              )}
               <section className="mb-6">
                 <div className="rounded-t-2xl bg-brand-600 px-5 py-6 sm:px-6">
                   <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
@@ -1616,7 +1573,14 @@ export default function BrandDetailPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => setConfirmClear(true)}
+                            onClick={() => {
+                              if (requiresClearHistoryConfirmation) {
+                                setConfirmClear(true);
+                                return;
+                              }
+
+                              void clearHistory();
+                            }}
                             className="border border-white/15 text-white/90 hover:border-white/25 hover:bg-white/10 hover:text-white"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -1629,7 +1593,7 @@ export default function BrandDetailPage() {
                         size="sm"
                         onClick={triggerScan}
                         loading={scanning}
-                        disabled={scanning || clearing || confirmClear}
+                        disabled={scanning || clearing || isAwaitingClearHistoryConfirmation}
                         className="border-white/15 bg-white !text-brand-700 hover:border-white/30 hover:bg-brand-50 disabled:hover:bg-white"
                       >
                         <Play className="w-4 h-4" />
@@ -1666,11 +1630,14 @@ export default function BrandDetailPage() {
                   )}
                 </div>
 
-                {activeTab === 'scans' && confirmClear && (
+                {activeTab === 'scans' && isAwaitingClearHistoryConfirmation && (
                   <div className="border-x border-b border-red-100 bg-red-50 px-4 py-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-sm text-red-800">
-                        Permanently delete all {totalResultsCount} result{totalResultsCount !== 1 ? 's' : ''} and scan history? This cannot be undone.
+                        <span className="font-semibold">
+                          Permanently delete all {totalResultsCount} result{totalResultsCount !== 1 ? 's' : ''} and scan history?
+                        </span>{' '}
+                        This cannot be undone.
                       </p>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <Button variant="secondary" size="sm" onClick={() => setConfirmClear(false)} disabled={clearing}>
@@ -1818,20 +1785,63 @@ export default function BrandDetailPage() {
 
                     {activeTab === 'scans' && (
                       <div className="space-y-4">
-                        {scanning && (!isFindingsSearchActive || visibleLiveScanFindings.length > 0) && (
+                        {scanning && (
                           <div className="overflow-hidden rounded-xl border border-brand-200 bg-white">
-                            <div className="flex items-center gap-4 bg-brand-50/40 px-6 py-4">
-                              <div className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                                <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
-                                <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
-                                  Scan in progress
-                                </span>
-                                {visibleLiveScanFindings.length > 0 && (
-                                  <SeverityPills
-                                    high={visibleLiveScanFindings.filter((f) => f.severity === 'high').length}
-                                    medium={visibleLiveScanFindings.filter((f) => f.severity === 'medium').length}
-                                    low={visibleLiveScanFindings.filter((f) => f.severity === 'low').length}
-                                  />
+                            <div className="bg-brand-50/40 px-6 py-4">
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex min-w-0 items-center gap-3 text-left">
+                                    <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
+                                    <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
+                                      Scan in progress
+                                    </span>
+                                    {visibleLiveScanFindings.length > 0 && (
+                                      <SeverityPills
+                                        high={visibleLiveScanFindings.filter((f) => f.severity === 'high').length}
+                                        medium={visibleLiveScanFindings.filter((f) => f.severity === 'medium').length}
+                                        low={visibleLiveScanFindings.filter((f) => f.severity === 'low').length}
+                                      />
+                                    )}
+                                  </div>
+                                  <div className="mt-3 pl-7">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className="text-sm font-medium text-brand-700">
+                                        {cancelling ? 'Cancelling scan' : getScanStatusLabel()}
+                                      </span>
+                                      {isDeepSearchActive && !cancelling && (
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700">
+                                          Deep search
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-brand-100">
+                                      <div
+                                        className="h-full rounded-full bg-brand-600 transition-all duration-500"
+                                        style={{ width: `${displayedScanProgressPct}%` }}
+                                      />
+                                    </div>
+                                    {!cancelling && !isSummarisingFindings && getDeepSearchProgressSubtext() && (
+                                      <p className="mt-3 text-xs text-brand-700/80">
+                                        {getDeepSearchProgressSubtext()}
+                                      </p>
+                                    )}
+                                    {!cancelling && !isSummarisingFindings && getSkippedDuplicateSubtext() && (
+                                      <p className="mt-2 text-xs text-brand-700/80">
+                                        {getSkippedDuplicateSubtext()}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                                {!cancelling && (
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={cancelScan}
+                                    className="flex-shrink-0 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                    Cancel
+                                  </Button>
                                 )}
                               </div>
                             </div>
@@ -1902,6 +1912,14 @@ export default function BrandDetailPage() {
                             const showIgnored = isFindingsSearchActive
                               ? matchingIgnoredCount > 0
                               : showIgnoredByScanId[scan.id] ?? false;
+                            const scanResultsCount =
+                              scan.highCount
+                              + scan.mediumCount
+                              + scan.lowCount
+                              + scan.nonHitCount
+                              + (scan.ignoredCount ?? 0)
+                              + (scan.skippedCount ?? 0);
+                            const requiresDeleteScanConfirmation = scanResultsCount > 0;
                             const isConfirmingDelete = confirmDeleteScanId === scan.id;
                             const isDeleting = deletingScanId === scan.id;
                             const hasFindings = isFindingsSearchActive
@@ -1937,7 +1955,10 @@ export default function BrandDetailPage() {
                                 {isConfirmingDelete ? (
                                   <div className="flex items-center justify-between gap-4 bg-red-50 px-6 py-4">
                                     <p className="text-sm text-red-800">
-                                      Delete this scan and its {scan.highCount + scan.mediumCount + scan.lowCount + scan.nonHitCount + (scan.ignoredCount ?? 0) + (scan.skippedCount ?? 0)} result{(scan.highCount + scan.mediumCount + scan.lowCount + scan.nonHitCount + (scan.ignoredCount ?? 0) + (scan.skippedCount ?? 0)) !== 1 ? 's' : ''}? This cannot be undone.
+                                      <span className="font-semibold">
+                                        Delete this scan and its {scanResultsCount} result{scanResultsCount !== 1 ? 's' : ''}?
+                                      </span>{' '}
+                                      This cannot be undone.
                                     </p>
                                     <div className="flex items-center gap-2 flex-shrink-0">
                                       <Button
@@ -2059,7 +2080,13 @@ export default function BrandDetailPage() {
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          setConfirmDeleteScanId(scan.id);
+                                          if (requiresDeleteScanConfirmation) {
+                                            setConfirmDeleteScanId(scan.id);
+                                            setConfirmClear(false);
+                                            return;
+                                          }
+
+                                          void deleteScan(scan.id);
                                           setConfirmClear(false);
                                         }}
                                         className="flex-shrink-0 rounded-md p-1.5 text-gray-300 opacity-0 transition hover:bg-red-50 hover:text-red-500 focus:opacity-100 group-hover:opacity-100"
