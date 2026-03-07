@@ -83,7 +83,13 @@ function renderHighlightedText(text: string, query?: string) {
 
 const sourceConfig: Record<
   FindingSource,
-  { icon: React.ElementType; bgClass: string; textClass: string; label: string }
+  {
+    icon: React.ElementType;
+    bgClass: string;
+    textClass: string;
+    label: string;
+    iconClassName?: string;
+  }
 > = {
   domain: {
     icon: Globe,
@@ -120,6 +126,7 @@ const sourceConfig: Record<
     bgClass: 'bg-brand-50',
     textClass: 'text-brand-600',
     label: 'Google Search',
+    iconClassName: 'w-4 h-4 sm:w-[18px] sm:h-[18px]',
   },
   'google-play': {
     icon: Smartphone,
@@ -183,11 +190,11 @@ function ExpandableSection({
   const [open, setOpen] = useState(false);
 
   function handleToggle() {
-    setOpen((prev) => {
-      const next = !prev;
-      if (next) onOpen?.();
-      return next;
-    });
+    const next = !open;
+    setOpen(next);
+    if (next) {
+      onOpen?.();
+    }
   }
 
   return (
@@ -357,7 +364,7 @@ export function FindingCard({
             muted ? 'bg-gray-100 text-gray-400' : cn(src.bgClass, src.textClass),
           )}
         >
-          <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
+          <Icon className={src.iconClassName ?? 'w-5 h-5 sm:w-6 sm:h-6'} />
         </div>
 
         {/* Content */}

@@ -28,6 +28,7 @@ import {
 } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo } from '@/lib/types';
 import { normalizeAllowAiDeepSearches, normalizeMaxAiDeepSearches } from '@/lib/brands';
+import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
 
 /** Maximum items to analyse per actor run — caps AI analysis cost and latency */
@@ -1562,6 +1563,7 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
   }
 
   await finalizeScanWithSummary(scanRef, summary);
+  await sendCompletedScanSummaryEmailIfNeeded(scanRef);
 }
 
 function normalizeSuggestedSearchKey(query: string): string {

@@ -2,10 +2,10 @@
 
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
-  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark,
+  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check,
   Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -29,7 +29,7 @@ const ACTIVE_SCAN_IDLE_POLL_INTERVAL_MS = 20_000;
 const ACTIVE_SCAN_DELETE_TOOLTIP =
   "Scan history can't be changed while a scan is running because current results are compared against previous findings.";
 const CLEARING_HISTORY_DELETE_TOOLTIP = 'Please wait while scan history is being deleted.';
-const ANALYSIS_PROGRESS_BUCKET_SIZE = 10;
+const SCAN_RESULT_SET_HASH_PREFIX = 'scan-result-set-';
 
 type BookmarkUpdate = {
   isBookmarked?: boolean;
@@ -210,16 +210,77 @@ function normalizeFindingsSearchText(value: string) {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
 
+function getScanResultSetAnchorId(scanId: string) {
+  return `${SCAN_RESULT_SET_HASH_PREFIX}${scanId}`;
+}
+
+function extractScanResultSetId(value: string) {
+  const normalizedValue = value.replace(/^[#?]/, '');
+  if (!normalizedValue.startsWith(SCAN_RESULT_SET_HASH_PREFIX)) {
+    return null;
+  }
+
+  const scanId = normalizedValue
+    .slice(SCAN_RESULT_SET_HASH_PREFIX.length)
+    .split(/[&#]/, 1)[0]
+    ?.trim();
+  return scanId || null;
+}
+
+function getScanResultSetIdFromHash(hash: string) {
+  return extractScanResultSetId(hash);
+}
+
+function getScanResultSetIdFromUrl(url: string) {
+  try {
+    const parsedUrl = new URL(url, 'http://localhost');
+    return (
+      getScanResultSetIdFromHash(parsedUrl.hash)
+      ?? extractScanResultSetId(parsedUrl.search)
+      ?? parsedUrl.searchParams.get('scanResultSet')?.trim()
+      ?? null
+    );
+  } catch {
+    return getScanResultSetIdFromHash(url) ?? extractScanResultSetId(url);
+  }
+}
+
+function scrollToScanResultSet(scanId: string, attempt = 0) {
+  if (typeof window === 'undefined') return;
+
+  const element = document.getElementById(getScanResultSetAnchorId(scanId));
+  if (!element) {
+    if (attempt < 8) {
+      window.setTimeout(() => scrollToScanResultSet(scanId, attempt + 1), 100);
+    }
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    const top = window.scrollY + element.getBoundingClientRect().top - 96;
+    window.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
+
+    if (attempt < 4) {
+      window.setTimeout(() => scrollToScanResultSet(scanId, attempt + 1), 120);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
 export default function BrandDetailPage() {
   const { brandId } = useParams<{ brandId: string }>();
+  const searchParams = useSearchParams();
+  const showDebug = searchParams.get('debug') === 'true';
 
   const [brand, setBrand] = useState<BrandProfile | null>(null);
   const [scans, setScans] = useState<ScanSummary[]>([]);
   const [expandedScanIds, setExpandedScanIds] = useState<string[]>([]);
+  const [anchorTargetScanId, setAnchorTargetScanId] = useState<string | null>(() => (
+    typeof window === 'undefined' ? null : getScanResultSetIdFromUrl(window.location.href)
+  ));
   const [scanFindings, setScanFindings] = useState<Record<string, FindingSummary[]>>({});
   const [scanNonHits, setScanNonHits] = useState<Record<string, FindingSummary[]>>({});
   const [scanIgnored, setScanIgnored] = useState<Record<string, FindingSummary[]>>({});
@@ -233,6 +294,7 @@ export default function BrandDetailPage() {
   const [findingsSearchLoading, setFindingsSearchLoading] = useState(false);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
+  const [copiedScanLinkId, setCopiedScanLinkId] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
@@ -245,6 +307,7 @@ export default function BrandDetailPage() {
   const [clearing, setClearing] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const copiedScanLinkResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressScanKeyRef = useRef<string | null>(null);
   const pendingScanFindingsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanNonHitsLoadsRef = useRef<Record<string, Promise<void>>>({});
@@ -270,7 +333,7 @@ export default function BrandDetailPage() {
       const newScans: ScanSummary[] = json.data ?? [];
       setScans(newScans);
 
-      const targetId = options?.autoExpandScanId ?? newScans[0]?.id;
+      const targetId = options?.autoExpandScanId ?? anchorTargetScanId ?? newScans[0]?.id;
       if (!options?.skipAutoExpand && targetId) {
         setExpandedScanIds((prev) => (prev.includes(targetId) ? prev : [targetId, ...prev]));
         loadScanFindings(targetId);
@@ -761,8 +824,14 @@ export default function BrandDetailPage() {
         // Resume any globally active scan for this brand, even if it was started in another tab
         // or environment that shares the same Firestore data.
         const restoredActiveScan = await restoreActiveScan();
+        const initialHashScanId = typeof window === 'undefined'
+          ? null
+          : getScanResultSetIdFromUrl(window.location.href);
+        const hasValidInitialHashScan = initialHashScanId
+          ? loadedScans.some((scan) => scan.id === initialHashScanId)
+          : false;
 
-        if (!restoredActiveScan && loadedScans[0]?.id) {
+        if (!restoredActiveScan && !hasValidInitialHashScan && loadedScans[0]?.id) {
           setExpandedScanIds([loadedScans[0].id]);
           loadScanFindings(loadedScans[0].id);
         }
@@ -776,6 +845,34 @@ export default function BrandDetailPage() {
     return () => stopPolling();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandId]);
+
+  useEffect(() => {
+    function syncAnchorTargetFromHash() {
+      const nextScanId = getScanResultSetIdFromUrl(window.location.href);
+      setAnchorTargetScanId(nextScanId);
+
+      if (nextScanId) {
+        setActiveTab('scans');
+        setConfirmClear(false);
+        setConfirmDeleteScanId(null);
+      }
+    }
+
+    syncAnchorTargetFromHash();
+    window.addEventListener('hashchange', syncAnchorTargetFromHash);
+
+    return () => window.removeEventListener('hashchange', syncAnchorTargetFromHash);
+  }, []);
+
+  useEffect(() => {
+    if (!anchorTargetScanId) return;
+    if (!scans.some((scan) => scan.id === anchorTargetScanId)) return;
+
+    setExpandedScanIds([anchorTargetScanId]);
+    void loadScanFindings(anchorTargetScanId);
+    scrollToScanResultSet(anchorTargetScanId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorTargetScanId, scans]);
 
   useEffect(() => {
     if (loading || scanning) return;
@@ -840,11 +937,20 @@ export default function BrandDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [findingsSearchQuery, scans, scanFindings, scanNonHits, scanIgnored]);
 
+  useEffect(() => {
+    return () => {
+      if (copiedScanLinkResetTimeoutRef.current) {
+        clearTimeout(copiedScanLinkResetTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // ---------------------------------------------------------------------------
   // Scan toggling
   // ---------------------------------------------------------------------------
 
   function toggleScanExpand(scanId: string) {
+    setAnchorTargetScanId(null);
     const isCurrentlyExpanded = expandedScanIds.includes(scanId);
     setExpandedScanIds((prev) =>
       isCurrentlyExpanded ? prev.filter((id) => id !== scanId) : [...prev, scanId],
@@ -855,6 +961,9 @@ export default function BrandDetailPage() {
   }
 
   function switchFindingsTab(tab: 'scans' | 'bookmarks' | 'ignored') {
+    if (tab !== 'scans') {
+      setAnchorTargetScanId(null);
+    }
     setActiveTab(tab);
     if (tab !== 'scans') {
       setConfirmClear(false);
@@ -1074,6 +1183,32 @@ export default function BrandDetailPage() {
     }
   }
 
+  async function copyScanDeepLink(scanId: string) {
+    if (typeof window === 'undefined' || !navigator.clipboard) {
+      setError('Clipboard access is not available in this browser.');
+      return;
+    }
+
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('debug');
+      url.hash = getScanResultSetAnchorId(scanId);
+      await navigator.clipboard.writeText(url.toString());
+
+      if (copiedScanLinkResetTimeoutRef.current) {
+        clearTimeout(copiedScanLinkResetTimeoutRef.current);
+      }
+
+      setCopiedScanLinkId(scanId);
+      copiedScanLinkResetTimeoutRef.current = setTimeout(() => {
+        setCopiedScanLinkId(null);
+        copiedScanLinkResetTimeoutRef.current = null;
+      }, 2_000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to copy deep link');
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Progress bar helpers
   // ---------------------------------------------------------------------------
@@ -1106,27 +1241,13 @@ export default function BrandDetailPage() {
     return { completed, total };
   }
 
-  function formatAnalysisProgressRange(completed: number, total: number): string {
-    if (total <= ANALYSIS_PROGRESS_BUCKET_SIZE + 1) {
-      return `0 - ${total}`;
-    }
-    if (completed >= total) return `${total} out of ${total}`;
-    if (completed <= ANALYSIS_PROGRESS_BUCKET_SIZE) {
-      return `0 - ${Math.min(total, ANALYSIS_PROGRESS_BUCKET_SIZE)} out of ${total}`;
-    }
-
-    const rangeStart = Math.floor((completed - 1) / ANALYSIS_PROGRESS_BUCKET_SIZE) * ANALYSIS_PROGRESS_BUCKET_SIZE + 1;
-    const rangeEnd = Math.min(total, rangeStart + ANALYSIS_PROGRESS_BUCKET_SIZE - 1);
-    return `${rangeStart} - ${rangeEnd} out of ${total}`;
-  }
-
   function withAnalysisCounts(inProgressLabel: string, finalisingLabel: string, run?: ActorRunInfo): string {
     const counts = getRunAnalysisCounts(run);
     if (!counts) return inProgressLabel;
     if (counts.completed >= counts.total) {
-      return `${finalisingLabel} (${formatAnalysisProgressRange(counts.total, counts.total)})`;
+      return finalisingLabel;
     }
-    return `${inProgressLabel} (${formatAnalysisProgressRange(counts.completed, counts.total)})`;
+    return inProgressLabel;
   }
 
   function formatDeepSearchQueryForDisplay(query: string): string {
@@ -1164,9 +1285,8 @@ export default function BrandDetailPage() {
     const prefix = counts.completed >= counts.total
       ? 'Finalising deep search results for'
       : 'Analysing deep search results for';
-    const progress = ` (${formatAnalysisProgressRange(counts.completed, counts.total)})`;
 
-    return renderDeepSearchQueryLabel(prefix, query, progress);
+    return renderDeepSearchQueryLabel(prefix, query);
   }
 
   function getDeepSearchSelectionAnnouncement(): string | null {
@@ -1190,7 +1310,7 @@ export default function BrandDetailPage() {
         case 'analysing':
           return query
             ? renderDeepSearchAnalysisLabel(query, activeRun)
-            : withAnalysisCounts('Analysing deep search results with AI', 'Finalising deep search results with AI', activeRun);
+            : withAnalysisCounts('Analysing deep search results', 'Finalising deep search results', activeRun);
         default:
           return activeDeepSearchCount > 1
             ? `Investigating ${activeDeepSearchCount} more related queries`
@@ -1202,7 +1322,7 @@ export default function BrandDetailPage() {
 
     switch (runStatus) {
       case 'fetching_dataset': return 'Fetching initial search results from Apify';
-      case 'analysing': return withAnalysisCounts('Analysing initial search results with AI', 'Finalising initial search results with AI', activeRun);
+      case 'analysing': return withAnalysisCounts('Analysing search results', 'Analysing search results', activeRun);
       default: return 'Waiting for web search to complete';
     }
   }
@@ -1323,14 +1443,16 @@ export default function BrandDetailPage() {
   const visibleIgnoredFindings = filterFindingsForSearch(allIgnoredFindings) ?? [];
   const visibleIgnoredCount = visibleIgnoredFindings.length;
   const visibleLiveScanFindings = filterFindingsForSearch(liveScanFindings) ?? [];
-  const scansToRender = isFindingsSearchActive
-    ? scans.filter((scan) => {
-        const hits = filterFindingsForSearch(scanFindings[scan.id]) ?? [];
-        const nonHits = filterFindingsForSearch(scanNonHits[scan.id]) ?? [];
-        const ignored = filterFindingsForSearch(scanIgnored[scan.id]) ?? [];
-        return hits.length > 0 || nonHits.length > 0 || ignored.length > 0;
-      })
-    : scans;
+  const scansToRender = anchorTargetScanId
+    ? scans
+    : isFindingsSearchActive
+      ? scans.filter((scan) => {
+          const hits = filterFindingsForSearch(scanFindings[scan.id]) ?? [];
+          const nonHits = filterFindingsForSearch(scanNonHits[scan.id]) ?? [];
+          const ignored = filterFindingsForSearch(scanIgnored[scan.id]) ?? [];
+          return hits.length > 0 || nonHits.length > 0 || ignored.length > 0;
+        })
+      : scans;
   const hasVisibleScanSearchMatches = (
     visibleLiveScanFindings.length > 0
     || scansToRender.length > 0
@@ -1768,9 +1890,11 @@ export default function BrandDetailPage() {
                             const matchingHitCount = hits?.length ?? 0;
                             const matchingNonHitCount = nonHits?.length ?? 0;
                             const matchingIgnoredCount = ignored?.length ?? 0;
-                            const isExpanded = isFindingsSearchActive
-                              ? matchingHitCount + matchingNonHitCount + matchingIgnoredCount > 0
-                              : expandedScanIds.includes(scan.id);
+                            const isExpanded = anchorTargetScanId
+                              ? anchorTargetScanId === scan.id
+                              : isFindingsSearchActive
+                                ? matchingHitCount + matchingNonHitCount + matchingIgnoredCount > 0
+                                : expandedScanIds.includes(scan.id);
                             const isLoading = loadingScanIds.includes(scan.id);
                             const showNonHits = isFindingsSearchActive
                               ? matchingNonHitCount > 0
@@ -1805,7 +1929,11 @@ export default function BrandDetailPage() {
                                 : null;
 
                             return (
-                              <div key={scan.id} className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                              <div
+                                key={scan.id}
+                                id={getScanResultSetAnchorId(scan.id)}
+                                className="scroll-mt-24 overflow-hidden rounded-xl border border-gray-200 bg-white"
+                              >
                                 {isConfirmingDelete ? (
                                   <div className="flex items-center justify-between gap-4 bg-red-50 px-6 py-4">
                                     <p className="text-sm text-red-800">
@@ -1886,6 +2014,32 @@ export default function BrandDetailPage() {
                                         )}
                                       </span>
                                     </button>
+
+                                    {showDebug && (
+                                      <Tooltip
+                                        content={copiedScanLinkId === scan.id ? 'Copied' : 'Copy deep link'}
+                                        align="end"
+                                        triggerClassName="flex-shrink-0"
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            void copyScanDeepLink(scan.id);
+                                          }}
+                                          className={cn(
+                                            'flex-shrink-0 rounded-md p-1.5 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+                                            copiedScanLinkId === scan.id && 'text-brand-600',
+                                          )}
+                                          aria-label="Copy deep link to scan result set"
+                                        >
+                                          {copiedScanLinkId === scan.id
+                                            ? <Check className="w-3.5 h-3.5" />
+                                            : <Link2 className="w-3.5 h-3.5" />}
+                                        </button>
+                                      </Tooltip>
+                                    )}
 
                                     {deleteDisabledReason ? (
                                       <Tooltip content={deleteDisabledReason} align="end" triggerClassName="flex-shrink-0">

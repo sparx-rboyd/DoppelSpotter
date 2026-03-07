@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
+import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import type { BrandProfile } from '@/lib/types';
 import {
   clearBrandActiveScanIfMatches,
@@ -52,6 +53,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   if (scan.status === 'summarising') {
     const recovered = await recoverStuckSummarisingScan(scanDoc.ref);
     if (recovered) {
+      await sendCompletedScanSummaryEmailIfNeeded(scanDoc.ref);
       const refreshedScanDoc = await scanDoc.ref.get();
       if (!refreshedScanDoc.exists) {
         await clearBrandActiveScanIfMatches(brandRef, brand.activeScanId);

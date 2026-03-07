@@ -258,6 +258,12 @@ export function formatScheduledRunAt(value: AnyTimestampLike, timeZone: string):
   return `${dateTime.toFormat("cccc d LLLL yyyy 'at' HH:mm")} ${dateTime.offsetNameShort}`;
 }
 
+export function formatScheduledRunAtShort(value: AnyTimestampLike, timeZone: string): string {
+  const dateTime = toZonedDateTime(value, timeZone);
+  if (!dateTime.isValid) return '—';
+  return dateTime.toFormat('d LLL yyyy, HH:mm');
+}
+
 export function formatScanScheduleFrequency(frequency: ScanScheduleFrequency): string {
   switch (frequency) {
     case 'daily':

@@ -4,6 +4,7 @@ import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
 import type { BrandProfile, Scan } from '@/lib/types';
 import { abortActorRun } from '@/lib/apify/client';
+import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import {
   clearBrandActiveScanIfMatches,
   isScanInProgress,
@@ -96,6 +97,7 @@ export async function GET(request: NextRequest) {
   if (scan.status === 'summarising') {
     const recovered = await recoverStuckSummarisingScan(scanDoc.ref);
     if (recovered) {
+      await sendCompletedScanSummaryEmailIfNeeded(scanDoc.ref);
       const refreshedScanDoc = await scanDoc.ref.get();
       if (refreshedScanDoc.exists) {
         scan = refreshedScanDoc.data() as Omit<Scan, 'id'>;

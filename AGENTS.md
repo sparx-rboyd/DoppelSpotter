@@ -47,7 +47,9 @@ using Apify actors for scraping and AI analysis for classification.
 │           ├── apify/
 │           │   ├── actors.ts     # ACTOR_REGISTRY — all actor definitions + enable/disable
 │           │   └── client.ts     # Apify client: startActorRun, buildActorInput, fetchDatasetItems
+│           ├── mailersend.ts     # MailerSend email client for transactional scan-summary emails
 │           ├── scan-runner.ts    # Shared manual + scheduled scan reservation and actor startup
+│           ├── scan-summary-emails.ts # Branded scan-summary email composition + idempotent delivery
 │           ├── scan-schedules.ts # Schedule validation, timezone-aware recurrence, next-run helpers
 │           └── analysis/
 │               ├── prompts.ts    # SYSTEM_PROMPT + buildAnalysisPrompt()
@@ -76,6 +78,7 @@ See `REVIEW.md` for full actor table and rationale.
 
 ```
 Brand add/edit pages
+ └─ persist `brands.sendScanSummaryEmails` to opt the brand into post-scan summary emails
  └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
  └─ scheduling is anchored from the chosen local start date/time and stored timezone
 
@@ -150,7 +153,10 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ completed scans pass through a short `summarising` state first
       └─ once all actor-run findings are written, the webhook loads the scan's high/medium/low findings and asks the LLM for a succinct scan-level summary focused on recurring themes and worrying trends
       └─ the final `scans.aiSummary` string is persisted on the scan document, then the scan flips to `completed` and clears `brands.activeScanId`
+      └─ after the scan is durably `completed`, `sendCompletedScanSummaryEmailIfNeeded()` may send a MailerSend summary email to `users.email` when `brands.sendScanSummaryEmails == true`
+      └─ email delivery is claimed on the scan document first (`scanSummaryEmailStatus == 'sending'`) so the normal webhook path and stale-summary recovery path cannot double-send
       └─ `summaryStartedAt` marks when the final summary phase began; if a scan stays in `summarising` too long, polling routes will recover it with a deterministic fallback summary so the UI does not remain stuck indefinitely
+      └─ recovered `summarising` scans call the same email helper after fallback completion, so email behaviour matches the normal completion path
 ```
 
 ---
@@ -261,6 +267,7 @@ Users can bookmark any finding they want to follow up on, including AI-classifie
 | `WHOISXML_API_KEY` | WhoisXML Brand Alert API key (custom actor) |
 | `OPENROUTER_API_KEY` | OpenRouter API key |
 | `OPENROUTER_MODEL` | AI analysis model override (default: `anthropic/claude-3.5-haiku`) |
+| `MAILERSEND_API_TOKEN` | MailerSend API token used to send branded scan-summary emails |
 | `AUTH_JWT_SECRET` | JWT signing secret (7-day tokens) |
 | `SCHEDULE_DISPATCH_SERVICE_ACCOUNT_EMAIL` | Email of the dedicated Cloud Scheduler service account allowed to call the internal scheduled-scan dispatch route |
 | `GCP_PROJECT_ID` | Google Cloud project ID |
@@ -275,8 +282,8 @@ Users can bookmark any finding they want to follow up on, including AI-classifie
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
-| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, skippedCount, aiSummary?, summaryStartedAt?** (denormalized — written by webhook, updated on ignore/un-ignore / duplicate-skip tracking), startedAt, completedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
+| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, skippedCount, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?**, rawLlmResponse?, createdAt |
 
 ---
@@ -308,7 +315,7 @@ Script: `app/scripts/backfill-scan-counts.ts`.
 
 The findings API is optimised to minimise Firestore reads and HTTP round-trips on the brand page:
 
-- **Lightweight brand list payloads** — `GET /api/brands` returns a compact `BrandSummary` shape (`id`, `name`, `keywordCount`, `officialDomainCount`, `createdAt`) rather than full `BrandProfile` documents. The brands list page only renders these summary fields.
+- **Brand list scan summaries** — `GET /api/brands` returns a compact `BrandSummary` shape (`id`, `name`, `scanCount`, `findingCount`, `nonHitCount`, `isScanInProgress`, `lastScanStartedAt?`, `createdAt`). The list route aggregates counts from terminal scan documents using the same denormalized per-scan fields that power the brand detail page totals, and also exposes whether any scan is currently pending/running/summarising plus the latest scan start time for list-card status text, without querying findings.
 - **Denormalized counts on scan documents** — `highCount`, `mediumCount`, `lowCount`, `nonHitCount`, `ignoredCount` are written by the webhook at scan-completion time and kept in sync by the PATCH handler on every ignore/un-ignore. The scans list endpoint (`GET /api/brands/[brandId]/scans`) reads these directly — no findings query needed.
 - **Lazy-loaded findings** — the brand page fetches findings for a scan in 3 separate stages, each only triggered on demand:
   1. **Hits** — fetched when the scan row is first expanded

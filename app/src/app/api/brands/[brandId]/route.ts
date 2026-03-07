@@ -47,6 +47,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (body.name) updates.name = body.name.trim();
   if (body.keywords) updates.keywords = body.keywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
   if (body.officialDomains) updates.officialDomains = body.officialDomains.map((d) => d.trim().toLowerCase()).filter(Boolean);
+  if (body.sendScanSummaryEmails !== undefined) {
+    if (typeof body.sendScanSummaryEmails !== 'boolean') {
+      return errorResponse('sendScanSummaryEmails must be a boolean');
+    }
+    updates.sendScanSummaryEmails = body.sendScanSummaryEmails;
+  }
   if (body.allowAiDeepSearches !== undefined) {
     if (!isValidAllowAiDeepSearches(body.allowAiDeepSearches)) {
       return errorResponse('allowAiDeepSearches must be a boolean');

@@ -1,18 +1,26 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState, type FormEvent } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ScanEye } from 'lucide-react';
 import { useAuth } from '@/lib/auth/auth-context';
+import { resolveSafeReturnTo } from '@/lib/auth/redirects';
 
 export default function LoginPage() {
-  const { signIn } = useAuth();
+  const { user, loading: authLoading, signIn } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const returnTo = resolveSafeReturnTo(searchParams.get('returnTo'));
+
+  useEffect(() => {
+    if (authLoading || !user) return;
+    router.replace(returnTo);
+  }, [authLoading, returnTo, router, user]);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -21,7 +29,7 @@ export default function LoginPage() {
 
     try {
       await signIn(email, password);
-      router.replace('/dashboard');
+      router.replace(returnTo);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred.');
     } finally {

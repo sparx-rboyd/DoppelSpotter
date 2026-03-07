@@ -46,6 +46,7 @@ export default function EditBrandPage() {
   const [watchWords, setWatchWords] = useState<string[]>([]);
   const [safeWordInput, setSafeWordInput] = useState('');
   const [safeWords, setSafeWords] = useState<string[]>([]);
+  const [sendScanSummaryEmails, setSendScanSummaryEmails] = useState(false);
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
   const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
   const [scanSchedule, setScanSchedule] = useState<BrandScanScheduleInput>(() => ({
@@ -70,6 +71,7 @@ export default function EditBrandPage() {
         setName(brand.name);
         setKeywords(brand.keywords);
         setDomains(brand.officialDomains);
+        setSendScanSummaryEmails(brand.sendScanSummaryEmails ?? false);
         setAllowAiDeepSearches(normalizeAllowAiDeepSearches(brand.allowAiDeepSearches));
         setMaxAiDeepSearches(normalizeMaxAiDeepSearches(brand.maxAiDeepSearches));
         setWatchWords(brand.watchWords ?? []);
@@ -166,6 +168,7 @@ export default function EditBrandPage() {
           name: name.trim(),
           keywords,
           officialDomains: domains,
+          sendScanSummaryEmails,
           allowAiDeepSearches,
           maxAiDeepSearches,
           watchWords,
@@ -303,6 +306,40 @@ export default function EditBrandPage() {
                     onRemove={removeSafeWord}
                     placeholder="Type a safe word and press enter..."
                   />
+
+                  <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4">
+                    <div className="flex min-w-0 flex-col gap-1">
+                      <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                        Send scan summary emails
+                        <InfoTooltip content="When a scan completes, DoppelSpotter will email a summary to your account email address." />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={sendScanSummaryEmails}
+                      aria-label="Send scan summary emails"
+                      onClick={() => setSendScanSummaryEmails((prev) => !prev)}
+                      className={`inline-flex items-center gap-3 rounded-full border px-3 py-2 text-sm font-medium transition ${
+                        sendScanSummaryEmails
+                          ? 'border-brand-600 bg-brand-50 text-brand-700'
+                          : 'border-gray-300 bg-gray-50 text-gray-600'
+                      }`}
+                    >
+                      <span>{sendScanSummaryEmails ? 'On' : 'Off'}</span>
+                      <span
+                        className={`relative inline-flex h-6 w-11 rounded-full transition ${
+                          sendScanSummaryEmails ? 'bg-brand-600' : 'bg-gray-300'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
+                            sendScanSummaryEmails ? 'left-[22px]' : 'left-0.5'
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  </div>
 
                   <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4">
                     <div className="flex min-w-0 flex-col gap-1">

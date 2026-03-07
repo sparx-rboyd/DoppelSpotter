@@ -3,6 +3,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth/auth-context';
+import { buildLoginRedirectHref } from '@/lib/auth/redirects';
 
 interface AuthGuardProps {
   children: ReactNode;
@@ -14,7 +15,8 @@ export function AuthGuard({ children }: AuthGuardProps) {
 
   useEffect(() => {
     if (!loading && !user) {
-      router.replace('/login');
+      const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      router.replace(buildLoginRedirectHref(returnTo));
     }
   }, [user, loading, router]);
 

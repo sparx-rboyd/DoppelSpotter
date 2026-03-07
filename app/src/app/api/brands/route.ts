@@ -8,8 +8,11 @@ import {
   DEFAULT_MAX_AI_DEEP_SEARCHES,
   isValidMaxAiDeepSearches,
 } from '@/lib/brands';
-import type { BrandProfile, BrandProfileCreateInput, BrandSummary } from '@/lib/types';
+import type { BrandProfile, BrandProfileCreateInput, BrandSummary, Scan, ScanStatus } from '@/lib/types';
 import { buildBrandScanSchedule } from '@/lib/scan-schedules';
+
+const TERMINAL_SCAN_STATUSES: ScanStatus[] = ['completed', 'cancelled', 'failed'];
+const IN_PROGRESS_SCAN_STATUSES: ScanStatus[] = ['pending', 'running', 'summarising'];
 
 // GET /api/brands — list all brands for the authenticated user
 export async function GET(request: NextRequest) {
@@ -17,20 +20,75 @@ export async function GET(request: NextRequest) {
   if (error) return error;
   void request;
 
-  const snapshot = await db
-    .collection('brands')
-    .where('userId', '==', uid)
-    .select('name', 'keywords', 'officialDomains', 'createdAt')
-    .orderBy('createdAt', 'desc')
-    .get();
+  const [brandSnapshot, scanSnapshot] = await Promise.all([
+    db
+      .collection('brands')
+      .where('userId', '==', uid)
+      .select('name', 'createdAt', 'scanSchedule')
+      .orderBy('createdAt', 'desc')
+      .get(),
+    db
+      .collection('scans')
+      .where('userId', '==', uid)
+      .select('brandId', 'status', 'startedAt', 'highCount', 'mediumCount', 'lowCount', 'nonHitCount')
+      .get(),
+  ]);
 
-  const brands: BrandSummary[] = snapshot.docs.map((doc) => {
-    const data = doc.data() as Pick<BrandProfile, 'name' | 'keywords' | 'officialDomains' | 'createdAt'>;
+  const countsByBrandId = new Map<
+    string,
+    Pick<BrandSummary, 'scanCount' | 'findingCount' | 'nonHitCount' | 'isScanInProgress' | 'lastScanStartedAt'>
+  >();
+
+  for (const doc of scanSnapshot.docs) {
+    const scan = doc.data() as Pick<Scan, 'brandId' | 'status' | 'startedAt' | 'highCount' | 'mediumCount' | 'lowCount' | 'nonHitCount'>;
+    const current = countsByBrandId.get(scan.brandId) ?? {
+      scanCount: 0,
+      findingCount: 0,
+      nonHitCount: 0,
+      isScanInProgress: false,
+      lastScanStartedAt: undefined,
+    };
+
+    if (!current.lastScanStartedAt || scan.startedAt.toMillis() > current.lastScanStartedAt.toMillis()) {
+      current.lastScanStartedAt = scan.startedAt;
+    }
+
+    if (IN_PROGRESS_SCAN_STATUSES.includes(scan.status)) {
+      current.isScanInProgress = true;
+    }
+
+    if (!TERMINAL_SCAN_STATUSES.includes(scan.status)) {
+      countsByBrandId.set(scan.brandId, current);
+      continue;
+    }
+
+    current.scanCount += 1;
+    current.findingCount += (scan.highCount ?? 0) + (scan.mediumCount ?? 0) + (scan.lowCount ?? 0);
+    current.nonHitCount += scan.nonHitCount ?? 0;
+
+    countsByBrandId.set(scan.brandId, current);
+  }
+
+  const brands: BrandSummary[] = brandSnapshot.docs.map((doc) => {
+    const data = doc.data() as Pick<BrandProfile, 'name' | 'createdAt' | 'scanSchedule'>;
+    const counts = countsByBrandId.get(doc.id);
+    const scanSchedule = data.scanSchedule?.enabled
+      ? {
+          enabled: data.scanSchedule.enabled,
+          timeZone: data.scanSchedule.timeZone,
+          nextRunAt: data.scanSchedule.nextRunAt,
+        }
+      : undefined;
+
     return {
       id: doc.id,
       name: data.name,
-      keywordCount: data.keywords.length,
-      officialDomainCount: data.officialDomains.length,
+      scanCount: counts?.scanCount ?? 0,
+      findingCount: counts?.findingCount ?? 0,
+      nonHitCount: counts?.nonHitCount ?? 0,
+      isScanInProgress: counts?.isScanInProgress ?? false,
+      lastScanStartedAt: counts?.lastScanStartedAt,
+      scanSchedule,
       createdAt: data.createdAt,
     };
   });
@@ -54,6 +112,7 @@ export async function POST(request: NextRequest) {
     name,
     keywords = [],
     officialDomains = [],
+    sendScanSummaryEmails = false,
     watchWords = [],
     safeWords = [],
     allowAiDeepSearches = DEFAULT_ALLOW_AI_DEEP_SEARCHES,
@@ -67,6 +126,10 @@ export async function POST(request: NextRequest) {
 
   if (!isValidAllowAiDeepSearches(allowAiDeepSearches)) {
     return errorResponse('allowAiDeepSearches must be a boolean');
+  }
+
+  if (typeof sendScanSummaryEmails !== 'boolean') {
+    return errorResponse('sendScanSummaryEmails must be a boolean');
   }
 
   if (!isValidMaxAiDeepSearches(maxAiDeepSearches)) {
@@ -89,6 +152,7 @@ export async function POST(request: NextRequest) {
     name: name.trim(),
     keywords: keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean),
     officialDomains: officialDomains.map((d) => String(d).trim().toLowerCase()).filter(Boolean),
+    sendScanSummaryEmails,
     allowAiDeepSearches,
     maxAiDeepSearches,
     watchWords: (watchWords as string[]).map((w) => String(w).trim().toLowerCase()).filter(Boolean),

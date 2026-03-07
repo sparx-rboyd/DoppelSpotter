@@ -46,6 +46,8 @@ export interface BrandProfile {
   name: string;
   keywords: string[];
   officialDomains: string[];
+  /** Whether completed scans should send a summary email to the brand owner's account email. */
+  sendScanSummaryEmails?: boolean;
   /** Whether AI analysis may trigger Google deep-search follow-up runs for this brand. */
   allowAiDeepSearches?: boolean;
   /** Maximum number of AI-requested Google follow-up searches allowed for this brand. */
@@ -66,6 +68,7 @@ export interface BrandProfileCreateInput {
   name: string;
   keywords?: string[];
   officialDomains?: string[];
+  sendScanSummaryEmails?: boolean;
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
   watchWords?: string[];
@@ -77,6 +80,7 @@ export interface BrandProfileUpdateInput {
   name?: string;
   keywords?: string[];
   officialDomains?: string[];
+  sendScanSummaryEmails?: boolean;
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
   watchWords?: string[];
@@ -87,8 +91,12 @@ export interface BrandProfileUpdateInput {
 export interface BrandSummary {
   id: string;
   name: string;
-  keywordCount: number;
-  officialDomainCount: number;
+  scanCount: number;
+  findingCount: number;
+  nonHitCount: number;
+  isScanInProgress: boolean;
+  lastScanStartedAt?: Timestamp;
+  scanSchedule?: Pick<BrandScanSchedule, 'enabled' | 'timeZone' | 'nextRunAt'>;
   createdAt: Timestamp;
 }
 
@@ -144,6 +152,7 @@ export interface Finding extends FindingSummary {
 // ─── Scans ─────────────────────────────────────────────────────────────────
 
 export type ScanStatus = 'pending' | 'running' | 'summarising' | 'completed' | 'failed' | 'cancelled';
+export type ScanSummaryEmailStatus = 'sending' | 'sent' | 'failed' | 'skipped';
 
 export type ActorRunStatus =
   | 'pending'
@@ -202,6 +211,16 @@ export interface Scan {
   skippedCount?: number;
   /** Succinct AI-generated overview of the scan's high/medium/low findings. */
   aiSummary?: string;
+  /** Delivery status for the optional post-scan summary email. */
+  scanSummaryEmailStatus?: ScanSummaryEmailStatus;
+  /** When scan summary email delivery was last attempted or explicitly skipped. */
+  scanSummaryEmailAttemptedAt?: Timestamp;
+  /** When the scan summary email was successfully sent. */
+  scanSummaryEmailSentAt?: Timestamp;
+  /** Provider message identifier returned by MailerSend. */
+  scanSummaryEmailMessageId?: string;
+  /** Most recent email delivery error message, if sending failed. */
+  scanSummaryEmailError?: string;
   /** When the final scan-level summary step began. */
   summaryStartedAt?: Timestamp;
   errorMessage?: string;

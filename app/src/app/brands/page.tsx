@@ -7,7 +7,24 @@ import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { formatScheduledRunAtShort } from '@/lib/scan-schedules';
 import type { BrandSummary } from '@/lib/types';
+import { formatDate } from '@/lib/utils';
+
+function getScanStatusLabel(brand: BrandSummary): string {
+  if (brand.isScanInProgress) return 'Scan in progress';
+
+  const lastScanLabel = brand.lastScanStartedAt
+    ? `Last scan: ${formatDate(brand.lastScanStartedAt)}`
+    : 'No scans performed yet';
+
+  if (!brand.scanSchedule?.enabled) return lastScanLabel;
+
+  return `${lastScanLabel} · Next scan: ${formatScheduledRunAtShort(
+    brand.scanSchedule.nextRunAt,
+    brand.scanSchedule.timeZone,
+  )}`;
+}
 
 export default function BrandsPage() {
   const [brands, setBrands] = useState<BrandSummary[]>([]);
@@ -94,7 +111,10 @@ export default function BrandsPage() {
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-gray-900 truncate">{brand.name}</h3>
                         <p className="text-xs text-gray-500 mt-0.5">
-                          {brand.keywordCount} keyword{brand.keywordCount !== 1 ? 's' : ''} · {brand.officialDomainCount} domain{brand.officialDomainCount !== 1 ? 's' : ''}
+                          {brand.scanCount} scan{brand.scanCount !== 1 ? 's' : ''} · {brand.findingCount} finding{brand.findingCount !== 1 ? 's' : ''} detected · {brand.nonHitCount} non-hit{brand.nonHitCount !== 1 ? 's' : ''}
+                        </p>
+                        <p className={`text-xs mt-1 ${brand.isScanInProgress ? 'text-brand-600 font-medium' : 'text-gray-400'}`}>
+                          {getScanStatusLabel(brand)}
                         </p>
                       </div>
                       <ChevronRight className="w-4 h-4 text-gray-400 flex-shrink-0" />
