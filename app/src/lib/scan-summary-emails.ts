@@ -24,25 +24,8 @@ function buildScanSummaryDeepLink(brandId: string, scanId: string): string {
   return `${buildAppBaseUrl()}/brands/${encodeURIComponent(brandId)}#scan-result-set-${encodeURIComponent(scanId)}`;
 }
 
-function buildEmailBrandLockupHtml() {
-  return `
-    <table role="presentation" cellspacing="0" cellpadding="0" border="0">
-      <tr>
-        <td style="padding:0;">
-          <table role="presentation" cellspacing="0" cellpadding="0" border="0">
-            <tr>
-              <td style="border:2px solid #0284c7;border-radius:10px;background:#f0f9ff;width:30px;height:30px;text-align:center;vertical-align:middle;">
-                <span style="display:inline-block;width:10px;height:10px;border-radius:9999px;background:#0284c7;"></span>
-              </td>
-              <td style="padding-left:10px;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:24px;line-height:1;font-weight:700;letter-spacing:-0.3px;color:#111827;white-space:nowrap;">
-                DoppelSpotter
-              </td>
-            </tr>
-          </table>
-        </td>
-      </tr>
-    </table>
-  `.trim();
+function buildLogoUrl(): string {
+  return `${buildAppBaseUrl()}/logo-white.png`;
 }
 
 function escapeHtml(value: string): string {
@@ -103,8 +86,8 @@ function buildScanSummaryEmailContent(scan: Scan, brand: BrandProfile) {
   const completedLabel = formatScanDate(scan.completedAt ?? scan.startedAt);
   const summary = scan.aiSummary?.trim() || buildCountOnlyScanAiSummary(scan);
   const deepLink = buildScanSummaryDeepLink(scan.brandId, scan.id);
+  const logoUrl = buildLogoUrl();
   const countRows = buildCountRows(scan);
-  const brandLockupHtml = buildEmailBrandLockupHtml();
 
   const text = [
     `DoppelSpotter scan summary for ${brand.name}`,
@@ -127,9 +110,13 @@ function buildScanSummaryEmailContent(scan: Scan, brand: BrandProfile) {
     <div style="margin:0;background:#f0f9ff;padding:24px;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
       <div style="margin:0 auto;max-width:640px;overflow:hidden;border:1px solid #e5e7eb;border-radius:20px;background:#ffffff;">
         <div style="background:linear-gradient(135deg,#0369a1 0%,#0284c7 52%,#0ea5e9 100%);padding:28px 32px;color:#ffffff;">
-          <div style="display:inline-block;border-radius:14px;background:#ffffff;padding:12px 16px;">
-            ${brandLockupHtml}
-          </div>
+          <img
+            src="${escapeHtml(logoUrl)}"
+            alt="DoppelSpotter"
+            width="248"
+            height="40"
+            style="display:block;height:auto;max-width:248px;width:100%;"
+          />
           <h1 style="margin:20px 0 0;font-size:30px;line-height:1.15;color:#ffffff;">Scan summary</h1>
         </div>
         <div style="padding:32px;">
