@@ -25,7 +25,7 @@ function buildScanSummaryDeepLink(brandId: string, scanId: string): string {
 }
 
 function buildLogoUrl(): string {
-  return `${buildAppBaseUrl()}/logo-white.png`;
+  return 'https://www.doppelspotter.com/logo-white.png';
 }
 
 function escapeHtml(value: string): string {
