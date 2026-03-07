@@ -381,8 +381,15 @@ export default function EditBrandPage() {
                     onRemove={removeSafeWord}
                     placeholder="Type a safe word and press enter..."
                   />
+                </CardContent>
+              </Card>
 
-                  <div className="flex items-center justify-between gap-4 rounded-xl border border-gray-200 bg-white p-4">
+              <Card>
+                <CardHeader className="px-6 py-5">
+                  <h2 className="font-semibold text-gray-900">Scan settings</h2>
+                </CardHeader>
+                <CardContent className="space-y-7 p-6">
+                  <div className="flex items-center justify-between gap-4">
                     <div className="flex min-w-0 flex-col gap-1">
                       <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
                         Send scan summary emails
@@ -395,10 +402,8 @@ export default function EditBrandPage() {
                       aria-checked={sendScanSummaryEmails}
                       aria-label="Send scan summary emails"
                       onClick={() => setSendScanSummaryEmails((prev) => !prev)}
-                      className={`inline-flex items-center gap-3 rounded-full border px-3 py-2 text-sm font-medium transition ${
-                        sendScanSummaryEmails
-                          ? 'border-brand-600 bg-brand-50 text-brand-700'
-                          : 'border-gray-300 bg-gray-50 text-gray-600'
+                      className={`inline-flex items-center gap-2 rounded-md text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                        sendScanSummaryEmails ? 'text-brand-700' : 'text-gray-600'
                       }`}
                     >
                       <span>{sendScanSummaryEmails ? 'On' : 'Off'}</span>
@@ -416,84 +421,87 @@ export default function EditBrandPage() {
                     </button>
                   </div>
 
-                  <div className="rounded-xl border border-gray-200 bg-white">
-                    <div className="flex items-center justify-between gap-4 p-4">
-                      <div className="flex min-w-0 flex-col gap-1">
-                        <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-                          Allow AI analysis to request deeper searches
-                          <InfoTooltip content="Deeper searches allow AI analysis to perform additional searches if it sees something in the search results that gives cause for concern. Deeper searches result in slower scans." />
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={allowAiDeepSearches}
-                        aria-label="Allow AI analysis to request deeper searches"
-                        onClick={() => setAllowAiDeepSearches((prev) => !prev)}
-                        className={`inline-flex items-center gap-3 rounded-full border px-3 py-2 text-sm font-medium transition ${
-                          allowAiDeepSearches
-                            ? 'border-brand-600 bg-brand-50 text-brand-700'
-                            : 'border-gray-300 bg-gray-50 text-gray-600'
-                        }`}
-                      >
-                        <span>{allowAiDeepSearches ? 'On' : 'Off'}</span>
-                        <span
-                          className={`relative inline-flex h-6 w-11 rounded-full transition ${
-                            allowAiDeepSearches ? 'bg-brand-600' : 'bg-gray-300'
-                          }`}
-                        >
-                          <span
-                            className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
-                              allowAiDeepSearches ? 'left-[22px]' : 'left-0.5'
-                            }`}
-                          />
-                        </span>
-                      </button>
-                    </div>
-
-                    {allowAiDeepSearches && (
-                      <div className="border-t border-gray-100 px-4 pb-4 pt-4">
-                        <div className="ml-1 border-l border-gray-200 pl-4">
-                          <label htmlFor="max-ai-deep-searches" className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
-                            AI deep searches
-                            <InfoTooltip content="The maximum number of follow-up Google searches that AI analysis is permitted to run. More searches increase coverage, but scans will be slower." />
-                          </label>
-                          <div className="mt-3">
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="min-w-0">
-                                <p className="text-sm text-gray-500">Fewer searches</p>
-                                <p className="text-xs text-gray-400">Faster</p>
-                              </div>
-                              <span className="text-sm font-semibold text-gray-900">{maxAiDeepSearches} searches</span>
-                              <div className="min-w-0 text-right">
-                                <p className="text-sm text-gray-500">More searches</p>
-                                <p className="text-xs text-gray-400">Slower</p>
-                              </div>
-                            </div>
-                            <input
-                              id="max-ai-deep-searches"
-                              type="range"
-                              min={MIN_AI_DEEP_SEARCHES}
-                              max={MAX_AI_DEEP_SEARCHES}
-                              step={1}
-                              value={maxAiDeepSearches}
-                              onChange={(e) => setMaxAiDeepSearches(Number(e.target.value))}
-                              className="mt-4 w-full accent-brand-600"
-                            />
-                            <div className="mt-2 flex justify-between text-xs text-gray-500">
-                              <span>{MIN_AI_DEEP_SEARCHES}</span>
-                              <span>{MAX_AI_DEEP_SEARCHES}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
                   <BrandScanScheduleFields
                     value={scanSchedule}
                     onChange={setScanSchedule}
                   />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="px-6 py-5">
+                  <h2 className="font-semibold text-gray-900">Web scan settings</h2>
+                </CardHeader>
+                <CardContent className="space-y-4 p-6">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex min-w-0 flex-col gap-1">
+                      <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                        Allow AI analysis to request deeper searches
+                        <InfoTooltip content="Deeper searches allow AI analysis to perform additional searches if it sees something in the search results that gives cause for concern. Deeper searches result in slower scans." />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={allowAiDeepSearches}
+                      aria-label="Allow AI analysis to request deeper searches"
+                      onClick={() => setAllowAiDeepSearches((prev) => !prev)}
+                      className={`inline-flex items-center gap-2 rounded-md text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                        allowAiDeepSearches ? 'text-brand-700' : 'text-gray-600'
+                      }`}
+                    >
+                      <span>{allowAiDeepSearches ? 'On' : 'Off'}</span>
+                      <span
+                        className={`relative inline-flex h-6 w-11 rounded-full transition ${
+                          allowAiDeepSearches ? 'bg-brand-600' : 'bg-gray-300'
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
+                            allowAiDeepSearches ? 'left-[22px]' : 'left-0.5'
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  </div>
+
+                  {allowAiDeepSearches && (
+                    <div className="border-t border-gray-100 pt-4">
+                      <div className="ml-1 border-l border-gray-200 pl-4">
+                        <label htmlFor="max-ai-deep-searches" className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
+                          AI deep searches
+                          <InfoTooltip content="The maximum number of follow-up Google searches that AI analysis is permitted to run. More searches increase coverage, but scans will be slower." />
+                        </label>
+                        <div className="mt-3">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="min-w-0">
+                              <p className="text-sm text-gray-500">Fewer searches</p>
+                              <p className="text-xs text-gray-400">Faster</p>
+                            </div>
+                            <span className="text-sm font-semibold text-gray-900">{maxAiDeepSearches} searches</span>
+                            <div className="min-w-0 text-right">
+                              <p className="text-sm text-gray-500">More searches</p>
+                              <p className="text-xs text-gray-400">Slower</p>
+                            </div>
+                          </div>
+                          <input
+                            id="max-ai-deep-searches"
+                            type="range"
+                            min={MIN_AI_DEEP_SEARCHES}
+                            max={MAX_AI_DEEP_SEARCHES}
+                            step={1}
+                            value={maxAiDeepSearches}
+                            onChange={(e) => setMaxAiDeepSearches(Number(e.target.value))}
+                            className="mt-4 w-full accent-brand-600"
+                          />
+                          <div className="mt-2 flex justify-between text-xs text-gray-500">
+                            <span>{MIN_AI_DEEP_SEARCHES}</span>
+                            <span>{MAX_AI_DEEP_SEARCHES}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

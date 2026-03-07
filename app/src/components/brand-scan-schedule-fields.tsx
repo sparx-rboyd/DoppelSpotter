@@ -723,8 +723,8 @@ export function BrandScanScheduleFields({
   }
 
   return (
-    <div className="rounded-xl border border-gray-200 bg-white">
-      <div className="flex items-center justify-between gap-4 p-4">
+    <div>
+      <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
           <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
             Scheduled scans
@@ -740,10 +740,8 @@ export function BrandScanScheduleFields({
           aria-checked={value.enabled}
           aria-label="Enable scheduled scans"
           onClick={() => updateValue({ enabled: !value.enabled })}
-          className={`inline-flex items-center gap-3 rounded-full border px-3 py-2 text-sm font-medium transition ${
-            value.enabled
-              ? 'border-brand-600 bg-brand-50 text-brand-700'
-              : 'border-gray-300 bg-gray-50 text-gray-600'
+          className={`inline-flex items-center gap-2 rounded-md text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+            value.enabled ? 'text-brand-700' : 'text-gray-600'
           }`}
         >
           <span>{value.enabled ? 'On' : 'Off'}</span>
@@ -762,7 +760,7 @@ export function BrandScanScheduleFields({
       </div>
 
       {value.enabled && (
-        <div className="border-t border-gray-100 px-4 pb-4 pt-4">
+        <div className="mt-3 border-t border-gray-100 pt-4">
           <div className="ml-1 border-l border-gray-200 pl-4">
             <div className="grid gap-4 md:grid-cols-2">
               <SelectField
