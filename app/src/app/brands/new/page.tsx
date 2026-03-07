@@ -13,10 +13,13 @@ import { TagInput } from '@/components/ui/tag-input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { InfoTooltip } from '@/components/ui/tooltip';
 import {
+  DEFAULT_SEARCH_RESULT_PAGES,
   DEFAULT_ALLOW_AI_DEEP_SEARCHES,
   DEFAULT_MAX_AI_DEEP_SEARCHES,
   MAX_AI_DEEP_SEARCHES,
   MIN_AI_DEEP_SEARCHES,
+  MAX_SEARCH_RESULT_PAGES,
+  MIN_SEARCH_RESULT_PAGES,
 } from '@/lib/brands';
 import {
   DEFAULT_SCAN_SCHEDULE_FREQUENCY,
@@ -40,6 +43,7 @@ export default function NewBrandPage() {
   const [safeWordInput, setSafeWordInput] = useState('');
   const [safeWords, setSafeWords] = useState<string[]>([]);
   const [sendScanSummaryEmails, setSendScanSummaryEmails] = useState(true);
+  const [searchResultPages, setSearchResultPages] = useState(DEFAULT_SEARCH_RESULT_PAGES);
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
   const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
   const [scanSchedule, setScanSchedule] = useState<BrandScanScheduleInput>(() => {
@@ -143,6 +147,7 @@ export default function NewBrandPage() {
           name: name.trim(),
           keywords,
           officialDomains: domains,
+          searchResultPages,
           sendScanSummaryEmails,
           allowAiDeepSearches,
           maxAiDeepSearches,
@@ -321,6 +326,42 @@ export default function NewBrandPage() {
                 <h2 className="font-semibold text-gray-900">Web scan settings</h2>
               </CardHeader>
               <CardContent className="space-y-4 p-6">
+                <div className="pb-4">
+                  <label htmlFor="search-result-pages" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                    Search result pages
+                    <InfoTooltip content="The number of search result pages to request (10 results per page). More pages increases coverage, but scans will be slower." />
+                  </label>
+                  <div className="mt-3">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-sm text-gray-500">Fewer pages</p>
+                        <p className="text-xs text-gray-400">Faster</p>
+                      </div>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {searchResultPages} {searchResultPages === 1 ? 'page' : 'pages'}
+                      </span>
+                      <div className="min-w-0 text-right">
+                        <p className="text-sm text-gray-500">More pages</p>
+                        <p className="text-xs text-gray-400">Slower</p>
+                      </div>
+                    </div>
+                    <input
+                      id="search-result-pages"
+                      type="range"
+                      min={MIN_SEARCH_RESULT_PAGES}
+                      max={MAX_SEARCH_RESULT_PAGES}
+                      step={1}
+                      value={searchResultPages}
+                      onChange={(e) => setSearchResultPages(Number(e.target.value))}
+                      className="mt-4 w-full accent-brand-600"
+                    />
+                    <div className="mt-2 flex justify-between text-xs text-gray-500">
+                      <span>{MIN_SEARCH_RESULT_PAGES}</span>
+                      <span>{MAX_SEARCH_RESULT_PAGES}</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex min-w-0 flex-col gap-1">
                     <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">

@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
-import { isValidAllowAiDeepSearches, isValidMaxAiDeepSearches } from '@/lib/brands';
+import { isValidAllowAiDeepSearches, isValidMaxAiDeepSearches, isValidSearchResultPages } from '@/lib/brands';
 import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
 import {
   buildBrandScanSchedule,
@@ -59,6 +59,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return errorResponse('sendScanSummaryEmails must be a boolean');
     }
     updates.sendScanSummaryEmails = body.sendScanSummaryEmails;
+  }
+  if (body.searchResultPages !== undefined) {
+    if (!isValidSearchResultPages(body.searchResultPages)) {
+      return errorResponse('searchResultPages must be a whole number from 1 to 10');
+    }
+    updates.searchResultPages = body.searchResultPages;
   }
   if (body.allowAiDeepSearches !== undefined) {
     if (!isValidAllowAiDeepSearches(body.allowAiDeepSearches)) {

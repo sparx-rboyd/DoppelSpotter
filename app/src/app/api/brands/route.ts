@@ -3,7 +3,9 @@ import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
 import {
+  DEFAULT_SEARCH_RESULT_PAGES,
   DEFAULT_ALLOW_AI_DEEP_SEARCHES,
+  isValidSearchResultPages,
   isValidAllowAiDeepSearches,
   DEFAULT_MAX_AI_DEEP_SEARCHES,
   isValidMaxAiDeepSearches,
@@ -112,6 +114,7 @@ export async function POST(request: NextRequest) {
     name,
     keywords = [],
     officialDomains = [],
+    searchResultPages = DEFAULT_SEARCH_RESULT_PAGES,
     sendScanSummaryEmails = true,
     watchWords = [],
     safeWords = [],
@@ -126,6 +129,10 @@ export async function POST(request: NextRequest) {
 
   if (!isValidAllowAiDeepSearches(allowAiDeepSearches)) {
     return errorResponse('allowAiDeepSearches must be a boolean');
+  }
+
+  if (!isValidSearchResultPages(searchResultPages)) {
+    return errorResponse('searchResultPages must be a whole number from 1 to 10');
   }
 
   if (typeof sendScanSummaryEmails !== 'boolean') {
@@ -155,6 +162,7 @@ export async function POST(request: NextRequest) {
     name: name.trim(),
     keywords: keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean),
     officialDomains: officialDomains.map((d) => String(d).trim().toLowerCase()).filter(Boolean),
+    searchResultPages,
     sendScanSummaryEmails,
     allowAiDeepSearches,
     maxAiDeepSearches,

@@ -79,6 +79,7 @@ See `REVIEW.md` for full actor table and rationale.
 ```
 Brand add/edit pages
  └─ persist `brands.sendScanSummaryEmails` to opt the brand into post-scan summary emails
+ └─ persist `brands.searchResultPages` to control how many Google SERP pages each initial/deep search run requests
  └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
  └─ scheduling is anchored from the chosen local start date/time and stored timezone
 
@@ -96,7 +97,7 @@ POST /api/scan
  └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ reads CORE_ACTOR_IDS (or actorIds from request body)
- └─ uses a fixed Google Search `maxPagesPerQuery` of 3 for the initial search pass
+ └─ uses `brands.searchResultPages` (default 3, min 1, max 10) as Google Search `maxPagesPerQuery`
  └─ calls startActorRun() for each actor → registers Apify webhook
  └─ stores runId → scan document in Firestore
 
@@ -149,7 +150,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ (batch mode, depth 0 only) if ranked chunk/fallback suggestions are present and the brand allows deep search → triggers deep-search runs
       └─ suggestions are reserved on the originating run so duplicate callbacks do not fan out extra searches
       └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
-      └─ each deep-search Google run uses at least 3 SERP pages, even when the initial scan is configured for fewer
+      └─ each deep-search Google run uses the same `brands.searchResultPages` setting as the initial search
       └─ `actorRuns.*.analysedCount` increments as chunks finish so the UI can show meaningful `X / N` AI-analysis progress
       └─ `actorRuns.*.skippedDuplicateCount` tracks how many previous-scan duplicate URLs were filtered out for progress UI + scan summaries
       └─ unexpected processing errors after partial finding writes reconcile scan counts from persisted findings, mark the affected run terminal, and let the scan complete normally when useful results already exist
@@ -217,9 +218,9 @@ check before triggering). Suggested queries are reserved on the originating run 
 Apify runs are started, so duplicate webhook callbacks do not fan out duplicate deep-search runs.
 `markActorRunComplete` always reads `actorRunIds.length` from a fresh Firestore snapshot inside
 its transaction, so dynamically-added runs are counted correctly for scan completion. Deep-search
-runs are skipped entirely when `allowAiDeepSearches` is false for the brand. When enabled, every
-deep-search Google run uses a fixed 2-page SERP budget, while the initial Google scan always uses
-a fixed 3-page SERP budget.
+runs are skipped entirely when `allowAiDeepSearches` is false for the brand. When enabled, both
+the initial Google scan and each deep-search Google run use the brand's `searchResultPages`
+setting, which defaults to 3 and is constrained to 1-10.
 
 `ActorRunInfo` carries `searchDepth` (0 or 1) and `searchQuery` (the literal query string for
 depth-1 runs). The brand page progress indicator shows a "Deep search" badge and surfaces the
@@ -287,7 +288,7 @@ Users can bookmark any finding they want to follow up on, including AI-classifie
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, skippedCount, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, isFalsePositive?, isIgnored?, ignoredAt?, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?**, rawLlmResponse?, createdAt |
 

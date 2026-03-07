@@ -29,7 +29,7 @@ export interface ActorRunResult {
 export function buildActorInput(actorId: string, brand: BrandProfile): Record<string, unknown> {
   const searchTerms = [brand.name, ...brand.keywords];
   const primaryQuery = searchTerms.join(' OR ');
-  const googlePageCount = getInitialGooglePageCount();
+  const googlePageCount = getInitialGooglePageCount(brand.searchResultPages);
 
   // Actor-specific input mappings
   switch (actorId) {
@@ -99,10 +99,11 @@ export async function startActorRun(
  */
 export async function startDeepSearchRun(
   query: string,
+  searchResultPages: number | undefined,
   webhookUrl: string,
 ): Promise<{ runId: string }> {
   const client = getClient();
-  const deepSearchPageCount = getDeepSearchGooglePageCount();
+  const deepSearchPageCount = getDeepSearchGooglePageCount(searchResultPages);
 
   const run = await client.actor('apify/google-search-scraper').start(
     { queries: query, maxPagesPerQuery: deepSearchPageCount },

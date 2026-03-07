@@ -56,7 +56,7 @@ primaryQuery = searchTerms.join(' OR ')
 
 | Actor | Input |
 |---|---|
-| `apify/google-search-scraper` | `{ queries: primaryQuery, maxPagesPerQuery: 3 }` |
+| `apify/google-search-scraper` | `{ queries: primaryQuery, maxPagesPerQuery: searchResultPages }` |
 | `apify/instagram-search-scraper` | `{ searchQueries: searchTerms, maxResults: 20 }` |
 | `data-slayer/twitter-search` | `{ searchTerms: searchTerms, maxTweets: 50 }` |
 | `apify/facebook-search-scraper` | `{ queries: searchTerms, maxResults: 20 }` |
@@ -86,8 +86,9 @@ push one dataset item per result — so 30 results → 30 items. It doesn't work
 
 Instead, the actor pushes **one dataset item per _page_ of Google results**. Each item
 is a single large JSON object that contains _all_ the results from that page bundled
-together inside an `organicResults` array. Our initial Google scan is now fixed at
-**3 SERP pages** (~30 organic results total, assuming ~10 per page), so we get:
+together inside an `organicResults` array. The initial Google scan now uses the brand's
+configured `searchResultPages` value, which defaults to **3 SERP pages** (~30 organic
+results total, assuming ~10 per page), so with the default we get:
 
 ```
 Dataset item 1  →  SERP page 1  →  organicResults[0..9]  (results #1–10)
@@ -95,7 +96,7 @@ Dataset item 2  →  SERP page 2  →  organicResults[0..9]  (results #11–20)
 Dataset item 3  →  SERP page 3  →  organicResults[0..9]  (results #21–30)
 ```
 
-Three items total, not thirty. Brands configured for 10, 20, 40, etc. follow the same
+Three items total, not thirty. Brands configured for more or fewer pages follow the same
 pattern: one dataset item per SERP page.
 
 This matters because the webhook handler first receives page-level SERP blobs, then has to
@@ -112,26 +113,26 @@ Defined in `app/src/lib/apify/client.ts` → `buildActorInput()`:
 ```typescript
 // searchTerms = [brand.name, ...brand.keywords]
 // primaryQuery = searchTerms.join(' OR ')
-// initial Google scan breadth is fixed
+// brand-specific Google scan breadth (defaults to 3)
 
-{ queries: primaryQuery, maxPagesPerQuery: 3 }
+{ queries: primaryQuery, maxPagesPerQuery: searchResultPages }
 ```
 
 **Example** — brand `Acme` with keywords `acme, acme-corp`:
 ```
 queries: "Acme OR acme OR acme-corp"
-maxPagesPerQuery: 3
+maxPagesPerQuery: searchResultPages
 ```
 
-This produces **3 dataset items** (one per SERP page), each containing up to 10
-organic results — ~30 organic results total per scan.
+At the default setting, this produces **3 dataset items** (one per SERP page), each
+containing up to 10 organic results — ~30 organic results total per scan.
 
 ### Input parameters (relevant subset)
 
 | Parameter | Type | Our value | Description |
 |---|---|---|---|
 | `queries` | string | `"brand OR kw1 OR kw2"` | Newline-separated search terms or Google URLs. We pass a single `OR`-joined string. |
-| `maxPagesPerQuery` | integer | `3` | Number of SERP pages to scrape per query for the initial search pass. Each page ≈ 10 organic results. |
+| `maxPagesPerQuery` | integer | `searchResultPages` (default `3`) | Number of SERP pages to scrape per query for both the initial search pass and deep-search runs. Each page ≈ 10 organic results. |
 | `resultsPerPage` | integer | _(not sent)_ | Google hard-caps SERPs at ~10 results, so we rely on page count rather than a per-brand result-count setting. |
 | `countryCode` | string | _(unset — defaults to US)_ | Google domain / country for the search. |
 | `languageCode` | string | _(unset)_ | UI language (affects results on international queries). |
@@ -538,4 +539,4 @@ _(To be filled in as the review progresses.)_
 - [ ] Are the search queries (using `OR`) producing relevant results for brand monitoring?
 - [ ] How well does AI analysis classify Google Search results vs. other sources?
 - [ ] Is the false positive rate too high / too low?
-- [ ] Is the fixed 3-page initial search plus configurable `maxAiDeepSearches` budget the right trade-off?
+- [ ] Is the shared `searchResultPages` setting plus configurable `maxAiDeepSearches` budget the right trade-off?

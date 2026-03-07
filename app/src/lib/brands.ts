@@ -1,10 +1,23 @@
-export const FIXED_INITIAL_GOOGLE_PAGE_COUNT = 3;
+export const DEFAULT_SEARCH_RESULT_PAGES = 3;
+export const MIN_SEARCH_RESULT_PAGES = 1;
+export const MAX_SEARCH_RESULT_PAGES = 10;
 export const DEFAULT_ALLOW_AI_DEEP_SEARCHES = true;
 export const MIN_AI_DEEP_SEARCHES = 1;
 export const MAX_AI_DEEP_SEARCHES = 10;
 export const DEFAULT_MAX_AI_DEEP_SEARCHES = 5;
-export const MIN_DEEP_SEARCH_PAGE_COUNT = 1;
-export const MAX_DEEP_SEARCH_PAGE_COUNT = 2;
+
+export function isValidSearchResultPages(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= MIN_SEARCH_RESULT_PAGES &&
+    value <= MAX_SEARCH_RESULT_PAGES
+  );
+}
+
+export function normalizeSearchResultPages(value: unknown): number {
+  return isValidSearchResultPages(value) ? value : DEFAULT_SEARCH_RESULT_PAGES;
+}
 
 export function isValidMaxAiDeepSearches(value: unknown): value is number {
   return (
@@ -19,12 +32,12 @@ export function normalizeMaxAiDeepSearches(value: unknown): number {
   return isValidMaxAiDeepSearches(value) ? value : DEFAULT_MAX_AI_DEEP_SEARCHES;
 }
 
-export function getInitialGooglePageCount(): number {
-  return FIXED_INITIAL_GOOGLE_PAGE_COUNT;
+export function getInitialGooglePageCount(searchResultPages?: unknown): number {
+  return normalizeSearchResultPages(searchResultPages);
 }
 
-export function getDeepSearchGooglePageCount(): number {
-  return MAX_DEEP_SEARCH_PAGE_COUNT;
+export function getDeepSearchGooglePageCount(searchResultPages?: unknown): number {
+  return normalizeSearchResultPages(searchResultPages);
 }
 
 export function isValidAllowAiDeepSearches(value: unknown): value is boolean {

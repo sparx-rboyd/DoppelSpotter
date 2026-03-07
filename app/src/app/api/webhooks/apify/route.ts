@@ -347,6 +347,7 @@ async function handleSucceededRun({
         await triggerDeepSearches({
           scanDoc,
           scan,
+          brand,
           suggestedSearches: reservedQueries,
           maxSuggestedSearches,
           webhookUrl,
@@ -1034,6 +1035,7 @@ async function reserveSuggestedSearches({
 async function triggerDeepSearches({
   scanDoc,
   scan,
+  brand,
   suggestedSearches,
   maxSuggestedSearches,
   webhookUrl,
@@ -1042,6 +1044,7 @@ async function triggerDeepSearches({
 }: {
   scanDoc: QueryDocumentSnapshot;
   scan: Scan;
+  brand: BrandProfile;
   suggestedSearches: string[];
   maxSuggestedSearches: number;
   webhookUrl: string;
@@ -1055,7 +1058,7 @@ async function triggerDeepSearches({
 
   for (const query of queries) {
     try {
-      const { runId } = await startDeepSearchRun(query, webhookUrl);
+      const { runId } = await startDeepSearchRun(query, brand.searchResultPages, webhookUrl);
       newRunIds.push(runId);
       newActorRuns[runId] = {
         actorId,

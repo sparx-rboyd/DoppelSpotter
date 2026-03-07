@@ -46,6 +46,8 @@ export interface BrandProfile {
   name: string;
   keywords: string[];
   officialDomains: string[];
+  /** Number of Google search result pages to request for both initial and deep-search runs. */
+  searchResultPages?: number;
   /** Whether completed scans should send a summary email to the brand owner's account email. */
   sendScanSummaryEmails?: boolean;
   /** Whether AI analysis may trigger Google deep-search follow-up runs for this brand. */
@@ -68,6 +70,7 @@ export interface BrandProfileCreateInput {
   name: string;
   keywords?: string[];
   officialDomains?: string[];
+  searchResultPages?: number;
   sendScanSummaryEmails?: boolean;
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
@@ -80,6 +83,7 @@ export interface BrandProfileUpdateInput {
   name?: string;
   keywords?: string[];
   officialDomains?: string[];
+  searchResultPages?: number;
   sendScanSummaryEmails?: boolean;
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
