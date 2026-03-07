@@ -120,6 +120,63 @@ function buildReclassifiedState(
   };
 }
 
+function getFindingCategory(finding: Pick<Finding, 'severity' | 'isFalsePositive'>): FindingCategory {
+  return finding.isFalsePositive ? 'non-hit' : finding.severity;
+}
+
+function clearUserPreferenceSignalUpdates(): Record<string, unknown> {
+  return {
+    userPreferenceSignal: FieldValue.delete(),
+    userPreferenceSignalReason: FieldValue.delete(),
+    userPreferenceSignalAt: FieldValue.delete(),
+    userReclassifiedFrom: FieldValue.delete(),
+    userReclassifiedTo: FieldValue.delete(),
+  };
+}
+
+function buildIgnoreSignalUpdates(isIgnored: boolean): Record<string, unknown> {
+  if (!isIgnored) {
+    return clearUserPreferenceSignalUpdates();
+  }
+
+  return {
+    userPreferenceSignal: 'negative',
+    userPreferenceSignalReason: 'ignored',
+    userPreferenceSignalAt: FieldValue.serverTimestamp(),
+    userReclassifiedFrom: FieldValue.delete(),
+    userReclassifiedTo: FieldValue.delete(),
+  };
+}
+
+function buildReclassificationSignalUpdates(
+  finding: Pick<Finding, 'severity' | 'isFalsePositive'>,
+  category: FindingCategory,
+): Record<string, unknown> {
+  const previousCategory = getFindingCategory(finding);
+
+  if (category === 'non-hit') {
+    return {
+      userPreferenceSignal: 'negative',
+      userPreferenceSignalReason: 'reclassified_to_non_hit',
+      userPreferenceSignalAt: FieldValue.serverTimestamp(),
+      userReclassifiedFrom: previousCategory,
+      userReclassifiedTo: 'non-hit',
+    };
+  }
+
+  if (category === 'high' && previousCategory === 'non-hit') {
+    return {
+      userPreferenceSignal: 'positive',
+      userPreferenceSignalReason: 'reclassified_non_hit_to_high',
+      userPreferenceSignalAt: FieldValue.serverTimestamp(),
+      userReclassifiedFrom: 'non-hit',
+      userReclassifiedTo: 'high',
+    };
+  }
+
+  return clearUserPreferenceSignalUpdates();
+}
+
 async function loadUrlScopedFindingDocs(
   brandId: string,
   uid: string,
@@ -286,6 +343,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           ignoredAt: nextState.isIgnored ? FieldValue.serverTimestamp() : FieldValue.delete(),
           isAddressed: false,
           addressedAt: FieldValue.delete(),
+          ...buildReclassificationSignalUpdates(sourceFinding, reclassifiedCategory),
         });
       });
       await batch.commit();
@@ -380,7 +438,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return errorResponse('Only real findings can be ignored', 409);
     }
 
-    const ignoreUpdates: Record<string, unknown> = { isIgnored: body.isIgnored === true };
+    const ignoreUpdates: Record<string, unknown> = {
+      isIgnored: body.isIgnored === true,
+      ...buildIgnoreSignalUpdates(body.isIgnored === true),
+    };
     if (body.isIgnored) {
       ignoreUpdates.ignoredAt = FieldValue.serverTimestamp();
     } else {

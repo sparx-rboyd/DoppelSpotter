@@ -1,4 +1,4 @@
-import type { FindingSource, Severity } from '@/lib/types';
+import type { FindingSource, Severity, UserPreferenceHints } from '@/lib/types';
 import type { GoogleRunContext, GoogleSearchCandidate } from './types';
 
 /**
@@ -23,9 +23,15 @@ Severity guidelines:
 - "medium": Suspicious activity that warrants investigation but may have a legitimate explanation (e.g. fan accounts, resellers using brand name)
 - "low": Likely benign mention but worth logging (e.g. news articles, legitimate reviews)
 
+Counter signals:
+Treat results with less caution when ...
+- Variations of the brand's name and protected keywords are used in an entirely different context to that of the brand (i.e. likely a legitimate use that wouldn't infringe the brand's trademarks)
+- Where there is clearly no signal of intent to impersonate nor defraud the brand nor its customers/users
+
 Rules:
 - Each indiviudal analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
  - This applies to both the title and the analysis text
+- If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override exact URL-match instructions, official domains, watch words, safe words, or clear evidence in the current result.
 
 Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).`;
 
@@ -59,12 +65,19 @@ Rules for "items":
 - Include exactly one item for every input result candidate and reuse the exact same resultId.
 - Assess only the provided result candidates. Do not add extra items and do not omit any candidate.
 - Each item must have all five fields: resultId, title, severity, analysis, isFalsePositive.
-- Each "analysis" must be a fully standalone description — do NOT reference or compare to any other item in the list (e.g. avoid phrases like "this is another X", "similar to the above", "like the previous result"). A reader should be able to understand each analysis without seeing any other result.
+- Each indiviudal analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
+ - This applies to both the title and the analysis text
+- If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override exact URL-match instructions, official domains, watch words, safe words, or clear evidence in the current result.
 
 Severity guidelines:
 - "high": Clear impersonation, phishing, counterfeit, or direct brand misuse posing immediate risk to customers or the brand
 - "medium": Suspicious activity that warrants investigation but may have a legitimate explanation (e.g. fan accounts, resellers using the brand name)
 - "low": Likely benign mention but worth logging (e.g. news articles, legitimate reviews)
+
+Counter signals:
+Treat results with less caution when ...
+- Variations of the brand's name and protected keywords are used in an entirely different context to that of the brand (i.e. likely a legitimate use that wouldn't infringe the brand's trademarks)
+- Where there is clearly no signal of intent to impersonate nor defraud the brand nor its customers/users
 
 Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).`;
 
@@ -155,10 +168,11 @@ export function buildAnalysisPrompt(params: {
   watchWords?: string[];
   safeWords?: string[];
   acknowledgedUrls?: string[];
+  userPreferenceHints?: UserPreferenceHints;
   source: FindingSource;
   rawData: Record<string, unknown>;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, safeWords, acknowledgedUrls, source, rawData } = params;
+  const { brandName, keywords, officialDomains, watchWords, safeWords, acknowledgedUrls, userPreferenceHints, source, rawData } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — note any presence or implied association in your analysis): ${watchWords.join(', ')}`
@@ -172,10 +186,12 @@ export function buildAnalysisPrompt(params: {
     ? `Previously reviewed URLs (the user has already either dismissed or addressed these — set isFalsePositive: true if the result URL matches any of these exactly):\n${acknowledgedUrls.map((u) => `  - ${u}`).join('\n')}`
     : null;
 
+  const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
+
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}Monitoring surface: ${source}
 
 Raw scraping result to analyse:
 ${JSON.stringify(rawData, null, 2)}
@@ -193,11 +209,12 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   watchWords?: string[];
   safeWords?: string[];
   acknowledgedUrls?: string[];
+  userPreferenceHints?: UserPreferenceHints;
   source: FindingSource;
   candidates: GoogleSearchCandidate[];
   runContext: GoogleRunContext;
 }): string {
-  const { brandName, keywords, officialDomains, watchWords, safeWords, acknowledgedUrls, source, candidates, runContext } = params;
+  const { brandName, keywords, officialDomains, watchWords, safeWords, acknowledgedUrls, userPreferenceHints, source, candidates, runContext } = params;
 
   const watchWordsLine = watchWords && watchWords.length > 0
     ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that result): ${watchWords.join(', ')}`
@@ -210,6 +227,8 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   const acknowledgedUrlsLine = acknowledgedUrls && acknowledgedUrls.length > 0
     ? `Previously reviewed URLs (the user has already either dismissed or addressed these — set isFalsePositive: true for any result whose URL exactly matches one of these):\n${acknowledgedUrls.map((u) => `  - ${u}`).join('\n')}`
     : null;
+
+  const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
 
   const compactCandidates = candidates.map((candidate) => ({
     resultId: candidate.resultId,
@@ -226,7 +245,7 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}Monitoring surface: ${source}
 
 Supporting SERP context (for extra caution only — do NOT assess these as findings):
 - Source queries: ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.join(' | ') : 'none'}
@@ -315,5 +334,41 @@ Actionable finding counts:
 Actionable findings for this scan (${findings.length}):
 ${JSON.stringify(findings, null, 2)}
 
-Write a concise overall summary of this scan. Highlight recurring themes, repeated abuse patterns, or notably worrying trends if present.`;
+Write a concise overall summary of this scan. Highlight recurring themes, repeated abuse patterns, or notably worrying trends if present.
+
+Take care not to over-emphasise risk - especially when only medium and/or low risk findings are presented.
+
+Keep the summary factual, informative and reflective of the nature of the findings.`;
+}
+
+function buildUserPreferenceHintsSection(
+  source: FindingSource,
+  userPreferenceHints?: UserPreferenceHints,
+): string | null {
+  if (!userPreferenceHints) return null;
+
+  const lines = uniqueStrings([
+    ...(userPreferenceHints.sourceLines?.[source] ?? []),
+    ...userPreferenceHints.globalLines,
+  ]).slice(0, 3);
+
+  if (lines.length === 0) {
+    return null;
+  }
+
+  return `Historical user-review tendencies (soft hints only — use these as gentle guidance, not hard include/exclude rules, and do not override exact URL matches or clear evidence):\n${lines.map((line) => `  - ${line}`).join('\n')}`;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of values) {
+    const normalized = value.trim();
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(normalized);
+  }
+  return unique;
 }

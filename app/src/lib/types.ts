@@ -108,6 +108,11 @@ export interface BrandSummary {
 
 export type Severity = 'high' | 'medium' | 'low';
 export type FindingCategory = Severity | 'non-hit';
+export type UserPreferenceSignal = 'positive' | 'negative';
+export type UserPreferenceSignalReason =
+  | 'ignored'
+  | 'reclassified_to_non_hit'
+  | 'reclassified_non_hit_to_high';
 
 export type FindingSource =
   | 'domain'
@@ -154,6 +159,16 @@ export interface Finding extends FindingSummary {
   rawData: Record<string, unknown>;
   /** Timestamp when the finding was ignored by the user. */
   ignoredAt?: Timestamp;
+  /** Explicit user-review preference signal captured from manual ignore/reclassification actions only. */
+  userPreferenceSignal?: UserPreferenceSignal;
+  /** Why the explicit user-review preference signal was recorded. */
+  userPreferenceSignalReason?: UserPreferenceSignalReason;
+  /** When the explicit user-review preference signal was last recorded. */
+  userPreferenceSignalAt?: Timestamp;
+  /** Previous user-visible category before the last manual reclassification, when applicable. */
+  userReclassifiedFrom?: FindingCategory;
+  /** New user-visible category after the last manual reclassification, when applicable. */
+  userReclassifiedTo?: FindingCategory;
   /** The exact system + user prompt transcript sent for AI analysis. */
   llmAnalysisPrompt?: string;
   /** The raw JSON string returned by AI analysis before parsing. */
@@ -164,20 +179,31 @@ export interface Finding extends FindingSummary {
 
 export type ScanStatus = 'pending' | 'running' | 'summarising' | 'completed' | 'failed' | 'cancelled';
 export type ScanSummaryEmailStatus = 'sending' | 'sent' | 'failed' | 'skipped';
+export type UserPreferenceHintsStatus = 'pending' | 'ready' | 'failed';
 
 export type ActorRunStatus =
   | 'pending'
   | 'running'
+  | 'waiting_for_preference_hints'
   | 'fetching_dataset'
   | 'analysing'
   | 'succeeded'
   | 'failed';
+
+export interface UserPreferenceHints {
+  version: 1;
+  generatedFromSignalCount: number;
+  globalLines: string[];
+  sourceLines?: Partial<Record<FindingSource, string[]>>;
+}
 
 export interface ActorRunInfo {
   actorId: string;
   source: FindingSource;
   /** Apify run status for this individual actor */
   status: ActorRunStatus;
+  /** Default dataset identifier captured when a succeeded webhook arrives before preference hints are ready. */
+  datasetId?: string;
   /** Total analysable items for this run (dataset items for per-item actors, deduped result candidates for Google). */
   itemCount?: number;
   /** Number of items that have completed AI analysis so far. */
@@ -221,6 +247,16 @@ export interface Scan {
   addressedCount?: number;
   /** Number of duplicate URLs skipped because they already appeared in previous scans. */
   skippedCount?: number;
+  /** Whether the scan-level soft user-preference hints are still being prepared. */
+  userPreferenceHintsStatus?: UserPreferenceHintsStatus;
+  /** Tiny scan-level soft guidance derived from prior explicit user-review signals. */
+  userPreferenceHints?: UserPreferenceHints;
+  /** Most recent preference-hint preparation error message, if generation failed. */
+  userPreferenceHintsError?: string;
+  /** When scan-level preference-hint preparation began. */
+  userPreferenceHintsStartedAt?: Timestamp;
+  /** When scan-level preference-hint preparation finished. */
+  userPreferenceHintsCompletedAt?: Timestamp;
   /** Succinct AI-generated overview of the scan's high/medium/low findings. */
   aiSummary?: string;
   /** Delivery status for the optional post-scan summary email. */

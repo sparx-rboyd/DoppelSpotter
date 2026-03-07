@@ -96,10 +96,12 @@ POST /api/scan
  └─ checks `brands.activeScanId` inside a Firestore transaction
  └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
+ └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
  └─ reads CORE_ACTOR_IDS (or actorIds from request body)
  └─ uses `brands.searchResultPages` (default 3, min 1, max 10) as Google Search `maxPagesPerQuery`
- └─ calls startActorRun() for each actor → registers Apify webhook
- └─ stores runId → scan document in Firestore
+ └─ starts Apify actors and scan-level user-preference-hint generation concurrently
+ └─ stores runId → scan document incrementally as each actor starts, reducing the race window for early callbacks
+ └─ once the scan-level preference hints are ready (or deliberately fail open), replays any deferred succeeded webhooks and then flips the scan to `running`
 
 DELETE /api/scan?scanId=xxx
  └─ verifies ownership; returns 409 if scan is not pending/running
@@ -145,6 +147,8 @@ GET /api/brands/[brandId]/findings?scanId=xxx
 Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ validates X-Apify-Webhook-Secret header
  └─ on SUCCEEDED, atomically claims the actor run by transitioning it to `fetching_dataset` before any dataset fetch / AI analysis begins
+ └─ if the scan's preference hints are still `pending`, the run is parked in `actorRuns.*.status = 'waiting_for_preference_hints'` and no analysis starts yet
+ └─ once the scan-level preference hints are `ready` or `failed`, deferred succeeded callbacks are replayed through the same webhook route so they resume normal processing
  └─ duplicate callbacks for a run already in `fetching_dataset` / `analysing` are acknowledged and skipped before expensive work starts
  └─ fetches up to 50 items from Apify dataset
  └─ per-item mode: one AI analysis call per dataset item → one Finding per item
@@ -159,6 +163,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
  └─ isFalsePositive: true findings are stored but excluded from default API responses
  └─ URLs that the user previously ignored or marked as addressed are passed back into AI classification prompts so repeat matches can be auto-suppressed in future scans
+ └─ a separate scan-level `userPreferenceHints` summary is also passed into classification prompts as soft guidance only; it is derived from explicit user ignore / reclassification signals and must not override exact URL-match suppression or clear evidence
  └─ (batch mode, depth 0 only) if ranked chunk/fallback suggestions are present and the brand allows deep search → triggers deep-search runs
       └─ suggestions are reserved on the originating run so duplicate callbacks do not fan out extra searches
       └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
@@ -188,6 +193,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **Scan-level summary:** after all actor runs finish, the webhook runs one final LLM pass over the scan's actionable findings and stores a concise `aiSummary` on the scan document for the brand page
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
+- **User preference hints:** each scan prepares a tiny LLM-authored soft-guidance summary from explicit user-review signals before actor-run analysis begins; this is separate from the existing exact-URL `acknowledgedUrls` suppression path
 - **Per-item output:** structured JSON `{ severity, title, llmAnalysis, isFalsePositive }`
 - **Google chunk output:** structured JSON `{ items: [{ resultId, title, severity, analysis, isFalsePositive }] }`
 - **Debug prompt transcript:** the exact system + user prompt used for finding-level AI analysis is stored on each finding as `llmAnalysisPrompt` for `?debug=true` inspection
@@ -294,6 +300,25 @@ Users can bookmark any finding they want to follow up on, including AI-classifie
 
 ---
 
+## User Preference Hints
+
+Explicit user-review actions now also feed a separate soft-guidance system for future classification.
+
+**Signals recorded:**
+- Manual ignore on a real finding → negative preference signal
+- Manual reclassification to `non-hit` → negative preference signal
+- Manual reclassification from `non-hit` to `high` → positive preference signal
+
+**Behaviour:**
+- These signals are stored directly on finding documents as explicit metadata (`userPreferenceSignal`, `userPreferenceSignalReason`, `userPreferenceSignalAt`, and optional `userReclassifiedFrom` / `userReclassifiedTo`)
+- AI auto-classified false positives do **not** create preference signals, even though they still participate in the separate exact-URL suppression path via `isIgnored`
+- At scan start, the app loads explicit signal findings only, dedupes repeated URL-scoped actions, and asks the LLM for a tiny scan-level hint summary
+- The resulting `scans.userPreferenceHints` payload is source-aware and intentionally tiny (global lines plus optional per-source lines)
+- Classification prompts treat these hints as soft tendencies only; they must not be used as hard include/exclude rules
+- No actor-run analysis begins until `scans.userPreferenceHintsStatus` is terminal (`ready` or `failed`)
+
+---
+
 ## Finding Notes
 
 Users can add notes to any finding, regardless of whether it is bookmarked, ignored, addressed, or AI-classified as a non-hit. Notes are stored per finding document in the existing `bookmarkNote` field for backwards compatibility.
@@ -334,8 +359,8 @@ Users can add notes to any finding, regardless of whether it is bookmarked, igno
 |---|---|
 | `users` | id, email, passwordHash, createdAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
-| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
+| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
+| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 
 ---
 

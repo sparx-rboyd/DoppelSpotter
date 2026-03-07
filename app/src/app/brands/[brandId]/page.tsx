@@ -1593,7 +1593,7 @@ export default function BrandDetailPage() {
 
   const allRuns = activeScan?.actorRuns ? Object.values(activeScan.actorRuns) : [];
   const inFlightRuns = allRuns.filter(
-    (r) => r.status === 'running' || r.status === 'fetching_dataset' || r.status === 'analysing',
+    (r) => r.status === 'running' || r.status === 'waiting_for_preference_hints' || r.status === 'fetching_dataset' || r.status === 'analysing',
   );
   const activeRun =
     inFlightRuns.find((r) => (r.searchDepth ?? 0) > 0) ??
@@ -1681,6 +1681,10 @@ export default function BrandDetailPage() {
     if (isDeepSearchActive) {
       const query = activeRun.searchQuery;
       switch (runStatus) {
+        case 'waiting_for_preference_hints':
+          return query
+            ? renderDeepSearchQueryLabel('Preparing analysis context for', query)
+            : 'Preparing analysis context';
         case 'fetching_dataset':
           return query
             ? renderDeepSearchQueryLabel('Fetching deeper results for', query)
@@ -1699,6 +1703,7 @@ export default function BrandDetailPage() {
     }
 
     switch (runStatus) {
+      case 'waiting_for_preference_hints': return 'Preparing analysis context';
       case 'fetching_dataset': return 'Fetching search results';
       case 'analysing': return withAnalysisCounts('Analysing search results', 'Analysing search results', activeRun);
       default: return 'Waiting for web search to complete';
@@ -1732,6 +1737,8 @@ export default function BrandDetailPage() {
       }
       case 'fetching_dataset':
         return 0.34;
+      case 'waiting_for_preference_hints':
+        return 0.22;
       case 'running':
       case 'pending':
       default:

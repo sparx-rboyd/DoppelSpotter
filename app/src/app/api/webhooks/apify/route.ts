@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
-import { FieldValue, type DocumentReference, type QueryDocumentSnapshot } from '@google-cloud/firestore';
+import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
 import { fetchDatasetItems, startDeepSearchRun } from '@/lib/apify/client';
 import { getActorConfig } from '@/lib/apify/actors';
 import { chatCompletion } from '@/lib/analysis/openrouter';
+import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-hints';
 import {
   SYSTEM_PROMPT,
   GOOGLE_CLASSIFICATION_SYSTEM_PROMPT,
@@ -39,6 +40,11 @@ const GOOGLE_ANALYSIS_CONCURRENCY = 3;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';
 const GOOGLE_RAW_DATA_VERSION = 1;
+type ScanDocHandle = {
+  id: string;
+  ref: DocumentReference;
+};
+
 const TRACKING_QUERY_PARAM_NAMES = new Set([
   'fbclid',
   'gclid',
@@ -126,9 +132,13 @@ export async function POST(request: NextRequest) {
   const webhookUrl = `${(process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')}/api/webhooks/apify`;
 
   if (resource.status === 'SUCCEEDED') {
-    const claim = await claimSucceededRunForProcessing(scanDoc, resource.id);
+    const claim = await claimSucceededRunForProcessing(scanDoc.ref, resource.id, resource.defaultDatasetId);
     if (claim.kind === 'cancelled') {
       console.log(`[webhook] Ignoring callback for run ${resource.id} — scan ${scanDoc.id} is cancelled`);
+      return NextResponse.json({ received: true });
+    }
+    if (claim.kind === 'waiting_for_preference_hints') {
+      console.log(`[webhook] Deferring callback for run ${resource.id} — waiting for scan-level preference hints`);
       return NextResponse.json({ received: true });
     }
     if (claim.kind === 'already_terminal') {
@@ -171,9 +181,10 @@ export async function POST(request: NextRequest) {
 
 type SucceededRunClaimResult =
   | { kind: 'claimed'; scan: Scan }
+  | { kind: 'waiting_for_preference_hints' }
   | { kind: 'cancelled' }
   | { kind: 'already_terminal'; status: 'succeeded' | 'failed' }
-  | { kind: 'already_processing'; status: 'fetching_dataset' | 'analysing' }
+  | { kind: 'already_processing'; status: 'waiting_for_preference_hints' | 'fetching_dataset' | 'analysing' }
   | { kind: 'missing' };
 
 /**
@@ -184,11 +195,12 @@ type SucceededRunClaimResult =
  * `fetching_dataset`, and any concurrent loser exits before doing expensive work.
  */
 async function claimSucceededRunForProcessing(
-  scanDoc: QueryDocumentSnapshot,
+  scanRef: DocumentReference,
   runId: string,
+  datasetId?: string,
 ): Promise<SucceededRunClaimResult> {
   return db.runTransaction(async (tx) => {
-    const freshSnap = await tx.get(scanDoc.ref);
+    const freshSnap = await tx.get(scanRef);
     if (!freshSnap.exists) return { kind: 'missing' };
 
     const fresh = freshSnap.data() as Scan;
@@ -201,12 +213,47 @@ async function claimSucceededRunForProcessing(
       return { kind: 'already_terminal', status: run.status };
     }
 
-    if (run.status === 'fetching_dataset' || run.status === 'analysing') {
+    if (!areUserPreferenceHintsTerminal(fresh)) {
+      if (run.status === 'waiting_for_preference_hints') {
+        return { kind: 'already_processing', status: 'waiting_for_preference_hints' };
+      }
+      if (run.status === 'fetching_dataset' || run.status === 'analysing') {
+        return { kind: 'already_processing', status: run.status };
+      }
+
+      tx.update(scanRef, {
+        [`actorRuns.${runId}.status`]: 'waiting_for_preference_hints',
+        ...(typeof datasetId === 'string' && datasetId.length > 0
+          ? { [`actorRuns.${runId}.datasetId`]: datasetId }
+          : {}),
+      });
+
+      return { kind: 'waiting_for_preference_hints' };
+    }
+
+    if (
+      run.status === 'waiting_for_preference_hints'
+      || run.status === 'fetching_dataset'
+      || run.status === 'analysing'
+    ) {
+      if (run.status === 'waiting_for_preference_hints') {
+        tx.update(scanRef, {
+          [`actorRuns.${runId}.status`]: 'fetching_dataset',
+          ...(typeof datasetId === 'string' && datasetId.length > 0
+            ? { [`actorRuns.${runId}.datasetId`]: datasetId }
+            : {}),
+        });
+        return { kind: 'claimed', scan: fresh };
+      }
+
       return { kind: 'already_processing', status: run.status };
     }
 
-    tx.update(scanDoc.ref, {
+    tx.update(scanRef, {
       [`actorRuns.${runId}.status`]: 'fetching_dataset',
+      ...(typeof datasetId === 'string' && datasetId.length > 0
+        ? { [`actorRuns.${runId}.datasetId`]: datasetId }
+        : {}),
     });
 
     return { kind: 'claimed', scan: fresh };
@@ -226,7 +273,7 @@ async function handleSucceededRun({
 }: {
   runId: string;
   datasetId: string;
-  scanDoc: QueryDocumentSnapshot;
+  scanDoc: ScanDocHandle;
   scan: Scan;
   webhookUrl: string;
 }) {
@@ -250,6 +297,7 @@ async function handleSucceededRun({
   const analysisMode = actorConfig?.analysisMode ?? 'per-item';
   const shouldSkipPreviouslySeenUrls =
     analysisMode === 'batch' || source === 'google' || actorId === 'apify/google-search-scraper';
+  const userPreferenceHints = scan.userPreferenceHints;
 
   // Fetch all URLs that the user has previously dismissed or addressed for this
   // brand so AI analysis can avoid re-reporting them in later scans.
@@ -332,6 +380,7 @@ async function handleSucceededRun({
       searchDepth,
       searchQuery,
       acknowledgedUrls,
+      userPreferenceHints,
       previousFindingUrls,
     });
     newFindingCount = findingCount;
@@ -378,6 +427,7 @@ async function handleSucceededRun({
         watchWords: brand.watchWords,
         safeWords: brand.safeWords,
         acknowledgedUrls,
+        userPreferenceHints,
         source,
         rawData: item,
       });
@@ -462,7 +512,7 @@ async function recoverFromSucceededRunError({
   runId,
   err,
 }: {
-  scanDoc: QueryDocumentSnapshot;
+  scanDoc: ScanDocHandle;
   runId: string;
   err: unknown;
 }) {
@@ -528,9 +578,10 @@ async function analyseAndWriteBatch({
   searchDepth,
   searchQuery,
   acknowledgedUrls,
+  userPreferenceHints,
   previousFindingUrls,
 }: {
-  scanDoc: QueryDocumentSnapshot;
+  scanDoc: ScanDocHandle;
   scan: Scan;
   brand: BrandProfile;
   source: Finding['source'];
@@ -541,6 +592,7 @@ async function analyseAndWriteBatch({
   searchDepth: number;
   searchQuery?: string;
   acknowledgedUrls?: string[];
+  userPreferenceHints?: Scan['userPreferenceHints'];
   previousFindingUrls?: ReadonlySet<string>;
 }): Promise<{
   findingCount: number;
@@ -588,6 +640,7 @@ async function analyseAndWriteBatch({
         watchWords: brand.watchWords,
         safeWords: brand.safeWords,
         acknowledgedUrls,
+        userPreferenceHints,
         source,
         candidates: chunk,
         runContext: normalizedRun.runContext,
@@ -926,7 +979,7 @@ async function upsertGoogleFinding({
   runContext,
   outcome,
 }: {
-  scanDoc: QueryDocumentSnapshot;
+  scanDoc: ScanDocHandle;
   scan: Scan;
   source: Finding['source'];
   actorId: string;
@@ -1034,7 +1087,7 @@ async function reserveSuggestedSearches({
   suggestedSearches,
   maxSuggestedSearches,
 }: {
-  scanDoc: QueryDocumentSnapshot;
+  scanDoc: ScanDocHandle;
   runId: string;
   suggestedSearches: string[];
   maxSuggestedSearches: number;
@@ -1085,7 +1138,7 @@ async function triggerDeepSearches({
   source,
   actorId,
 }: {
-  scanDoc: QueryDocumentSnapshot;
+  scanDoc: ScanDocHandle;
   scan: Scan;
   brand: BrandProfile;
   suggestedSearches: string[];
@@ -1755,7 +1808,7 @@ async function mapWithConcurrency<T, R>(
  * so that dynamically-added deep-search runs are correctly accounted for.
  */
 async function markActorRunComplete(
-  scanDoc: QueryDocumentSnapshot,
+  scanDoc: ScanDocHandle,
   runId: string,
   runStatus: 'succeeded' | 'failed',
   newFindingCount = 0,
