@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  type CSSProperties,
   type MutableRefObject,
   type ReactNode,
   useCallback,
@@ -44,6 +45,7 @@ type SelectDropdownProps = {
   labelTone?: 'default' | 'subtle';
   emptyMessage?: string;
   triggerClassName?: string;
+  triggerStyle?: CSSProperties;
   panelClassName?: string;
   matchTriggerWidth?: boolean;
   dividerAfterValue?: string;
@@ -251,6 +253,7 @@ export function SelectDropdown({
   labelTone = 'default',
   emptyMessage = 'No matching options.',
   triggerClassName,
+  triggerStyle,
   panelClassName,
   matchTriggerWidth = true,
   dividerAfterValue,
@@ -335,6 +338,7 @@ export function SelectDropdown({
           if (!disabled) setIsOpen((current) => !current);
         }}
         className={buildTriggerButtonClassName(disabled, triggerClassName)}
+        style={triggerStyle}
       >
         {buttonIcon}
         <span className="min-w-0 flex-1 truncate text-left">

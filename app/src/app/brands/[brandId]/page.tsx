@@ -2412,7 +2412,8 @@ export default function BrandDetailPage() {
                         onChange={(e) => setFindingsSearchQuery(e.target.value)}
                         placeholder="Search finding titles, URLs, and analyses"
                         aria-label="Search findings"
-                        className="pl-9 pr-10 border-white/20 bg-white text-gray-900 placeholder:text-gray-400"
+                        className="pl-9 pr-10 border-white/20 bg-white placeholder:text-gray-400"
+                        style={isFindingsSearchActive ? { color: '#6b7280' } : undefined}
                       />
                       {isFindingsSearchActive && (
                         <button
@@ -2433,9 +2434,10 @@ export default function BrandDetailPage() {
                         options={findingThemeOptions}
                         onChange={handleFindingThemeFilterChange}
                         triggerClassName={cn(
-                          'min-w-[10rem] border-white/20 text-gray-700',
-                          hasActiveFindingThemeFilter && 'border-brand-200 bg-brand-50 text-brand-800',
+                          'min-w-[10rem] border-white/20',
+                          hasActiveFindingThemeFilter && 'border-brand-200 bg-brand-50',
                         )}
+                        triggerStyle={{ color: '#6b7280' }}
                         matchTriggerWidth={false}
                         panelClassName="min-w-[16rem] max-w-[calc(100vw-1.5rem)]"
                         dividerAfterValue=""
@@ -2448,9 +2450,10 @@ export default function BrandDetailPage() {
                         options={findingCategoryOptions}
                         onChange={handleFindingCategoryFilterChange}
                         triggerClassName={cn(
-                          'min-w-[10rem] border-white/20 text-gray-700',
-                          hasActiveFindingCategoryFilter && 'border-brand-200 bg-brand-50 text-brand-800',
+                          'min-w-[10rem] border-white/20',
+                          hasActiveFindingCategoryFilter && 'border-brand-200 bg-brand-50',
                         )}
+                        triggerStyle={{ color: '#6b7280' }}
                         matchTriggerWidth={false}
                         panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
                         dividerAfterValue=""
@@ -2463,9 +2466,10 @@ export default function BrandDetailPage() {
                         options={findingSourceOptions}
                         onChange={handleFindingSourceFilterChange}
                         triggerClassName={cn(
-                          'min-w-[10rem] border-white/20 text-gray-700',
-                          hasActiveFindingSourceFilter && 'border-brand-200 bg-brand-50 text-brand-800',
+                          'min-w-[10rem] border-white/20',
+                          hasActiveFindingSourceFilter && 'border-brand-200 bg-brand-50',
                         )}
+                        triggerStyle={{ color: '#6b7280' }}
                         matchTriggerWidth={false}
                         panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
                         dividerAfterValue=""

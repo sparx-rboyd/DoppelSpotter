@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import React from 'react';
@@ -102,35 +103,48 @@ const SOURCE_BADGE_STYLES: Record<FindingSource, { bg: string; border: string; t
   },
 };
 
-let fontsRegistered = false;
 let logoDataUriPromise: Promise<string | null> | null = null;
+let registeredPdfFontFamily: 'Inter' | 'Helvetica' | null = null;
 
-function ensureFontsRegistered() {
-  if (fontsRegistered) return;
+const INTER_FONT_FILES = [
+  {
+    relativePath: path.join('node_modules', '@fontsource', 'inter', 'files', 'inter-latin-400-normal.woff'),
+    fontWeight: 400,
+  },
+  {
+    relativePath: path.join('node_modules', '@fontsource', 'inter', 'files', 'inter-latin-500-normal.woff'),
+    fontWeight: 500,
+  },
+  {
+    relativePath: path.join('node_modules', '@fontsource', 'inter', 'files', 'inter-latin-600-normal.woff'),
+    fontWeight: 600,
+  },
+  {
+    relativePath: path.join('node_modules', '@fontsource', 'inter', 'files', 'inter-latin-700-normal.woff'),
+    fontWeight: 700,
+  },
+] as const;
 
-  Font.register({
-    family: 'Inter',
-    fonts: [
-      {
-        src: path.join(process.cwd(), 'node_modules', '@fontsource', 'inter', 'files', 'inter-latin-400-normal.woff'),
-        fontWeight: 400,
-      },
-      {
-        src: path.join(process.cwd(), 'node_modules', '@fontsource', 'inter', 'files', 'inter-latin-500-normal.woff'),
-        fontWeight: 500,
-      },
-      {
-        src: path.join(process.cwd(), 'node_modules', '@fontsource', 'inter', 'files', 'inter-latin-600-normal.woff'),
-        fontWeight: 600,
-      },
-      {
-        src: path.join(process.cwd(), 'node_modules', '@fontsource', 'inter', 'files', 'inter-latin-700-normal.woff'),
-        fontWeight: 700,
-      },
-    ],
-  });
+function ensurePdfFontFamily(): 'Inter' | 'Helvetica' {
+  if (registeredPdfFontFamily) return registeredPdfFontFamily;
 
-  fontsRegistered = true;
+  const interFonts = INTER_FONT_FILES.map(({ relativePath, fontWeight }) => ({
+    src: path.join(process.cwd(), relativePath),
+    fontWeight,
+  }));
+
+  if (interFonts.every(({ src }) => existsSync(src))) {
+    Font.register({
+      family: 'Inter',
+      fonts: interFonts,
+    });
+    registeredPdfFontFamily = 'Inter';
+    return registeredPdfFontFamily;
+  }
+
+  console.warn('PDF export Inter font files are unavailable at runtime; falling back to Helvetica.');
+  registeredPdfFontFamily = 'Helvetica';
+  return registeredPdfFontFamily;
 }
 
 const styles = StyleSheet.create({
@@ -615,9 +629,11 @@ function renderSeveritySection({
 
 function ScanExportPdfDocument({
   data,
+  fontFamily,
   logoSrc,
 }: {
   data: ScanExportData;
+  fontFamily: 'Inter' | 'Helvetica';
   logoSrc: string | null;
 }) {
   const summary = data.scan.aiSummary?.trim() || buildCountOnlyScanAiSummary(data.scan);
@@ -628,7 +644,7 @@ function ScanExportPdfDocument({
 
   return (
     <Document title={`DoppelSpotter scan report for ${data.brand.name}`} author="DoppelSpotter">
-      <Page size="A4" style={styles.page}>
+      <Page size="A4" style={{ ...styles.page, fontFamily }}>
         <View style={styles.header} wrap={false}>
           {logoSrc
             ? (
@@ -750,7 +766,7 @@ function ScanExportPdfDocument({
 }
 
 export async function buildScanExportPdfBuffer(data: ScanExportData): Promise<Buffer> {
-  ensureFontsRegistered();
+  const fontFamily = ensurePdfFontFamily();
   const logoSrc = await getLogoDataUri();
-  return renderToBuffer(<ScanExportPdfDocument data={data} logoSrc={logoSrc} />);
+  return renderToBuffer(<ScanExportPdfDocument data={data} fontFamily={fontFamily} logoSrc={logoSrc} />);
 }

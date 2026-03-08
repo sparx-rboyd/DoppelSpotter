@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
   // by @vercel/nft — force-include it and its sub-agents in the standalone bundle.
   outputFileTracingIncludes: {
     '**': [
+      './node_modules/@fontsource/inter/**/*',
       './node_modules/proxy-agent/**/*',
       './node_modules/agent-base/**/*',
       './node_modules/http-proxy-agent/**/*',
