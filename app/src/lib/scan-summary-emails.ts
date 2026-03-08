@@ -14,7 +14,7 @@ import { buildCountOnlyScanAiSummary, scanFromSnapshot } from './scans';
 import type { BrandProfile, Scan, UserRecord } from './types';
 import { formatScanDate } from './utils';
 
-const SKIPPED_FINDINGS_EXPLAINER = 'Findings that appeared in previous scans were skipped.';
+const SKIPPED_FINDINGS_EXPLAINER = 'Findings that appeared in other searches in this scan, or historical findings, were skipped';
 
 type CountRowTone = 'high' | 'medium' | 'low' | 'neutral';
 

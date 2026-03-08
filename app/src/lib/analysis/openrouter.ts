@@ -49,8 +49,8 @@ export async function chatCompletion(messages: ChatMessage[]): Promise<string> {
       model,
       messages,
       response_format: { type: 'json_object' },
-      temperature: 0.5,
-      max_tokens: 32000,
+      temperature: 0.2,
+      max_tokens: 8192,
     }),
   });
 

@@ -39,12 +39,21 @@ const DRILLDOWN_THEME_QUERY_PARAM = 'theme';
 const DRILLDOWN_SOURCE_QUERY_PARAM = 'source';
 const RETURN_TO_QUERY_PARAM = 'returnTo';
 const RETURN_TO_DASHBOARD_VALUE = 'dashboard';
+const FINDING_SEARCH_MIN_QUERY_LENGTH = 2;
+const FINDING_SEARCH_DEBOUNCE_MS = 250;
+const FINDING_SEARCH_RESULTS_PAGE_SIZE = 50;
 
 type BookmarkUpdate = {
   isBookmarked?: boolean;
 };
 
 type FindingSourceFilter = Exclude<FindingSource, 'unknown'>;
+type FindingSearchDisplayBucket = 'hit' | 'non-hit' | 'ignored' | 'addressed';
+type FindingSearchResult = FindingSummary & {
+  displayBucket: FindingSearchDisplayBucket;
+  scanStartedAt?: FindingSummary['createdAt'];
+  scanStatus?: Scan['status'];
+};
 
 // ---------------------------------------------------------------------------
 // localStorage helpers — persist active scan ID across page reloads
@@ -426,7 +435,14 @@ export default function BrandDetailPage() {
   const [activeTab, setActiveTab] = useState<'scans' | 'bookmarks' | 'ignored' | 'addressed'>('scans');
   const [allIgnoredFindings, setAllIgnoredFindings] = useState<FindingSummary[]>([]);
   const [findingsSearchQuery, setFindingsSearchQuery] = useState('');
-  const [findingsSearchLoading, setFindingsSearchLoading] = useState(false);
+  const [debouncedFindingsSearchQuery, setDebouncedFindingsSearchQuery] = useState('');
+  const [serverSearchLoading, setServerSearchLoading] = useState(false);
+  const [filterHydrationLoading, setFilterHydrationLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<FindingSearchResult[]>([]);
+  const [searchResultsNextCursor, setSearchResultsNextCursor] = useState<string | null>(null);
+  const [searchResultsError, setSearchResultsError] = useState('');
+  const [searchResultsTruncated, setSearchResultsTruncated] = useState(false);
+  const [loadingMoreSearchResults, setLoadingMoreSearchResults] = useState(false);
   const [findingTaxonomyOptions, setFindingTaxonomyOptions] = useState<{ themes: string[] }>({
     themes: [],
   });
@@ -458,20 +474,29 @@ export default function BrandDetailPage() {
   const pendingScanFindingsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanNonHitsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanIgnoredLoadsRef = useRef<Record<string, Promise<void>>>({});
+  const findingSearchAbortControllerRef = useRef<AbortController | null>(null);
+  const findingSearchRequestIdRef = useRef(0);
   const [selectedScanProgressSource, setSelectedScanProgressSource] = useState<FindingSource>('google');
   const [displayedScanProgressPctBySource, setDisplayedScanProgressPctBySource] = useState<Partial<Record<FindingSource, number>>>({});
-  const normalizedFindingsSearchQuery = normalizeFindingsSearchText(findingsSearchQuery);
+  const normalizedFindingsSearchInput = normalizeFindingsSearchText(findingsSearchQuery);
+  const normalizedFindingsSearchQuery = normalizeFindingsSearchText(debouncedFindingsSearchQuery);
   const normalizedSelectedFindingTheme = normalizeFindingsTaxonomyValue(selectedFindingTheme);
-  const isFindingsSearchActive = normalizedFindingsSearchQuery.length > 0;
+  const isFindingsSearchActive = normalizedFindingsSearchInput.length > 0;
+  const canRunServerFindingSearch = normalizedFindingsSearchQuery.length >= FINDING_SEARCH_MIN_QUERY_LENGTH;
   const hasActiveFindingCategoryFilter = selectedFindingCategory !== null;
   const hasActiveFindingSourceFilter = selectedFindingSource !== null;
   const hasActiveFindingThemeFilter = normalizedSelectedFindingTheme.length > 0;
+  const hasActiveNonSearchFindingFilters =
+    hasActiveFindingCategoryFilter
+    || hasActiveFindingSourceFilter
+    || hasActiveFindingThemeFilter;
   const isAnyFindingFilterActive =
     isFindingsSearchActive
     || hasActiveFindingCategoryFilter
     || hasActiveFindingSourceFilter
     || hasActiveFindingThemeFilter;
-  const activeHighlightQuery = isFindingsSearchActive ? findingsSearchQuery : undefined;
+  const activeHighlightQuery = canRunServerFindingSearch ? debouncedFindingsSearchQuery : undefined;
+  const findingsSearchLoading = isFindingsSearchActive ? serverSearchLoading : filterHydrationLoading;
 
   useEffect(() => {
     if (!isAnyFindingFilterActive) return;
@@ -489,6 +514,7 @@ export default function BrandDetailPage() {
     category?: FindingCategory | null;
     source?: FindingSourceFilter | null;
     theme?: string | null;
+    hash?: string | null;
   }) {
     const params = new URLSearchParams(searchParams.toString());
 
@@ -517,7 +543,9 @@ export default function BrandDetailPage() {
     }
 
     const queryString = params.toString();
-    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    const hash = updates.hash !== undefined
+      ? updates.hash
+      : (typeof window !== 'undefined' ? window.location.hash : '');
     router.replace(`${pathname}${queryString ? `?${queryString}` : ''}${hash}`, { scroll: false });
   }
 
@@ -540,6 +568,11 @@ export default function BrandDetailPage() {
 
   function resetFindingsSearchAndFilters() {
     setFindingsSearchQuery('');
+    setDebouncedFindingsSearchQuery('');
+    setSearchResults([]);
+    setSearchResultsNextCursor(null);
+    setSearchResultsError('');
+    setSearchResultsTruncated(false);
     setSelectedFindingCategory(null);
     setSelectedFindingSource(null);
     setSelectedFindingTheme('');
@@ -548,6 +581,123 @@ export default function BrandDetailPage() {
       source: null,
       theme: null,
     });
+  }
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedFindingsSearchQuery(findingsSearchQuery);
+    }, FINDING_SEARCH_DEBOUNCE_MS);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [findingsSearchQuery]);
+
+  const fetchServerSearchResults = useCallback(async (options?: { append?: boolean; cursor?: string | null; signal?: AbortSignal }) => {
+    const params = new URLSearchParams({
+      q: debouncedFindingsSearchQuery.trim(),
+      limit: `${FINDING_SEARCH_RESULTS_PAGE_SIZE}`,
+    });
+
+    if (options?.cursor) {
+      params.set('cursor', options.cursor);
+    }
+    if (selectedFindingCategory) {
+      params.set('category', selectedFindingCategory);
+    }
+    if (selectedFindingSource) {
+      params.set('source', selectedFindingSource);
+    }
+    if (selectedFindingTheme.trim()) {
+      params.set('theme', selectedFindingTheme.trim());
+    }
+
+    const res = await fetch(`/api/brands/${brandId}/findings/search?${params.toString()}`, {
+      credentials: 'same-origin',
+      signal: options?.signal,
+    });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      throw new Error(json.error ?? 'Failed to search findings');
+    }
+
+    const json = await res.json().catch(() => ({}));
+    const responseData = (json.data ?? {}) as {
+      results?: FindingSearchResult[];
+      nextCursor?: string | null;
+      hasMore?: boolean;
+      truncated?: boolean;
+    };
+    const nextResults = Array.isArray(responseData.results) ? responseData.results : [];
+
+    setSearchResults((prev) => {
+      if (!options?.append) {
+        return nextResults;
+      }
+
+      const seen = new Set(prev.map((result) => result.id));
+      const appended = nextResults.filter((result) => !seen.has(result.id));
+      return appended.length > 0 ? [...prev, ...appended] : prev;
+    });
+    setSearchResultsNextCursor(responseData.hasMore ? (responseData.nextCursor ?? null) : null);
+    setSearchResultsTruncated(responseData.truncated === true);
+    setSearchResultsError('');
+  }, [
+    brandId,
+    debouncedFindingsSearchQuery,
+    selectedFindingCategory,
+    selectedFindingSource,
+    selectedFindingTheme,
+  ]);
+
+  async function loadMoreSearchResults() {
+    if (!searchResultsNextCursor || loadingMoreSearchResults) return;
+
+    setLoadingMoreSearchResults(true);
+    try {
+      await fetchServerSearchResults({ append: true, cursor: searchResultsNextCursor });
+    } catch (err) {
+      setSearchResultsError(err instanceof Error ? err.message : 'Failed to load more search results');
+    } finally {
+      setLoadingMoreSearchResults(false);
+    }
+  }
+
+  function openSearchResult(result: FindingSearchResult) {
+    setFindingsSearchQuery('');
+    setDebouncedFindingsSearchQuery('');
+    setSearchResults([]);
+    setSearchResultsNextCursor(null);
+    setSearchResultsError('');
+    setSearchResultsTruncated(false);
+    setExpandedScanIds([result.scanId]);
+    setSelectedFindingSource(null);
+    setSelectedFindingTheme('');
+    setSelectedFindingCategory(result.displayBucket === 'non-hit' ? 'non-hit' : null);
+
+    if (result.displayBucket === 'addressed') {
+      setActiveTab('addressed');
+      updateDrilldownUrl({
+        category: null,
+        source: null,
+        theme: null,
+      });
+      return;
+    }
+
+    setActiveTab('scans');
+    setAnchorTargetScanId(result.scanId);
+    updateDrilldownUrl({
+      category: result.displayBucket === 'non-hit' ? 'non-hit' : null,
+      source: null,
+      theme: null,
+      hash: `#${getScanResultSetAnchorId(result.scanId)}`,
+    });
+    void loadScanFindings(result.scanId);
+
+    if (result.displayBucket === 'non-hit') {
+      void loadScanNonHits(result.scanId);
+    } else if (result.displayBucket === 'ignored') {
+      void loadScanIgnored(result.scanId);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -1467,8 +1617,65 @@ export default function BrandDetailPage() {
   }, [brandId, loading, scanning]);
 
   useEffect(() => {
-    if (!isAnyFindingFilterActive) {
-      setFindingsSearchLoading(false);
+    if (!isFindingsSearchActive) {
+      findingSearchAbortControllerRef.current?.abort();
+      findingSearchAbortControllerRef.current = null;
+      setServerSearchLoading(false);
+      setLoadingMoreSearchResults(false);
+      setSearchResults([]);
+      setSearchResultsNextCursor(null);
+      setSearchResultsError('');
+      setSearchResultsTruncated(false);
+      return;
+    }
+
+    if (!canRunServerFindingSearch) {
+      findingSearchAbortControllerRef.current?.abort();
+      findingSearchAbortControllerRef.current = null;
+      setServerSearchLoading(false);
+      setLoadingMoreSearchResults(false);
+      setSearchResults([]);
+      setSearchResultsNextCursor(null);
+      setSearchResultsError('');
+      setSearchResultsTruncated(false);
+      return;
+    }
+
+    const requestId = ++findingSearchRequestIdRef.current;
+    findingSearchAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    findingSearchAbortControllerRef.current = controller;
+    setServerSearchLoading(true);
+    setLoadingMoreSearchResults(false);
+    setSearchResultsError('');
+
+    void fetchServerSearchResults({ signal: controller.signal }).catch((err) => {
+      if (controller.signal.aborted || requestId !== findingSearchRequestIdRef.current) {
+        return;
+      }
+
+      setSearchResults([]);
+      setSearchResultsNextCursor(null);
+      setSearchResultsTruncated(false);
+      setSearchResultsError(err instanceof Error ? err.message : 'Failed to search findings');
+    }).finally(() => {
+      if (!controller.signal.aborted && requestId === findingSearchRequestIdRef.current) {
+        setServerSearchLoading(false);
+      }
+    });
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    canRunServerFindingSearch,
+    fetchServerSearchResults,
+    isFindingsSearchActive,
+  ]);
+
+  useEffect(() => {
+    if (isFindingsSearchActive || !hasActiveNonSearchFindingFilters) {
+      setFilterHydrationLoading(false);
       return;
     }
 
@@ -1482,12 +1689,12 @@ export default function BrandDetailPage() {
     });
 
     if (!needsHydration) {
-      setFindingsSearchLoading(false);
+      setFilterHydrationLoading(false);
       return;
     }
 
     let cancelled = false;
-    setFindingsSearchLoading(true);
+    setFilterHydrationLoading(true);
 
     void Promise.all(
       scans.flatMap((scan) => {
@@ -1508,7 +1715,7 @@ export default function BrandDetailPage() {
       }),
     ).finally(() => {
       if (!cancelled) {
-        setFindingsSearchLoading(false);
+        setFilterHydrationLoading(false);
       }
     });
 
@@ -1516,7 +1723,7 @@ export default function BrandDetailPage() {
       cancelled = true;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAnyFindingFilterActive, scans, scanFindings, scanNonHits, scanIgnored]);
+  }, [hasActiveNonSearchFindingFilters, isFindingsSearchActive, scans, scanFindings, scanNonHits, scanIgnored]);
 
   const availableFindingThemes = useMemo(() => collectDistinctFindingTaxonomyLabels([
     ...findingTaxonomyOptions.themes,
@@ -1555,6 +1762,7 @@ export default function BrandDetailPage() {
 
   useEffect(() => {
     return () => {
+      findingSearchAbortControllerRef.current?.abort();
       if (copiedScanLinkResetTimeoutRef.current) {
         clearTimeout(copiedScanLinkResetTimeoutRef.current);
       }
@@ -2013,7 +2221,7 @@ export default function BrandDetailPage() {
     if (skippedDuplicateCount === 1) {
       return '1 result is being skipped because it duplicates previous findings.';
     }
-    return `${skippedDuplicateCount} results are being skipped because they duplicate previous findings.`;
+    return `${skippedDuplicateCount} results are being skipped because they duplicate other findings in this scan, or historical findings.`;
   }
 
   function getRunProgressFraction(run: ActorRunInfo): number {
@@ -2214,9 +2422,6 @@ export default function BrandDetailPage() {
   }
 
   function matchesFindingFilters(finding: FindingSummary) {
-    const matchesSearch = !isFindingsSearchActive || normalizeFindingsSearchText(
-      `${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis}`,
-    ).includes(normalizedFindingsSearchQuery);
     const matchesCategory = !selectedFindingCategory || (
       selectedFindingCategory === 'non-hit'
         ? finding.isFalsePositive === true
@@ -2226,12 +2431,12 @@ export default function BrandDetailPage() {
     const matchesTheme = !hasActiveFindingThemeFilter
       || normalizeFindingsTaxonomyValue(finding.theme) === normalizedSelectedFindingTheme;
 
-    return matchesSearch && matchesCategory && matchesSource && matchesTheme;
+    return matchesCategory && matchesSource && matchesTheme;
   }
 
   function filterFindings(findings?: FindingSummary[]) {
     if (!findings) return findings;
-    return isAnyFindingFilterActive ? findings.filter(matchesFindingFilters) : findings;
+    return hasActiveNonSearchFindingFilters ? findings.filter(matchesFindingFilters) : findings;
   }
 
   const totalFindings = scans.reduce((sum, s) => sum + s.highCount + s.mediumCount + s.lowCount, 0);
@@ -2275,6 +2480,9 @@ export default function BrandDetailPage() {
   const visibleIgnoredCount = visibleIgnoredFindings.length;
   const visibleLiveScanFindings = filterFindings(liveScanFindings) ?? [];
   const visibleLiveScanNonHits = sortBySeverity(filterFindings(liveScanNonHits) ?? []);
+  const isSearchResultsMode = isFindingsSearchActive;
+  const isSearchQueryTooShort = isSearchResultsMode && !canRunServerFindingSearch;
+  const searchResultsCountLabel = `${searchResults.length} result${searchResults.length !== 1 ? 's' : ''}`;
   const scansToRender = anchorTargetScanId
     ? scans
     : isAnyFindingFilterActive
@@ -2517,9 +2725,21 @@ export default function BrandDetailPage() {
                   </div>
                   {isAnyFindingFilterActive && (
                     <p className="mt-3 text-xs text-white/80">
-                      {findingsSearchLoading
-                        ? 'Filtering across hits, non-hits, ignored, addressed, and bookmarked findings...'
-                        : `Showing only findings that match the current ${activeFindingsFilterLabel}.`}
+                      {isSearchResultsMode
+                        ? (
+                          isSearchQueryTooShort
+                            ? `Type at least ${FINDING_SEARCH_MIN_QUERY_LENGTH} characters to search findings.`
+                            : findingsSearchLoading
+                              ? 'Searching findings across all result sets...'
+                              : searchResultsError
+                                ? searchResultsError
+                                : `Showing ${searchResultsCountLabel} that match the current ${activeFindingsFilterLabel}.`
+                        )
+                        : (
+                          findingsSearchLoading
+                            ? 'Filtering across loaded findings...'
+                            : `Showing only findings that match the current ${activeFindingsFilterLabel}.`
+                        )}
                     </p>
                   )}
                 </div>
@@ -2616,6 +2836,121 @@ export default function BrandDetailPage() {
                   </div>
 
                   <div className="bg-gray-50 px-4 py-6 sm:px-6">
+                    {isSearchResultsMode ? (
+                      <div className="space-y-4">
+                        {isSearchQueryTooShort ? (
+                          <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
+                              <Search className="w-5 h-5 text-brand-600" />
+                            </div>
+                            <p className="text-sm text-gray-500">
+                              Type at least {FINDING_SEARCH_MIN_QUERY_LENGTH} characters to search findings.
+                            </p>
+                          </div>
+                        ) : findingsSearchLoading && searchResults.length === 0 ? (
+                          <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <Loader2 className="w-5 h-5 animate-spin text-brand-600" />
+                            <p className="text-sm text-gray-500">Searching findings…</p>
+                          </div>
+                        ) : searchResultsError ? (
+                          <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-4 text-sm text-red-700">
+                            {searchResultsError}
+                          </div>
+                        ) : searchResults.length === 0 ? (
+                          <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
+                              <Search className="w-5 h-5 text-brand-600" />
+                            </div>
+                            <p className="text-sm text-gray-500">No findings match the current {activeFindingsFilterLabel}.</p>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium text-gray-700">
+                                  Search results
+                                  <span className="ml-2 text-xs font-normal text-gray-500">
+                                    {searchResultsCountLabel}
+                                  </span>
+                                </p>
+                                <p className="mt-1 text-xs text-gray-500">
+                                  Matching findings across scans, bookmarks, addressed, ignored, and non-hits.
+                                </p>
+                              </div>
+                              {searchResultsTruncated && (
+                                <span className="text-xs text-amber-700">
+                                  Refine your query to search more precisely.
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="space-y-4">
+                              {searchResults.map((result) => (
+                                <div key={result.id} className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
+                                  <div className="flex flex-wrap items-center justify-between gap-3">
+                                    <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                                      <Badge variant="default" className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
+                                        {result.displayBucket === 'non-hit'
+                                          ? 'Non-hit'
+                                          : result.displayBucket === 'ignored'
+                                            ? 'Ignored'
+                                            : result.displayBucket === 'addressed'
+                                              ? 'Addressed'
+                                              : 'Finding'}
+                                      </Badge>
+                                      <span>· {getFindingSourceLabel(result.source)}</span>
+                                      <span>· {formatScanDate(result.scanStartedAt ?? result.createdAt)}</span>
+                                      {result.scanStatus && result.scanStatus !== 'completed' && (
+                                        <span>· {result.scanStatus}</span>
+                                      )}
+                                    </div>
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      onClick={() => openSearchResult(result)}
+                                    >
+                                      {result.displayBucket === 'addressed' ? 'Open addressed view' : 'Open scan result set'}
+                                    </Button>
+                                  </div>
+
+                                  <FindingCard
+                                    finding={result}
+                                    highlightQuery={activeHighlightQuery}
+                                    onIgnoreToggle={result.displayBucket === 'ignored' || result.displayBucket === 'hit' ? handleIgnoreToggle : undefined}
+                                    onAddressToggle={result.displayBucket !== 'non-hit' && result.displayBucket !== 'ignored' ? handleAddressedToggle : undefined}
+                                    onReclassify={handleReclassifyFinding}
+                                    onBookmarkUpdate={handleBookmarkUpdate}
+                                    onNoteUpdate={handleFindingNoteUpdate}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+
+                            {(searchResultsNextCursor || searchResultsTruncated) && (
+                              <div className="flex flex-col items-center gap-3 pt-2">
+                                {searchResultsNextCursor && (
+                                  <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => void loadMoreSearchResults()}
+                                    loading={loadingMoreSearchResults}
+                                    disabled={loadingMoreSearchResults}
+                                  >
+                                    Load more
+                                  </Button>
+                                )}
+                                {searchResultsTruncated && (
+                                  <p className="text-center text-xs text-amber-700">
+                                    Search results were capped to keep the request responsive. Narrow the query to search more findings.
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <>
                     {activeTab === 'bookmarks' && (
                       visibleBookmarkedCount === 0 ? (
                         <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
@@ -3108,7 +3443,7 @@ export default function BrandDetailPage() {
                                             <span className="inline-flex items-center gap-1 text-xs text-gray-400">
                                               · {scan.skippedCount} skipped
                                               <InfoTooltip
-                                                content="Findings that appeared in previous scans were skipped."
+                                                content="Findings that appeared in other searches in this scan, or historical findings."
                                                 iconClassName="text-gray-300 hover:text-gray-400"
                                               />
                                             </span>
@@ -3383,6 +3718,8 @@ export default function BrandDetailPage() {
                           })
                         )}
                       </div>
+                    )}
+                      </>
                     )}
                   </div>
                 </div>

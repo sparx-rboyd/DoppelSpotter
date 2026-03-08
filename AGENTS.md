@@ -185,6 +185,13 @@ DELETE /api/brands/[brandId]
 GET /api/brands/[brandId]/findings?scanId=xxx
  └─ optional scanId param filters findings to a single scan (used for lazy loading in the UI)
 
+GET /api/brands/[brandId]/findings/search?q=...
+ └─ authenticated brand-scoped text search over lightweight finding summaries used by the brand page when the search box is non-empty
+ └─ accepts optional `scanId`, `category`, `source`, `theme`, `limit`, and `cursor`
+ └─ applies exact Firestore filters first where available, then server-side substring matching on `title`, `url`, and `llmAnalysis`
+ └─ returns flat paginated matches annotated with `displayBucket` (`hit` | `non-hit` | `ignored` | `addressed`) plus scan-level context (`scanStartedAt`, `scanStatus`)
+ └─ includes cursor pagination and a scan-budget cap so very broad queries degrade gracefully instead of freezing the browser
+
 Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ validates X-Apify-Webhook-Secret header
  └─ on SUCCEEDED, atomically claims the actor run by transitioning it to `fetching_dataset` before any dataset fetch / AI analysis begins
@@ -565,6 +572,7 @@ The findings API is optimised to minimise Firestore reads and HTTP round-trips o
 - **Eager cross-scan bookmark fetch** — the brand page separately loads `GET /api/brands/[brandId]/findings?bookmarkedOnly=true` on mount so the bookmark follow-up panel is immediately available without expanding individual scans
 - **Eager cross-scan addressed fetch** — the brand page separately loads `GET /api/brands/[brandId]/findings?addressedOnly=true` on mount so addressed findings are available in their dedicated tab without loading individual scan accordions
 - **Dedicated taxonomy bootstrap** — the brand page loads `GET /api/brands/[brandId]/findings/taxonomy` on mount (and after scan-history changes) so the theme filter dropdown can populate without hydrating every scan bucket first
+- **Dedicated server-backed text search** — when the brand-page search box is non-empty, the UI now calls `GET /api/brands/[brandId]/findings/search` instead of hydrating every scan bucket into the browser. The route pages through lightweight `FindingSummary` projections server-side, applies substring matching on `title`, `url`, and `llmAnalysis`, honours the active severity/source/theme filters, and returns flat paginated results with bucket metadata for a dedicated search-results mode.
 - **Lightweight list payloads** — the findings list endpoints (`GET /api/brands/[brandId]/findings` and `GET /api/findings`) return a compact `FindingSummary` shape via Firestore `.select(...)`, excluding `rawData`, `llmAnalysisPrompt`, `rawLlmResponse`, and other fields not needed for normal rendering. This avoids repeatedly shipping the full SERP batch payload on every finding card.
 - **Dedicated scan export paths** — `GET /api/brands/[brandId]/scans/[scanId]/export` performs a single scan-scoped findings query and returns a CSV attachment containing hits, non-hits, notes, and review-state flags, while `GET /api/brands/[brandId]/scans/[scanId]/export/pdf` returns a branded PDF report containing the scan AI summary, actionable high/medium/low findings, notes, and a dedicated addressed-findings section. Neither path forces the UI to eagerly load every findings bucket first.
 - **Dashboard bootstrap + metrics split** — the main dashboard uses `GET /api/dashboard/bootstrap` for brand selection state and `GET /api/dashboard/metrics` for brand/scan-scoped analytics, instead of reusing the lightweight recent-findings feed.

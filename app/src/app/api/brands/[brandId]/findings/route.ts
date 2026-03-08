@@ -1,3 +1,4 @@
+import { type Query, type QueryDocumentSnapshot } from '@google-cloud/firestore';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { runWriteBatchInChunks } from '@/lib/firestore-batches';
@@ -6,6 +7,41 @@ import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
 import type { BrandProfile, FindingSummary } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
+const FINDINGS_PAGE_SIZE = 200;
+
+async function loadMatchingFindingSummaries(
+  query: Query,
+  matchesFinding: (finding: FindingSummary) => boolean,
+): Promise<FindingSummary[]> {
+  const findings: FindingSummary[] = [];
+  let cursor: QueryDocumentSnapshot | undefined;
+
+  while (true) {
+    let pageQuery = query.limit(FINDINGS_PAGE_SIZE);
+    if (cursor) {
+      pageQuery = pageQuery.startAfter(cursor);
+    }
+
+    const snapshot = await pageQuery.get();
+    if (snapshot.empty) break;
+
+    for (const doc of snapshot.docs) {
+      const finding = {
+        id: doc.id,
+        ...(doc.data() as Omit<FindingSummary, 'id'>),
+      } satisfies FindingSummary;
+
+      if (matchesFinding(finding)) {
+        findings.push(finding);
+      }
+    }
+
+    cursor = snapshot.docs[snapshot.docs.length - 1];
+    if (snapshot.size < FINDINGS_PAGE_SIZE) break;
+  }
+
+  return findings;
+}
 
 // GET /api/brands/[brandId]/findings
 // Query params:
@@ -60,7 +96,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     query = query.where('isBookmarked', '==', true);
   }
 
-  const snapshot = await query
+  const orderedQuery = query
     .select(
       'scanId',
       'brandId',
@@ -79,31 +115,30 @@ export async function GET(request: NextRequest, { params }: Params) {
       'bookmarkedAt',
       'createdAt',
     )
-    .orderBy(bookmarkedOnly ? 'bookmarkedAt' : addressedOnly ? 'addressedAt' : 'createdAt', 'desc')
-    .limit(200)
-    .get();
+    .orderBy(bookmarkedOnly ? 'bookmarkedAt' : addressedOnly ? 'addressedAt' : 'createdAt', 'desc');
 
-  const all: FindingSummary[] = snapshot.docs.map((doc) => ({
-    id: doc.id,
-    ...(doc.data() as Omit<FindingSummary, 'id'>),
-  }));
+  const matchesFinding = (finding: FindingSummary) => {
+    if (bookmarkedOnly) {
+      return finding.isBookmarked === true;
+    }
+    if (addressedOnly) {
+      return finding.isAddressed === true && !finding.isFalsePositive;
+    }
+    if (ignoredOnly) {
+      // Only user-manually-ignored real findings (not auto-ignored AI false positives —
+      // those have their own non-hits section).
+      return finding.isIgnored === true && !finding.isFalsePositive && !finding.isAddressed;
+    }
+    if (nonHitsOnly) {
+      // All AI false positives, regardless of their internal ignored state.
+      return finding.isFalsePositive === true;
+    }
 
-  let findings: FindingSummary[];
-  if (bookmarkedOnly) {
-    findings = all.filter((f) => f.isBookmarked === true);
-  } else if (addressedOnly) {
-    findings = all.filter((f) => f.isAddressed === true && !f.isFalsePositive);
-  } else if (ignoredOnly) {
-    // Only user-manually-ignored real findings (not auto-ignored AI false positives —
-    // those have their own non-hits section).
-    findings = all.filter((f) => f.isIgnored === true && !f.isFalsePositive && !f.isAddressed);
-  } else if (nonHitsOnly) {
-    // All AI false positives, regardless of their internal ignored state.
-    findings = all.filter((f) => f.isFalsePositive === true);
-  } else {
     // Default: real hits only — exclude AI false-positives, ignored findings, and addressed findings.
-    findings = all.filter((f) => !f.isFalsePositive && !f.isIgnored && !f.isAddressed);
-  }
+    return !finding.isFalsePositive && !finding.isIgnored && !finding.isAddressed;
+  };
+
+  const findings = await loadMatchingFindingSummaries(orderedQuery, matchesFinding);
 
   return NextResponse.json({ data: findings });
 }

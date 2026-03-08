@@ -2847,7 +2847,7 @@ function buildGoogleStoredFindingRawData({
     peopleAlsoAsk: uniqueStrings([...(existing?.context.peopleAlsoAsk ?? []), ...runContext.peopleAlsoAsk]),
   };
 
-  return {
+  return stripUndefinedDeep({
     kind: 'google-normalized',
     version: GOOGLE_RAW_DATA_VERSION,
     normalizedUrl: candidate.normalizedUrl,
@@ -2872,7 +2872,7 @@ function buildGoogleStoredFindingRawData({
       ...(searchQuery ? { searchQuery } : {}),
       ...(displayQuery ? { displayQuery } : {}),
     },
-  };
+  }) as GoogleStoredFindingRawData;
 }
 
 function readGoogleStoredFindingRawData(rawData?: Record<string, unknown>): GoogleStoredFindingRawData | null {
@@ -2955,7 +2955,7 @@ function buildDiscordStoredFindingRawData({
   classificationSource: 'llm' | 'fallback';
 }): DiscordStoredFindingRawData {
   const existing = readDiscordStoredFindingRawData(existingRawData);
-  return {
+  return stripUndefinedDeep({
     kind: 'discord-normalized',
     version: DISCORD_RAW_DATA_VERSION,
     server: {
@@ -2990,7 +2990,7 @@ function buildDiscordStoredFindingRawData({
       ...(searchQuery ? { searchQuery } : {}),
       ...(displayQuery ? { displayQuery } : {}),
     },
-  };
+  }) as DiscordStoredFindingRawData;
 }
 
 function readDiscordStoredFindingRawData(rawData?: Record<string, unknown>): DiscordStoredFindingRawData | null {
@@ -3080,7 +3080,7 @@ function buildXStoredFindingRawData({
   classificationSource: 'llm' | 'fallback';
 }): XStoredFindingRawData {
   const existing = readXStoredFindingRawData(existingRawData);
-  return {
+  return stripUndefinedDeep({
     kind: 'x-normalized',
     version: X_RAW_DATA_VERSION,
     tweet: {
@@ -3127,7 +3127,7 @@ function buildXStoredFindingRawData({
       ...(searchQuery ? { searchQuery } : {}),
       ...(displayQuery ? { displayQuery } : {}),
     },
-  };
+  }) as XStoredFindingRawData;
 }
 
 function readXStoredFindingRawData(rawData?: Record<string, unknown>): XStoredFindingRawData | null {
@@ -3222,7 +3222,7 @@ function buildGitHubStoredFindingRawData({
   classificationSource: 'llm' | 'fallback';
 }): GitHubStoredFindingRawData {
   const existing = readGitHubStoredFindingRawData(existingRawData);
-  return {
+  return stripUndefinedDeep({
     kind: 'github-normalized',
     version: GITHUB_RAW_DATA_VERSION,
     repo: {
@@ -3251,7 +3251,7 @@ function buildGitHubStoredFindingRawData({
       ...(searchQuery ? { searchQuery } : {}),
       ...(displayQuery ? { displayQuery } : {}),
     },
-  };
+  }) as GitHubStoredFindingRawData;
 }
 
 function readGitHubStoredFindingRawData(rawData?: Record<string, unknown>): GitHubStoredFindingRawData | null {
@@ -3328,13 +3328,15 @@ function normalizeGoogleSearchSighting(value: unknown): GoogleSearchSighting | n
     ...(searchQuery ? { searchQuery } : {}),
     ...(displayQuery ? { displayQuery } : {}),
     page: sighting.page,
-    position: typeof sighting.position === 'number' ? sighting.position : undefined,
+    ...(typeof sighting.position === 'number' ? { position: sighting.position } : {}),
     title: sighting.title,
-    displayedUrl: typeof sighting.displayedUrl === 'string' ? sighting.displayedUrl : undefined,
-    description: typeof sighting.description === 'string' ? sighting.description : undefined,
-    emphasizedKeywords: Array.isArray(sighting.emphasizedKeywords)
-      ? sighting.emphasizedKeywords.filter((entry): entry is string => typeof entry === 'string')
-      : undefined,
+    ...(typeof sighting.displayedUrl === 'string' ? { displayedUrl: sighting.displayedUrl } : {}),
+    ...(typeof sighting.description === 'string' ? { description: sighting.description } : {}),
+    ...(Array.isArray(sighting.emphasizedKeywords)
+      ? {
+        emphasizedKeywords: sighting.emphasizedKeywords.filter((entry): entry is string => typeof entry === 'string'),
+      }
+      : {}),
   };
 }
 
@@ -4090,6 +4092,29 @@ function uniqueStrings(values: string[]): string[] {
     unique.push(normalized);
   }
   return unique;
+}
+
+function stripUndefinedDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value
+      .filter((entry): entry is Exclude<typeof entry, undefined> => entry !== undefined)
+      .map((entry) => stripUndefinedDeep(entry)) as T;
+  }
+
+  if (!value || typeof value !== 'object') {
+    return value;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return value;
+  }
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .map(([key, entry]) => [key, stripUndefinedDeep(entry)]),
+  ) as T;
 }
 
 function chunkArray<T>(values: T[], size: number): T[][] {
