@@ -5,10 +5,14 @@ import { FieldValue } from '@google-cloud/firestore';
 import {
   DEFAULT_SEARCH_RESULT_PAGES,
   DEFAULT_ALLOW_AI_DEEP_SEARCHES,
+  DEFAULT_BRAND_SCAN_SOURCES,
+  hasEnabledBrandScanSource,
   isValidSearchResultPages,
   isValidAllowAiDeepSearches,
+  isValidBrandScanSources,
   DEFAULT_MAX_AI_DEEP_SEARCHES,
   isValidMaxAiDeepSearches,
+  normalizeBrandScanSources,
 } from '@/lib/brands';
 import type { BrandProfile, BrandProfileCreateInput, BrandSummary, Scan, ScanStatus } from '@/lib/types';
 import { buildBrandScanSchedule, isScheduleStartInPast } from '@/lib/scan-schedules';
@@ -120,6 +124,7 @@ export async function POST(request: NextRequest) {
     safeWords = [],
     allowAiDeepSearches = DEFAULT_ALLOW_AI_DEEP_SEARCHES,
     maxAiDeepSearches = DEFAULT_MAX_AI_DEEP_SEARCHES,
+    scanSources = DEFAULT_BRAND_SCAN_SOURCES,
     scanSchedule,
   } = body;
 
@@ -141,6 +146,12 @@ export async function POST(request: NextRequest) {
 
   if (!isValidMaxAiDeepSearches(maxAiDeepSearches)) {
     return errorResponse('maxAiDeepSearches must be a whole number from 1 to 10');
+  }
+  if (!isValidBrandScanSources(scanSources)) {
+    return errorResponse('scanSources must include boolean google, reddit, tiktok, youtube, facebook, and instagram values');
+  }
+  if (!hasEnabledBrandScanSource(scanSources)) {
+    return errorResponse('At least one scan source must be enabled');
   }
   if (scanSchedule?.enabled && isScheduleStartInPast(scanSchedule)) {
     return errorResponse('Scheduled scan start date and time must be in the future');
@@ -166,6 +177,7 @@ export async function POST(request: NextRequest) {
     sendScanSummaryEmails,
     allowAiDeepSearches,
     maxAiDeepSearches,
+    scanSources: normalizeBrandScanSources(scanSources),
     watchWords: (watchWords as string[]).map((w) => String(w).trim().toLowerCase()).filter(Boolean),
     safeWords: (safeWords as string[]).map((w) => String(w).trim().toLowerCase()).filter(Boolean),
     ...(resolvedScanSchedule ? { scanSchedule: resolvedScanSchedule } : {}),

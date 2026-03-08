@@ -27,7 +27,12 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
 {
   "globalHints": ["Optional short hint"],
   "sourceHints": {
-    "google": ["Optional short source-specific hint"]
+    "google": ["Optional short source-specific hint"],
+    "reddit": ["Optional short source-specific hint"],
+    "tiktok": ["Optional short source-specific hint"],
+    "youtube": ["Optional short source-specific hint"],
+    "facebook": ["Optional short source-specific hint"],
+    "instagram": ["Optional short source-specific hint"]
   }
 }
 

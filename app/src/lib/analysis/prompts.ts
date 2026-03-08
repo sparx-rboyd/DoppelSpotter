@@ -1,5 +1,11 @@
 import type { FindingSource, Severity, UserPreferenceHints } from '@/lib/types';
 import { MAX_FINDING_TAXONOMY_WORDS } from '@/lib/findings-taxonomy';
+import type { GoogleScannerConfig } from '@/lib/scan-sources';
+import {
+  buildGoogleClassificationSurfaceLine,
+  buildGoogleDeepSearchSystemPolicy,
+  buildGoogleDeepSearchUserPolicy,
+} from './google-scanner-policy';
 import type { GoogleRunContext, GoogleSearchCandidate } from './types';
 
 /**
@@ -22,7 +28,6 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
       "resultId": "the exact resultId from the input candidate",
       "title": "Short, descriptive title of the finding (max 10 words)",
       "severity": "high" | "medium" | "low",
-      "platform": "Short platform label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
       "theme": "Short theme label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
       "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
       "isFalsePositive": boolean
@@ -33,13 +38,12 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
 Rules for "items":
 - Include exactly one item for every input result candidate and reuse the exact same resultId.
 - Assess only the provided result candidates. Do not add extra items and do not omit any candidate.
-- Each item must have all seven fields: resultId, title, severity, platform, theme, analysis, isFalsePositive.
+- Each item must have all six fields: resultId, title, severity, theme, analysis, isFalsePositive.
 - Each indiviudal analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
  - This applies to both the title and the analysis text
-- Always return concise "platform" and "theme" labels. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case. 
-- If the user prompt includes existing platform/theme labels that fit, reuse one of them exactly.
+- Always return a concise "theme" label. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case.
+- If the user prompt includes existing theme labels that fit, reuse one of them exactly.
 - If none fit well, create a new short label rather than forcing a poor match.
-- You MUST only create new platform labels for prominent, very-widely-used platforms (e.g. TikTok, Reddit, GitHub, X, Facebook etc.). Niche or lesser-known platforms MUST always be labelled 'Other'.
 - Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
 - You MUST not create very niche theme labels that few results would likely be linked with over time. 
 - Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
@@ -92,7 +96,12 @@ export function formatLlmPromptForDebug(systemPrompt: string, userPrompt: string
   ].join('\n');
 }
 
-export function buildGoogleFinalSelectionSystemPrompt(maxSuggestedSearches: number): string {
+export function buildGoogleFinalSelectionSystemPrompt(
+  maxSuggestedSearches: number,
+  scanner: GoogleScannerConfig,
+): string {
+  const scannerPolicy = buildGoogleDeepSearchSystemPolicy(scanner);
+
   return `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
 
 You will receive metadata about a brand, an existing search term about the brand that has been executed, and suggested related searches as a result of this initial search.
@@ -117,6 +126,7 @@ Rules:
 - Do NOT suggest clearly legitimate or generic navigational queries.
 - Prefer concise Google-ready queries, not full sentences.
 - Make use of Google search operators in your queries where you feel it would enhance the quality/depth of relevant search results.
+${scannerPolicy ? `${scannerPolicy}\n` : ''}
 
 For example: 
 
@@ -138,26 +148,26 @@ For example:
  * Build the user prompt for a chunk of normalized Google result candidates.
  */
 export function buildGoogleChunkAnalysisPrompt(params: {
+  scanner: GoogleScannerConfig;
   brandName: string;
   keywords: string[];
   officialDomains: string[];
   watchWords?: string[];
   safeWords?: string[];
   userPreferenceHints?: UserPreferenceHints;
-  existingPlatforms?: string[];
   existingThemes?: string[];
   source: FindingSource;
   candidates: GoogleSearchCandidate[];
   runContext: GoogleRunContext;
 }): string {
   const {
+    scanner,
     brandName,
     keywords,
     officialDomains,
     watchWords,
     safeWords,
     userPreferenceHints,
-    existingPlatforms,
     existingThemes,
     source,
     candidates,
@@ -173,8 +183,8 @@ export function buildGoogleChunkAnalysisPrompt(params: {
     : null;
 
   const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
-  const existingPlatformsLine = `Existing platform labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingPlatforms && existingPlatforms.length > 0 ? existingPlatforms.join(', ') : 'none'}`;
   const existingThemesLine = `Existing theme labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingThemes && existingThemes.length > 0 ? existingThemes.join(', ') : 'none'}`;
+  const monitoringSurfaceLine = buildGoogleClassificationSurfaceLine(scanner);
 
   const compactCandidates = candidates.map((candidate) => ({
     resultId: candidate.resultId,
@@ -191,9 +201,8 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingPlatformsLine}
-${existingThemesLine}
-Monitoring surface: ${source}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
+${monitoringSurfaceLine}
 
 Supporting SERP context (for extra caution only — do NOT assess these as findings):
 - Source queries: ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.join(' | ') : 'none'}
@@ -202,7 +211,7 @@ Supporting SERP context (for extra caution only — do NOT assess these as findi
 
 Assess every result candidate below and return one item in the "items" array per resultId.
 Use British English in any human-readable text you generate.
-Keep both taxonomy labels short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
+Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
 
 Result candidates (${compactCandidates.length}):
 ${JSON.stringify(compactCandidates, null, 2)}`;
@@ -212,6 +221,7 @@ ${JSON.stringify(compactCandidates, null, 2)}`;
  * Build the user prompt for the final Google deep-search selection pass.
  */
 export function buildGoogleFinalSelectionPrompt(params: {
+  scanner: GoogleScannerConfig;
   brandName: string;
   keywords: string[];
   watchWords?: string[];
@@ -220,6 +230,7 @@ export function buildGoogleFinalSelectionPrompt(params: {
   maxSuggestedSearches: number;
 }): string {
   const {
+    scanner,
     brandName,
     keywords,
     watchWords,
@@ -235,12 +246,13 @@ export function buildGoogleFinalSelectionPrompt(params: {
   const safeWordsLine = safeWords && safeWords.length > 0
     ? `Safe words (terms the brand owner is comfortable being associated with; you can use these as negative keyword in your suggestion queries as you see appropriate): ${safeWords.join(', ')}`
     : null;
+  const scannerPolicy = buildGoogleDeepSearchUserPolicy(scanner);
 
   return `Brand being protected: "${brandName}"
 
 Brand keywords (keywords that the brand owner wants to monitor and protect; you can use slices or combinations of these in your suggested queries as you see appropriate): ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 
-${watchWordsLine ? `${watchWordsLine}\n\n` : ''}${safeWordsLine ? `${safeWordsLine}\n\n` : ''}Original search query:
+${watchWordsLine ? `${watchWordsLine}\n\n` : ''}${safeWordsLine ? `${safeWordsLine}\n\n` : ''}${scannerPolicy ? `${scannerPolicy}\n\n` : ''}Original search query:
 ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.map((query) => `- ${query}`).join('\n') : '- none'}
 
 Suggested related queries returned by Google for the above search:

@@ -6,7 +6,6 @@ import { createPortal } from 'react-dom';
 import {
   AlertCircle,
   AlertTriangle,
-  Globe,
   Info,
   Sparkles,
   ExternalLink,
@@ -27,7 +26,9 @@ import {
   SearchCheck,
 } from 'lucide-react';
 import { type Finding, type FindingCategory, type FindingSource, type FindingSummary } from '@/lib/types';
+import { getFindingSourceLabel } from '@/lib/scan-sources';
 import { cn } from '@/lib/utils';
+import { ScanSourceIcon } from './scan-source-icon';
 import { Tooltip } from './ui/tooltip';
 
 type BookmarkUpdate = {
@@ -80,25 +81,45 @@ function renderHighlightedText(text: string, query?: string) {
 const sourceConfig: Record<
   FindingSource,
   {
-    icon: React.ElementType;
     bgClass: string;
     textClass: string;
     label: string;
-    iconClassName?: string;
   }
 > = {
   google: {
-    icon: Globe,
     bgClass: 'bg-brand-50',
     textClass: 'text-brand-600',
-    label: 'Web search',
-    iconClassName: 'w-4 h-4 sm:w-[18px] sm:h-[18px]',
+    label: getFindingSourceLabel('google'),
+  },
+  reddit: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('reddit'),
+  },
+  tiktok: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('tiktok'),
+  },
+  youtube: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('youtube'),
+  },
+  facebook: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('facebook'),
+  },
+  instagram: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('instagram'),
   },
   unknown: {
-    icon: Globe,
     bgClass: 'bg-gray-50',
     textClass: 'text-gray-500',
-    label: 'Unknown',
+    label: getFindingSourceLabel('unknown'),
   },
 };
 
@@ -222,7 +243,6 @@ export function FindingCard({
   onNoteUpdate,
 }: FindingCardProps) {
   const src = sourceConfig[finding.source] ?? sourceConfig.unknown;
-  const Icon = src.icon;
   const isFalsePositive = finding.isFalsePositive === true;
   const isIgnored = finding.isIgnored === true;
   const isAddressed = finding.isAddressed === true;
@@ -409,7 +429,7 @@ export function FindingCard({
                 muted ? 'bg-gray-100 text-gray-400' : cn(src.bgClass, src.textClass),
               )}
             >
-              <Icon className={src.iconClassName ?? 'w-5 h-5 sm:w-6 sm:h-6'} />
+              <ScanSourceIcon source={finding.source} className="h-5 w-5 sm:h-6 sm:w-6" />
             </span>
           </Tooltip>
 
@@ -586,15 +606,8 @@ export function FindingCard({
               )}
             </div>
 
-            {(finding.platform || finding.theme) && (
+            {finding.theme && (
               <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
-                {finding.platform && (
-                  <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5">
-                    <span className="text-gray-700">
-                      {renderHighlightedText(finding.platform, highlightQuery)}
-                    </span>
-                  </span>
-                )}
                 {finding.theme && (
                   <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5">
                     <span className="text-gray-700">

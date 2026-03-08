@@ -6,6 +6,7 @@ import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
 import { BrandScanScheduleFields } from '@/components/brand-scan-schedule-fields';
+import { BrandScanSourceFields } from '@/components/brand-scan-source-fields';
 import { Navbar } from '@/components/navbar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -15,11 +16,13 @@ import { InfoTooltip } from '@/components/ui/tooltip';
 import {
   DEFAULT_SEARCH_RESULT_PAGES,
   DEFAULT_ALLOW_AI_DEEP_SEARCHES,
+  DEFAULT_BRAND_SCAN_SOURCES,
   DEFAULT_MAX_AI_DEEP_SEARCHES,
   MAX_AI_DEEP_SEARCHES,
   MIN_AI_DEEP_SEARCHES,
   MAX_SEARCH_RESULT_PAGES,
   MIN_SEARCH_RESULT_PAGES,
+  hasEnabledBrandScanSource,
 } from '@/lib/brands';
 import {
   DEFAULT_SCAN_SCHEDULE_FREQUENCY,
@@ -46,6 +49,7 @@ export default function NewBrandPage() {
   const [searchResultPages, setSearchResultPages] = useState(DEFAULT_SEARCH_RESULT_PAGES);
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
   const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
+  const [scanSources, setScanSources] = useState(DEFAULT_BRAND_SCAN_SOURCES);
   const [scanSchedule, setScanSchedule] = useState<BrandScanScheduleInput>(() => {
     const timeZone = getBrowserTimeZone();
     const defaultStart = getDefaultScheduleStartInput(timeZone);
@@ -130,6 +134,10 @@ export default function NewBrandPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
+    if (!hasEnabledBrandScanSource(scanSources)) {
+      setError('At least one scan source must be enabled');
+      return;
+    }
     if (scanSchedule.enabled && isScheduleStartInPast(scanSchedule)) {
       setError('Scheduled scan start date and time must be in the future');
       return;
@@ -151,6 +159,7 @@ export default function NewBrandPage() {
           sendScanSummaryEmails,
           allowAiDeepSearches,
           maxAiDeepSearches,
+          scanSources,
           watchWords,
           safeWords,
           scanSchedule,
@@ -326,6 +335,14 @@ export default function NewBrandPage() {
                 <h2 className="font-semibold text-gray-900">Web scan settings</h2>
               </CardHeader>
               <CardContent className="space-y-4 p-6">
+                <div className="space-y-3 border-b border-gray-100 pb-4">
+                  <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+                    Scan sources
+                    <InfoTooltip content="Choose which scan types DoppelSpotter should run for this brand. At least one scan source must remain enabled." />
+                  </div>
+                  <BrandScanSourceFields value={scanSources} onChange={setScanSources} />
+                </div>
+
                 <div className="pb-4">
                   <label htmlFor="search-result-pages" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
                     Search result pages

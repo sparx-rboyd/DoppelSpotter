@@ -1,6 +1,7 @@
 import { ApifyClient } from 'apify-client';
 import type { BrandProfile } from '@/lib/types';
 import { getDeepSearchGooglePageCount, getInitialGooglePageCount } from '@/lib/brands';
+import { buildGoogleScannerQuery, sanitizeGoogleQueryForDisplay } from '@/lib/scan-sources';
 import type { ActorConfig } from './actors';
 
 let _client: ApifyClient | null = null;
@@ -24,12 +25,20 @@ export interface ActorRunResult {
 /**
  * Build the Google Search actor input payload for a brand profile.
  */
-export function buildActorInput(brand: BrandProfile): Record<string, unknown> {
+export function buildActorInput(
+  actor: ActorConfig,
+  brand: BrandProfile,
+): { input: Record<string, unknown>; query: string; displayQuery: string } {
   const searchTerms = [brand.name, ...brand.keywords];
   const primaryQuery = searchTerms.join(' OR ');
+  const query = buildGoogleScannerQuery(actor.source, primaryQuery);
   const googlePageCount = getInitialGooglePageCount(brand.searchResultPages);
 
-  return { queries: primaryQuery, maxPagesPerQuery: googlePageCount };
+  return {
+    input: { queries: query, maxPagesPerQuery: googlePageCount },
+    query,
+    displayQuery: sanitizeGoogleQueryForDisplay(query),
+  };
 }
 
 /**
@@ -41,9 +50,9 @@ export async function startActorRun(
   actor: ActorConfig,
   brand: BrandProfile,
   webhookUrl: string,
-): Promise<{ runId: string }> {
+): Promise<{ runId: string; query: string; displayQuery: string }> {
   const client = getClient();
-  const input = buildActorInput(brand);
+  const { input, query, displayQuery } = buildActorInput(actor, brand);
 
   const run = await client.actor(actor.actorId).start(input, {
     webhooks: [
@@ -55,7 +64,7 @@ export async function startActorRun(
     ],
   });
 
-  return { runId: run.id };
+  return { runId: run.id, query, displayQuery };
 }
 
 /**
@@ -64,15 +73,20 @@ export async function startActorRun(
  * The actor input mirrors the core scan input but uses a custom query string.
  */
 export async function startDeepSearchRun(
-  query: string,
-  searchResultPages: number | undefined,
-  webhookUrl: string,
-): Promise<{ runId: string }> {
+  params: {
+    actor: ActorConfig;
+    query: string;
+    searchResultPages: number | undefined;
+    webhookUrl: string;
+  },
+): Promise<{ runId: string; query: string; displayQuery: string }> {
+  const { actor, query, searchResultPages, webhookUrl } = params;
   const client = getClient();
+  const executableQuery = buildGoogleScannerQuery(actor.source, query);
   const deepSearchPageCount = getDeepSearchGooglePageCount(searchResultPages);
 
-  const run = await client.actor('apify/google-search-scraper').start(
-    { queries: query, maxPagesPerQuery: deepSearchPageCount },
+  const run = await client.actor(actor.actorId).start(
+    { queries: executableQuery, maxPagesPerQuery: deepSearchPageCount },
     {
       webhooks: [
         {
@@ -84,7 +98,11 @@ export async function startDeepSearchRun(
     },
   );
 
-  return { runId: run.id };
+  return {
+    runId: run.id,
+    query: executableQuery,
+    displayQuery: sanitizeGoogleQueryForDisplay(executableQuery),
+  };
 }
 
 /**
@@ -116,7 +134,7 @@ export async function runActor(
   webhookUrl?: string,
 ): Promise<ActorRunResult> {
   const client = getClient();
-  const input = buildActorInput(brand);
+  const { input } = buildActorInput(actor, brand);
 
   const runOptions: Record<string, unknown> = { input };
 

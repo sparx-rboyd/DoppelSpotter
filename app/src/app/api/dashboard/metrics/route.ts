@@ -1,7 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { errorResponse, requireAuth } from '@/lib/api-utils';
-import { buildDashboardBreakdownRows, buildDashboardMetricTotalsFromScans, TERMINAL_DASHBOARD_SCAN_STATUSES } from '@/lib/dashboard';
+import {
+  buildDashboardBreakdownRows,
+  buildDashboardMetricTotalsFromScans,
+  buildDashboardSourceBreakdownRows,
+  TERMINAL_DASHBOARD_SCAN_STATUSES,
+} from '@/lib/dashboard';
 import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
 import type {
   BrandProfile,
@@ -99,7 +104,7 @@ export async function GET(request: NextRequest) {
   }
 
   const terminalScanIds = new Set(terminalScans.map((scan) => scan.id));
-  let findingsForBreakdown: Array<Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'platform' | 'theme'>> = [];
+  let findingsForBreakdown: Array<Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'source' | 'theme'>> = [];
 
   if (selectedScans.length > 0) {
     let findingsQuery = db
@@ -112,11 +117,11 @@ export async function GET(request: NextRequest) {
     }
 
     const findingsSnap = await findingsQuery
-      .select('scanId', 'severity', 'isFalsePositive', 'isIgnored', 'isAddressed', 'platform', 'theme')
+      .select('scanId', 'severity', 'isFalsePositive', 'isIgnored', 'isAddressed', 'source', 'theme')
       .get();
 
     findingsForBreakdown = findingsSnap.docs
-      .map((doc) => doc.data() as Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'platform' | 'theme'>)
+      .map((doc) => doc.data() as Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'source' | 'theme'>)
       .filter((finding) => selectedScanId ? true : terminalScanIds.has(finding.scanId));
   }
 
@@ -127,8 +132,8 @@ export async function GET(request: NextRequest) {
     activeScan,
     scanOptions: terminalScans,
     totals: buildDashboardMetricTotalsFromScans(selectedScans),
-    platformBreakdown: buildDashboardBreakdownRows(findingsForBreakdown, 'platform', scanOrderById),
-    themeBreakdown: buildDashboardBreakdownRows(findingsForBreakdown, 'theme', scanOrderById),
+    sourceBreakdown: buildDashboardSourceBreakdownRows(findingsForBreakdown, scanOrderById),
+    themeBreakdown: buildDashboardBreakdownRows(findingsForBreakdown, scanOrderById),
   };
 
   return NextResponse.json({ data });

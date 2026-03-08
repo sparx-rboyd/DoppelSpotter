@@ -1,4 +1,4 @@
-import type { Severity } from '@/lib/types';
+import type { FindingSource, GoogleScannerId, Severity } from '@/lib/types';
 import { normalizeFindingTaxonomyLabel } from '@/lib/findings-taxonomy';
 
 /**
@@ -6,8 +6,11 @@ import { normalizeFindingTaxonomyLabel } from '@/lib/findings-taxonomy';
  */
 export interface GoogleSearchSighting {
   runId: string;
+  source: FindingSource;
+  scannerId: GoogleScannerId;
   searchDepth: number;
   searchQuery?: string;
+  displayQuery?: string;
   page: number;
   position?: number;
   title: string;
@@ -53,7 +56,6 @@ export interface GoogleChunkAnalysisItem {
   resultId: string;
   title: string;
   severity: Severity;
-  platform?: string;
   theme?: string;
   analysis: string;
   isFalsePositive: boolean;
@@ -86,7 +88,7 @@ export interface ScanSummaryOutput {
  */
 export interface GoogleStoredFindingRawData extends Record<string, unknown> {
   kind: 'google-normalized';
-  version: 1;
+  version: 2;
   normalizedUrl: string;
   result: {
     rawUrl: string;
@@ -101,8 +103,11 @@ export interface GoogleStoredFindingRawData extends Record<string, unknown> {
   analysis: {
     source: 'llm' | 'fallback';
     runId: string;
+    findingSource: FindingSource;
+    scannerId: GoogleScannerId;
     searchDepth: number;
     searchQuery?: string;
+    displayQuery?: string;
   };
 }
 
@@ -152,7 +157,6 @@ export function parseGoogleChunkAnalysisOutput(
           resultId,
           title: (item.title as string).trim(),
           severity: item.severity as Severity,
-          platform: normalizeFindingTaxonomyLabel(item.platform),
           theme: normalizeFindingTaxonomyLabel(item.theme),
           analysis: (item.analysis as string).trim(),
           isFalsePositive: item.isFalsePositive as boolean,

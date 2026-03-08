@@ -24,7 +24,6 @@ export async function GET(request: NextRequest) {
       'source',
       'severity',
       'title',
-      'platform',
       'theme',
       'llmAnalysis',
       'url',

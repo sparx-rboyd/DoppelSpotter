@@ -4,7 +4,6 @@ export const MAX_FINDING_TAXONOMY_WORDS = 3;
 const OTHER_FINDING_TAXONOMY_KEY = 'other';
 
 export interface FindingTaxonomyOptions {
-  platforms: string[];
   themes: string[];
 }
 
@@ -65,14 +64,13 @@ export async function loadBrandFindingTaxonomy(params: {
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', userId)
-    .select('platform', 'theme')
+    .select('scanId', 'theme')
     .get();
   const docs = excludeScanId
     ? snapshot.docs.filter((doc) => doc.get('scanId') !== excludeScanId)
     : snapshot.docs;
 
   return {
-    platforms: dedupeFindingTaxonomyLabels(docs.map((doc) => doc.get('platform'))),
     themes: dedupeFindingTaxonomyLabels(docs.map((doc) => doc.get('theme'))),
   };
 }

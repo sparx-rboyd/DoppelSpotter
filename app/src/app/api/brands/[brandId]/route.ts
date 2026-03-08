@@ -2,7 +2,14 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
-import { isValidAllowAiDeepSearches, isValidMaxAiDeepSearches, isValidSearchResultPages } from '@/lib/brands';
+import {
+  hasEnabledBrandScanSource,
+  isValidAllowAiDeepSearches,
+  isValidBrandScanSources,
+  isValidMaxAiDeepSearches,
+  isValidSearchResultPages,
+  normalizeBrandScanSources,
+} from '@/lib/brands';
 import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
 import {
   buildBrandScanSchedule,
@@ -77,6 +84,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       return errorResponse('maxAiDeepSearches must be a whole number from 1 to 10');
     }
     updates.maxAiDeepSearches = body.maxAiDeepSearches;
+  }
+  if (body.scanSources !== undefined) {
+    if (!isValidBrandScanSources(body.scanSources)) {
+      return errorResponse('scanSources must include boolean google, reddit, tiktok, youtube, facebook, and instagram values');
+    }
+    if (!hasEnabledBrandScanSource(body.scanSources)) {
+      return errorResponse('At least one scan source must be enabled');
+    }
+    updates.scanSources = normalizeBrandScanSources(body.scanSources);
   }
   if (body.watchWords !== undefined) updates.watchWords = body.watchWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
   if (body.safeWords !== undefined) updates.safeWords = body.safeWords.map((w) => w.trim().toLowerCase()).filter(Boolean);

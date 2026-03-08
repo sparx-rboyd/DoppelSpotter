@@ -3,6 +3,7 @@ import { errorResponse, requireAuth } from '@/lib/api-utils';
 import {
   buildCsvFilename,
   formatBoolean,
+  formatFindingSource,
   formatScanDateTimeIso,
   formatSeverity,
   loadScanExportData,
@@ -15,6 +16,7 @@ type Params = { params: Promise<{ brandId: string; scanId: string }> };
 
 const CSV_COLUMNS = [
   'Scan date/time',
+  'Scan type',
   'Severity',
   'Title',
   'URL',
@@ -49,6 +51,7 @@ export async function GET(request: NextRequest, { params }: Params) {
 
     const rows = orderedFindings.map((finding: ExportableFinding) => serializeCsvRow([
       scanDateTime,
+      formatFindingSource(finding),
       formatSeverity(finding),
       finding.title,
       finding.url ?? '',

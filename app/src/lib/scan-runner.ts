@@ -1,6 +1,7 @@
 import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
 import { db } from './firestore';
 import type { ActorRunInfo, BrandProfile, Scan } from './types';
+import type { ActorConfig } from './apify/actors';
 import {
   clearBrandActiveScanIfMatches,
   isPendingScanStale,
@@ -54,15 +55,13 @@ type PreparedScanStart = {
   brand: BrandProfile;
   brandRef: DocumentReference;
   scanRef: DocumentReference;
-  targetActorIds: string[];
+  targetActors: ActorConfig[];
 };
 
 export async function startScanForBrand(params: StartScanForBrandParams): Promise<StartScanForBrandResult> {
-  const { CORE_ACTOR_IDS, getActorConfig } = await import('@/lib/apify/actors');
+  const { getTargetActorConfigs } = await import('@/lib/apify/actors');
   const { startActorRun } = await import('@/lib/apify/client');
   const { prepareUserPreferenceHintsForScan } = await import('@/lib/analysis/user-preference-hints');
-
-  const targetActorIds = CORE_ACTOR_IDS;
   const brandRef = db.collection('brands').doc(params.brandId);
   const scanRef = db.collection('scans').doc();
   const now = params.scheduled?.dispatchedAt ?? new Date();
@@ -74,7 +73,7 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
     brandId: params.brandId,
     userId: '',
     status: 'pending',
-    actorIds: targetActorIds,
+    actorIds: [],
     actorRunIds: [],
     actorRuns: {},
     completedRunCount: 0,
@@ -140,6 +139,11 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
     }
 
     scan.userId = brandData.userId;
+    const targetActors = getTargetActorConfigs(brandData);
+    if (targetActors.length === 0) {
+      throw new ScanStartError('At least one scan source must be enabled', 400);
+    }
+    scan.actorIds = Array.from(new Set(targetActors.map((actor) => actor.actorId)));
     tx.set(scanRef, scan);
 
     const brandUpdates: Record<string, unknown> = {
@@ -157,7 +161,7 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
       brand: brandData,
       brandRef,
       scanRef,
-      targetActorIds,
+      targetActors,
     };
   }).catch((error: unknown) => {
     if (error instanceof ScheduledScanSkipError) {
@@ -176,40 +180,34 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
 
   const readyScan = preparedScan as PreparedScanStart;
   const webhookUrl = `${buildAppUrl(params.requestHeaders)}/api/webhooks/apify`;
-  const targetSources = Array.from(new Set(
-    readyScan.targetActorIds
-      .map((actorId) => getActorConfig(actorId)?.source)
-      .filter((source): source is ActorRunInfo['source'] => typeof source === 'string'),
-  ));
+  const targetSources = Array.from(new Set(readyScan.targetActors.map((actor) => actor.source)));
 
   const actorStartPromise = (async () => {
-    let successCount = 0;
-
-    for (const actorId of readyScan.targetActorIds) {
-      const actorConfig = getActorConfig(actorId);
-      if (!actorConfig) {
-        console.warn(`[scan] Unknown actor ID: ${actorId} — skipping`);
-        continue;
-      }
-
+    const results = await Promise.all(readyScan.targetActors.map(async (actorConfig) => {
       try {
-        const { runId } = await startActorRun(actorConfig, readyScan.brand, webhookUrl);
+        const { runId, query, displayQuery } = await startActorRun(actorConfig, readyScan.brand, webhookUrl);
         await readyScan.scanRef.update({
           actorRunIds: FieldValue.arrayUnion(runId),
           [`actorRuns.${runId}`]: {
-            actorId,
+            scannerId: actorConfig.id,
+            actorId: actorConfig.actorId,
             source: actorConfig.source,
             status: 'running',
             skippedDuplicateCount: 0,
+            searchDepth: 0,
+            searchQuery: query,
+            displayQuery,
           } satisfies ActorRunInfo,
         });
-        successCount++;
-        console.log(`[scan] Started actor ${actorId} → runId=${runId}`);
+        console.log(`[scan] Started scanner ${actorConfig.id} (${actorConfig.actorId}) → runId=${runId}`);
+        return true;
       } catch (error) {
-        console.error(`[scan] Failed to start actor ${actorId}:`, error);
+        console.error(`[scan] Failed to start scanner ${actorConfig.id}:`, error);
+        return false;
       }
-    }
+    }));
 
+    const successCount = results.filter(Boolean).length;
     return { successCount };
   })();
 

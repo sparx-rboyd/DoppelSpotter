@@ -27,6 +27,12 @@ import {
 import type { BrandProfile, Finding, Scan, ActorRunInfo } from '@/lib/types';
 import { normalizeAllowAiDeepSearches, normalizeMaxAiDeepSearches } from '@/lib/brands';
 import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
+import {
+  buildGoogleScannerQuery,
+  getGoogleScannerConfigById,
+  getGoogleScannerConfigBySource,
+  sanitizeGoogleQueryForDisplay,
+} from '@/lib/scan-sources';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
 
@@ -36,7 +42,7 @@ const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
 const GOOGLE_ANALYSIS_CONCURRENCY = 3;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';
-const GOOGLE_RAW_DATA_VERSION = 1;
+const GOOGLE_RAW_DATA_VERSION = 2;
 type ScanDocHandle = {
   id: string;
   ref: DocumentReference;
@@ -285,10 +291,12 @@ async function handleSucceededRun({
 
   // Determine the source (surface) for this actor run
   const actorRunInfo = scan.actorRuns?.[runId];
-  const source = actorRunInfo?.source ?? 'google';
-  const actorId = actorRunInfo?.actorId ?? 'apify/google-search-scraper';
+  const scannerConfig = resolveGoogleScannerConfig(actorRunInfo);
+  const source = actorRunInfo?.source ?? scannerConfig.source;
+  const actorId = actorRunInfo?.actorId ?? scannerConfig.actorId;
   const searchDepth = actorRunInfo?.searchDepth ?? 0;
   const searchQuery = actorRunInfo?.searchQuery;
+  const displayQuery = actorRunInfo?.displayQuery ?? (searchQuery ? sanitizeGoogleQueryForDisplay(searchQuery) : undefined);
   const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
   const shouldSkipPreviouslySeenUrls = source === 'google' || actorId === 'apify/google-search-scraper';
   const userPreferenceHints = scan.userPreferenceHints;
@@ -352,9 +360,11 @@ async function handleSucceededRun({
     items: itemsToAnalyse,
     searchDepth,
     searchQuery,
+    displayQuery,
     userPreferenceHints,
     previousFindingUrls,
     existingTaxonomy,
+    scannerConfig,
   });
   newFindingCount = findingCount;
   skippedDuplicateCount = batchSkippedDuplicateCount;
@@ -375,6 +385,7 @@ async function handleSucceededRun({
       scanDoc,
       runId,
       suggestedSearches,
+      scannerConfig,
       maxSuggestedSearches,
     });
     if (reservedQueries.length > 0) {
@@ -385,14 +396,13 @@ async function handleSucceededRun({
         suggestedSearches: reservedQueries,
         maxSuggestedSearches,
         webhookUrl,
-        source,
-        actorId: 'apify/google-search-scraper',
+        scannerConfig,
       });
     }
   }
 
   console.log(
-    `[webhook] Actor ${actorId} (run ${runId}, depth ${searchDepth}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items, ${skippedDuplicateCount} skipped as previous duplicates (mode: google-batch)`,
+    `[webhook] Actor ${actorId} (run ${runId}, scanner ${scannerConfig.id}, depth ${searchDepth}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items, ${skippedDuplicateCount} skipped as previous duplicates (mode: google-batch)`,
   );
 
   await markActorRunComplete(scanDoc, runId, 'succeeded', newFindingCount, counts, skippedDuplicateCount);
@@ -462,12 +472,14 @@ async function analyseAndWriteBatch({
   scan,
   brand,
   source,
+  scannerConfig,
   actorId,
   datasetId,
   runId,
   items,
   searchDepth,
   searchQuery,
+  displayQuery,
   userPreferenceHints,
   previousFindingUrls,
   existingTaxonomy,
@@ -476,15 +488,17 @@ async function analyseAndWriteBatch({
   scan: Scan;
   brand: BrandProfile;
   source: Finding['source'];
+  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
   actorId: string;
   datasetId: string;
   runId: string;
   items: Record<string, unknown>[];
   searchDepth: number;
   searchQuery?: string;
+  displayQuery?: string;
   userPreferenceHints?: Scan['userPreferenceHints'];
   previousFindingUrls?: ReadonlySet<string>;
-  existingTaxonomy: { platforms: string[]; themes: string[] };
+  existingTaxonomy: { themes: string[] };
 }): Promise<{
   findingCount: number;
   suggestedSearches?: string[];
@@ -498,9 +512,12 @@ async function analyseAndWriteBatch({
   const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
 
   const normalizedRun = normalizeGoogleSerpRun({
+    source,
+    scannerId: scannerConfig.id,
     runId,
     searchDepth,
     searchQuery,
+    displayQuery,
     items,
   });
   const candidatesToAnalyse = normalizedRun.candidates.filter(
@@ -525,13 +542,13 @@ async function analyseAndWriteBatch({
     GOOGLE_ANALYSIS_CONCURRENCY,
     async (chunk, chunkIndex): Promise<GoogleChunkAnalysisResult> => {
       const prompt = buildGoogleChunkAnalysisPrompt({
+        scanner: scannerConfig,
         brandName: brand.name,
         keywords: brand.keywords,
         officialDomains: brand.officialDomains,
         watchWords: brand.watchWords,
         safeWords: brand.safeWords,
         userPreferenceHints,
-        existingPlatforms: existingTaxonomy.platforms,
         existingThemes: existingTaxonomy.themes,
         source,
         candidates: chunk,
@@ -582,6 +599,7 @@ async function analyseAndWriteBatch({
   if (canRunDeepSearchSelection) {
     suggestedSearches = await finalizeSuggestedSearches({
       brand,
+      scannerConfig,
       runContext: normalizedRun.runContext,
       maxSuggestedSearches,
     });
@@ -596,9 +614,11 @@ async function analyseAndWriteBatch({
       runId,
       searchDepth,
       searchQuery,
+      displayQuery,
       candidate,
       runContext: normalizedRun.runContext,
       outcome,
+      scannerConfig,
     });
 
     findingCount += delta.findingCount;
@@ -614,7 +634,6 @@ async function analyseAndWriteBatch({
 type GoogleFindingOutcome = {
   severity: Finding['severity'];
   title: string;
-  platform?: string;
   theme?: string;
   analysis: string;
   isFalsePositive: boolean;
@@ -654,14 +673,20 @@ type MarkActorRunCompleteResult = {
 };
 
 function normalizeGoogleSerpRun({
+  source,
+  scannerId,
   runId,
   searchDepth,
   searchQuery,
+  displayQuery,
   items,
 }: {
+  source: Finding['source'];
+  scannerId: ReturnType<typeof resolveGoogleScannerConfig>['id'];
   runId: string;
   searchDepth: number;
   searchQuery?: string;
+  displayQuery?: string;
   items: Record<string, unknown>[];
 }): { candidates: GoogleSearchCandidate[]; runContext: GoogleRunContext } {
   const candidateMap = new Map<string, GoogleSearchCandidate>();
@@ -672,7 +697,8 @@ function normalizeGoogleSerpRun({
 
   for (const item of items) {
     const pageNumber = readGooglePageNumber(item);
-    const sourceQuery = searchQuery ?? readGoogleSourceQuery(item);
+    const rawSourceQuery = searchQuery ?? readGoogleSourceQuery(item);
+    const sourceQuery = displayQuery ?? (rawSourceQuery ? sanitizeGoogleQueryForDisplay(rawSourceQuery) : undefined);
     if (sourceQuery) sourceQueries.add(sourceQuery);
 
     for (const relatedQuery of readGoogleTitles(item.relatedQueries)) {
@@ -704,10 +730,13 @@ function normalizeGoogleSerpRun({
 
       const sighting: GoogleSearchSighting = {
         runId,
+        source,
+        scannerId,
         searchDepth,
         page: pageNumber,
         title,
-        ...(sourceQuery ? { searchQuery: sourceQuery } : {}),
+        ...(rawSourceQuery ? { searchQuery: rawSourceQuery } : {}),
+        ...(sourceQuery ? { displayQuery: sourceQuery } : {}),
         ...(typeof position === 'number' ? { position } : {}),
         ...(displayedUrl ? { displayedUrl } : {}),
         ...(description ? { description } : {}),
@@ -791,14 +820,17 @@ async function analyseGoogleChunk({
 
 async function analyseGoogleFinalSelection({
   brand,
+  scannerConfig,
   runContext,
   maxSuggestedSearches,
 }: {
   brand: BrandProfile;
+  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
   runContext: GoogleRunContext;
   maxSuggestedSearches: number;
 }): Promise<string[] | undefined> {
   const prompt = buildGoogleFinalSelectionPrompt({
+    scanner: scannerConfig,
     brandName: brand.name,
     keywords: brand.keywords,
     watchWords: brand.watchWords,
@@ -806,7 +838,7 @@ async function analyseGoogleFinalSelection({
     runContext,
     maxSuggestedSearches,
   });
-  const systemPrompt = buildGoogleFinalSelectionSystemPrompt(maxSuggestedSearches);
+  const systemPrompt = buildGoogleFinalSelectionSystemPrompt(maxSuggestedSearches, scannerConfig);
 
   const raw = await chatCompletion([
     { role: 'system', content: systemPrompt },
@@ -823,16 +855,19 @@ async function analyseGoogleFinalSelection({
 
 async function finalizeSuggestedSearches({
   brand,
+  scannerConfig,
   runContext,
   maxSuggestedSearches,
 }: {
   brand: BrandProfile;
+  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
   runContext: GoogleRunContext;
   maxSuggestedSearches: number;
 }): Promise<string[] | undefined> {
   try {
     const llmSuggestedSearches = await analyseGoogleFinalSelection({
       brand,
+      scannerConfig,
       runContext,
       maxSuggestedSearches,
     });
@@ -865,10 +900,12 @@ async function upsertGoogleFinding({
   scanDoc,
   scan,
   source,
+  scannerConfig,
   actorId,
   runId,
   searchDepth,
   searchQuery,
+  displayQuery,
   candidate,
   runContext,
   outcome,
@@ -876,10 +913,12 @@ async function upsertGoogleFinding({
   scanDoc: ScanDocHandle;
   scan: Scan;
   source: Finding['source'];
+  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
   actorId: string;
   runId: string;
   searchDepth: number;
   searchQuery?: string;
+  displayQuery?: string;
   candidate: GoogleSearchCandidate;
   runContext: GoogleRunContext;
   outcome: GoogleFindingOutcome;
@@ -895,11 +934,15 @@ async function upsertGoogleFinding({
       existingRawData: existing?.rawData,
       candidate,
       runContext,
+      source,
+      scannerConfig,
       runId,
       searchDepth,
       searchQuery,
+      displayQuery,
       classificationSource: preferredOutcome.classificationSource,
     });
+    const preferredSource = choosePreferredFindingSource(existing?.source, source);
 
     const previousState = existing ? getFindingCountState(existing) : emptyFindingCountState();
     const nextState = getOutcomeCountState(preferredOutcome);
@@ -909,11 +952,10 @@ async function upsertGoogleFinding({
         scanId,
         brandId: scan.brandId,
         userId: scan.userId,
-        source,
+        source: preferredSource,
         actorId,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
-        ...(preferredOutcome.platform ? { platform: preferredOutcome.platform } : {}),
         ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
@@ -937,9 +979,10 @@ async function upsertGoogleFinding({
     }
 
     const updates: Record<string, unknown> = {
+      source: preferredSource,
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
-      platform: preferredOutcome.platform ?? existing.platform ?? FieldValue.delete(),
+      platform: FieldValue.delete(),
       theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
@@ -983,11 +1026,13 @@ async function reserveSuggestedSearches({
   scanDoc,
   runId,
   suggestedSearches,
+  scannerConfig,
   maxSuggestedSearches,
 }: {
   scanDoc: ScanDocHandle;
   runId: string;
   suggestedSearches: string[];
+  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
   maxSuggestedSearches: number;
 }): Promise<string[]> {
   return db.runTransaction(async (tx) => {
@@ -1000,12 +1045,29 @@ async function reserveSuggestedSearches({
 
     const existingQueries = new Set(
       Object.values(fresh.actorRuns ?? {})
-        .map((value) => value.searchQuery?.trim().toLowerCase())
-        .filter((value): value is string => typeof value === 'string' && value.length > 0),
+        .flatMap((value) => {
+          const existing: string[] = [];
+          if (typeof value.searchQuery === 'string' && value.searchQuery.trim().length > 0) {
+            existing.push(normalizeSuggestedSearchKey(value.searchQuery));
+          }
+
+          const existingScannerConfig = resolveGoogleScannerConfig(value);
+          for (const suggestedQuery of value.suggestedSearches ?? []) {
+            const executableQuery = buildExecutableSearchQuery(existingScannerConfig, suggestedQuery);
+            if (executableQuery) {
+              existing.push(normalizeSuggestedSearchKey(executableQuery));
+            }
+          }
+
+          return existing;
+        }),
     );
 
     const reserved = uniqueStrings(suggestedSearches)
-      .filter((query) => !existingQueries.has(query.toLowerCase()))
+      .filter((query) => {
+        const executableQuery = buildExecutableSearchQuery(scannerConfig, query);
+        return executableQuery.length > 0 && !existingQueries.has(normalizeSuggestedSearchKey(executableQuery));
+      })
       .slice(0, maxSuggestedSearches);
 
     const updates: Record<string, unknown> = {
@@ -1033,8 +1095,7 @@ async function triggerDeepSearches({
   suggestedSearches,
   maxSuggestedSearches,
   webhookUrl,
-  source,
-  actorId,
+  scannerConfig,
 }: {
   scanDoc: ScanDocHandle;
   scan: Scan;
@@ -1042,30 +1103,46 @@ async function triggerDeepSearches({
   suggestedSearches: string[];
   maxSuggestedSearches: number;
   webhookUrl: string;
-  source: Finding['source'];
-  actorId: string;
+  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
 }) {
   const queries = suggestedSearches.slice(0, maxSuggestedSearches);
 
-  const newRunIds: string[] = [];
-  const newActorRuns: Record<string, ActorRunInfo> = {};
-
-  for (const query of queries) {
+  const startResults = await Promise.all(queries.map(async (query) => {
     try {
-      const { runId } = await startDeepSearchRun(query, brand.searchResultPages, webhookUrl);
-      newRunIds.push(runId);
-      newActorRuns[runId] = {
-        actorId,
-        source,
-        status: 'running',
-        skippedDuplicateCount: 0,
-        searchDepth: 1,
-        searchQuery: query,
+      const { runId, query: executableQuery, displayQuery } = await startDeepSearchRun({
+        actor: scannerConfig,
+        query,
+        searchResultPages: brand.searchResultPages,
+        webhookUrl,
+      });
+
+      return {
+        runId,
+        info: {
+          scannerId: scannerConfig.id,
+          actorId: scannerConfig.actorId,
+          source: scannerConfig.source,
+          status: 'running',
+          skippedDuplicateCount: 0,
+          searchDepth: 1,
+          searchQuery: executableQuery,
+          displayQuery,
+        } satisfies ActorRunInfo,
       };
     } catch (err) {
       console.error(`[webhook] Failed to start deep search for "${query}":`, err);
+      return null;
     }
-  }
+  }));
+
+  const newRunIds = startResults
+    .filter((result): result is NonNullable<typeof result> => result !== null)
+    .map((result) => result.runId);
+  const newActorRuns: Record<string, ActorRunInfo> = Object.fromEntries(
+    startResults
+      .filter((result): result is NonNullable<typeof result> => result !== null)
+      .map((result) => [result.runId, result.info]),
+  );
 
   if (newRunIds.length === 0) return;
 
@@ -1095,7 +1172,6 @@ function buildGoogleFindingOutcome(
   return {
     severity: item.severity,
     title: item.title,
-    platform: item.platform,
     theme: item.theme,
     analysis: item.analysis,
     isFalsePositive: item.isFalsePositive,
@@ -1125,17 +1201,23 @@ function buildGoogleStoredFindingRawData({
   existingRawData,
   candidate,
   runContext,
+  source,
+  scannerConfig,
   runId,
   searchDepth,
   searchQuery,
+  displayQuery,
   classificationSource,
 }: {
   existingRawData?: Record<string, unknown>;
   candidate: GoogleSearchCandidate;
   runContext: GoogleRunContext;
+  source: Finding['source'];
+  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
   runId: string;
   searchDepth: number;
   searchQuery?: string;
+  displayQuery?: string;
   classificationSource: 'llm' | 'fallback';
 }): GoogleStoredFindingRawData {
   const existing = readGoogleStoredFindingRawData(existingRawData);
@@ -1165,14 +1247,20 @@ function buildGoogleStoredFindingRawData({
     analysis: {
       source: classificationSource,
       runId,
+      findingSource: source,
+      scannerId: scannerConfig.id,
       searchDepth,
       ...(searchQuery ? { searchQuery } : {}),
+      ...(displayQuery ? { displayQuery } : {}),
     },
   };
 }
 
 function readGoogleStoredFindingRawData(rawData?: Record<string, unknown>): GoogleStoredFindingRawData | null {
-  if (!rawData || rawData.kind !== 'google-normalized' || rawData.version !== GOOGLE_RAW_DATA_VERSION) {
+  if (!rawData || rawData.kind !== 'google-normalized') {
+    return null;
+  }
+  if (rawData.version !== 1 && rawData.version !== GOOGLE_RAW_DATA_VERSION) {
     return null;
   }
 
@@ -1195,7 +1283,9 @@ function readGoogleStoredFindingRawData(rawData?: Record<string, unknown>): Goog
         : undefined,
     },
     sightings: Array.isArray(rawData.sightings)
-      ? rawData.sightings.filter((value): value is GoogleSearchSighting => isGoogleSearchSighting(value))
+      ? rawData.sightings
+        .map((value) => normalizeGoogleSearchSighting(value))
+        .filter((value): value is GoogleSearchSighting => value !== null)
       : [],
     context: {
       sourceQueries: Array.isArray(context.sourceQueries)
@@ -1211,21 +1301,119 @@ function readGoogleStoredFindingRawData(rawData?: Record<string, unknown>): Goog
     analysis: {
       source: analysis.source === 'fallback' ? 'fallback' : 'llm',
       runId: typeof analysis.runId === 'string' ? analysis.runId : '',
+      findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'google',
+      scannerId: isKnownGoogleScannerId(analysis.scannerId) ? analysis.scannerId : 'google-web',
       searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
       searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
+      displayQuery: typeof analysis.displayQuery === 'string'
+        ? analysis.displayQuery
+        : (typeof analysis.searchQuery === 'string' ? sanitizeGoogleQueryForDisplay(analysis.searchQuery) : undefined),
     },
   };
 }
 
-function isGoogleSearchSighting(value: unknown): value is GoogleSearchSighting {
-  if (typeof value !== 'object' || value === null) return false;
+function normalizeGoogleSearchSighting(value: unknown): GoogleSearchSighting | null {
+  if (typeof value !== 'object' || value === null) return null;
   const sighting = value as Record<string, unknown>;
+  if (
+    typeof sighting.runId !== 'string' ||
+    typeof sighting.searchDepth !== 'number' ||
+    typeof sighting.page !== 'number' ||
+    typeof sighting.title !== 'string'
+  ) {
+    return null;
+  }
+
+  const searchQuery = typeof sighting.searchQuery === 'string' ? sighting.searchQuery : undefined;
+  const displayQuery = typeof sighting.displayQuery === 'string'
+    ? sighting.displayQuery
+    : (searchQuery ? sanitizeGoogleQueryForDisplay(searchQuery) : undefined);
+
+  return {
+    runId: sighting.runId,
+    source: isKnownFindingSource(sighting.source) ? sighting.source : 'google',
+    scannerId: isKnownGoogleScannerId(sighting.scannerId) ? sighting.scannerId : 'google-web',
+    searchDepth: sighting.searchDepth,
+    ...(searchQuery ? { searchQuery } : {}),
+    ...(displayQuery ? { displayQuery } : {}),
+    page: sighting.page,
+    position: typeof sighting.position === 'number' ? sighting.position : undefined,
+    title: sighting.title,
+    displayedUrl: typeof sighting.displayedUrl === 'string' ? sighting.displayedUrl : undefined,
+    description: typeof sighting.description === 'string' ? sighting.description : undefined,
+    emphasizedKeywords: Array.isArray(sighting.emphasizedKeywords)
+      ? sighting.emphasizedKeywords.filter((entry): entry is string => typeof entry === 'string')
+      : undefined,
+  };
+}
+
+function isKnownFindingSource(value: unknown): value is Finding['source'] {
   return (
-    typeof sighting.runId === 'string' &&
-    typeof sighting.searchDepth === 'number' &&
-    typeof sighting.page === 'number' &&
-    typeof sighting.title === 'string'
+    value === 'google'
+    || value === 'reddit'
+    || value === 'tiktok'
+    || value === 'youtube'
+    || value === 'facebook'
+    || value === 'instagram'
+    || value === 'unknown'
   );
+}
+
+function isKnownGoogleScannerId(value: unknown): value is ActorRunInfo['scannerId'] {
+  return (
+    value === 'google-web'
+    || value === 'google-reddit'
+    || value === 'google-tiktok'
+    || value === 'google-youtube'
+    || value === 'google-facebook'
+    || value === 'google-instagram'
+  );
+}
+
+function resolveGoogleScannerConfig(actorRunInfo?: Partial<ActorRunInfo>) {
+  if (actorRunInfo?.scannerId && isKnownGoogleScannerId(actorRunInfo.scannerId)) {
+    return getGoogleScannerConfigById(actorRunInfo.scannerId);
+  }
+
+  if (
+    actorRunInfo?.source === 'reddit'
+    || actorRunInfo?.source === 'tiktok'
+    || actorRunInfo?.source === 'youtube'
+    || actorRunInfo?.source === 'facebook'
+    || actorRunInfo?.source === 'instagram'
+    || actorRunInfo?.source === 'google'
+  ) {
+    return getGoogleScannerConfigBySource(actorRunInfo.source);
+  }
+
+  return getGoogleScannerConfigById('google-web');
+}
+
+function choosePreferredFindingSource(
+  existingSource: Finding['source'] | undefined,
+  nextSource: Finding['source'],
+): Finding['source'] {
+  const rank = (source: Finding['source'] | undefined): number => {
+    if (
+      source === 'reddit'
+      || source === 'tiktok'
+      || source === 'youtube'
+      || source === 'facebook'
+      || source === 'instagram'
+    ) return 3;
+    if (source === 'google') return 2;
+    if (source === 'unknown') return 1;
+    return 0;
+  };
+
+  return rank(nextSource) >= rank(existingSource) ? nextSource : (existingSource ?? nextSource);
+}
+
+function buildExecutableSearchQuery(
+  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>,
+  query: string,
+): string {
+  return buildGoogleScannerQuery(scannerConfig.source, query);
 }
 
 function choosePreferredGoogleOutcome(existing: Finding | null, next: GoogleFindingOutcome): GoogleFindingOutcome {
@@ -1235,7 +1423,6 @@ function choosePreferredGoogleOutcome(existing: Finding | null, next: GoogleFind
   const existingOutcome: GoogleFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
-    platform: existing.platform,
     theme: existing.theme,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,

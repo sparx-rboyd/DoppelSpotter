@@ -7,7 +7,7 @@ import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
 type Params = { params: Promise<{ brandId: string }> };
 
 // GET /api/brands/[brandId]/findings/taxonomy
-// Returns distinct brand-scoped platform/theme labels for filter dropdowns.
+// Returns distinct brand-scoped theme labels for filter dropdowns.
 export async function GET(request: NextRequest, { params }: Params) {
   const { uid, error } = await requireAuth(request);
   if (error) return error;

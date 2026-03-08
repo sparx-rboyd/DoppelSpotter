@@ -65,7 +65,6 @@ export async function GET(request: NextRequest, { params }: Params) {
       'source',
       'severity',
       'title',
-      'platform',
       'theme',
       'llmAnalysis',
       'url',

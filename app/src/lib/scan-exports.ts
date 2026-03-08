@@ -1,6 +1,7 @@
 import { capitalise } from './utils';
 import { db } from './firestore';
 import type { BrandProfile, Finding, Scan, Severity } from './types';
+import { getFindingSourceLabel } from './scan-sources';
 
 export type ExportTimestamp =
   | Date
@@ -10,8 +11,10 @@ export type ExportTimestamp =
 
 export type ExportableFinding = Pick<
   Finding,
+  | 'source'
   | 'severity'
   | 'title'
+  | 'theme'
   | 'url'
   | 'llmAnalysis'
   | 'bookmarkNote'
@@ -39,8 +42,10 @@ export class ScanExportError extends Error {
 }
 
 const EXPORT_FINDING_FIELDS = [
+  'source',
   'severity',
   'title',
+  'theme',
   'url',
   'llmAnalysis',
   'bookmarkNote',
@@ -91,6 +96,10 @@ export function buildPdfFilename(brandName: string, startedAt: ExportTimestamp):
 
 export function formatSeverity(finding: Pick<Finding, 'severity' | 'isFalsePositive'>): string {
   return finding.isFalsePositive === true ? 'Non-hit' : capitalise(finding.severity);
+}
+
+export function formatFindingSource(finding: Pick<Finding, 'source'>): string {
+  return getFindingSourceLabel(finding.source);
 }
 
 export function formatBoolean(value: boolean | undefined): string {

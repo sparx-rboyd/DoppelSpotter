@@ -12,18 +12,20 @@ import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { FindingCard } from '@/components/finding-card';
+import { ScanSourceIcon } from '@/components/scan-source-icon';
 import { SelectDropdown } from '@/components/ui/select-dropdown';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { InfoTooltip, Tooltip } from '@/components/ui/tooltip';
-import { normalizeAllowAiDeepSearches } from '@/lib/brands';
+import { normalizeAllowAiDeepSearches, normalizeBrandScanSources } from '@/lib/brands';
 import {
   formatScanScheduleFrequency,
   formatScheduledRunAt,
 } from '@/lib/scan-schedules';
+import { getFindingSourceLabel, GOOGLE_SCAN_SOURCE_ORDER } from '@/lib/scan-sources';
 import { cn, formatScanDate } from '@/lib/utils';
-import type { ActorRunInfo, BrandProfile, FindingCategory, FindingSummary, Scan, ScanSummary } from '@/lib/types';
+import type { ActorRunInfo, BrandProfile, FindingCategory, FindingSource, FindingSummary, Scan, ScanSummary } from '@/lib/types';
 
 const POLL_INTERVAL_MS = 5_000;
 const ACTIVE_SCAN_IDLE_POLL_INTERVAL_MS = 20_000;
@@ -33,14 +35,19 @@ const CLEARING_HISTORY_DELETE_TOOLTIP = 'Please wait while scan history is being
 const SCAN_RESULT_SET_HASH_PREFIX = 'scan-result-set-';
 const OTHER_FINDING_TAXONOMY_KEY = 'other';
 const DRILLDOWN_CATEGORY_QUERY_PARAM = 'category';
-const DRILLDOWN_PLATFORM_QUERY_PARAM = 'platform';
 const DRILLDOWN_THEME_QUERY_PARAM = 'theme';
+const DRILLDOWN_SOURCE_QUERY_PARAM = 'source';
 const RETURN_TO_QUERY_PARAM = 'returnTo';
 const RETURN_TO_DASHBOARD_VALUE = 'dashboard';
 
 type BookmarkUpdate = {
   isBookmarked?: boolean;
 };
+
+type FindingSourceFilter = Extract<
+  FindingSource,
+  'google' | 'reddit' | 'tiktok' | 'youtube' | 'facebook' | 'instagram'
+>;
 
 // ---------------------------------------------------------------------------
 // localStorage helpers — persist active scan ID across page reloads
@@ -340,6 +347,20 @@ function parseDownloadFilename(headerValue: string | null) {
   return basicMatch?.[1] ?? null;
 }
 
+function parseFindingSourceFilter(value?: string | null): FindingSourceFilter | null {
+  if (
+    value === 'google'
+    || value === 'reddit'
+    || value === 'tiktok'
+    || value === 'youtube'
+    || value === 'facebook'
+    || value === 'instagram'
+  ) {
+    return value;
+  }
+  return null;
+}
+
 function scrollToScanResultSet(scanId: string, attempt = 0) {
   if (typeof window === 'undefined') return;
 
@@ -396,7 +417,7 @@ export default function BrandDetailPage() {
     ? '/dashboard'
     : '/brands';
   const initialFindingCategory = parseFindingCategoryFilter(searchParams.get(DRILLDOWN_CATEGORY_QUERY_PARAM));
-  const initialFindingPlatform = searchParams.get(DRILLDOWN_PLATFORM_QUERY_PARAM)?.trim() ?? '';
+  const initialFindingSource = parseFindingSourceFilter(searchParams.get(DRILLDOWN_SOURCE_QUERY_PARAM));
   const initialFindingTheme = searchParams.get(DRILLDOWN_THEME_QUERY_PARAM)?.trim() ?? '';
 
   const [brand, setBrand] = useState<BrandProfile | null>(null);
@@ -417,13 +438,12 @@ export default function BrandDetailPage() {
   const [allIgnoredFindings, setAllIgnoredFindings] = useState<FindingSummary[]>([]);
   const [findingsSearchQuery, setFindingsSearchQuery] = useState('');
   const [findingsSearchLoading, setFindingsSearchLoading] = useState(false);
-  const [findingTaxonomyOptions, setFindingTaxonomyOptions] = useState<{ platforms: string[]; themes: string[] }>({
-    platforms: [],
+  const [findingTaxonomyOptions, setFindingTaxonomyOptions] = useState<{ themes: string[] }>({
     themes: [],
   });
   const [hasLoadedFindingTaxonomyOptions, setHasLoadedFindingTaxonomyOptions] = useState(false);
   const [selectedFindingCategory, setSelectedFindingCategory] = useState<FindingCategory | null>(initialFindingCategory);
-  const [selectedFindingPlatform, setSelectedFindingPlatform] = useState(initialFindingPlatform);
+  const [selectedFindingSource, setSelectedFindingSource] = useState<FindingSourceFilter | null>(initialFindingSource);
   const [selectedFindingTheme, setSelectedFindingTheme] = useState(initialFindingTheme);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
@@ -449,20 +469,25 @@ export default function BrandDetailPage() {
   const pendingScanFindingsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanNonHitsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanIgnoredLoadsRef = useRef<Record<string, Promise<void>>>({});
-  const [displayedScanProgressPct, setDisplayedScanProgressPct] = useState(0);
+  const [selectedScanProgressSource, setSelectedScanProgressSource] = useState<FindingSource>('google');
+  const [displayedScanProgressPctBySource, setDisplayedScanProgressPctBySource] = useState<Partial<Record<FindingSource, number>>>({});
   const normalizedFindingsSearchQuery = normalizeFindingsSearchText(findingsSearchQuery);
-  const normalizedSelectedFindingPlatform = normalizeFindingsTaxonomyValue(selectedFindingPlatform);
   const normalizedSelectedFindingTheme = normalizeFindingsTaxonomyValue(selectedFindingTheme);
   const isFindingsSearchActive = normalizedFindingsSearchQuery.length > 0;
   const hasActiveFindingCategoryFilter = selectedFindingCategory !== null;
-  const hasActiveFindingPlatformFilter = normalizedSelectedFindingPlatform.length > 0;
+  const hasActiveFindingSourceFilter = selectedFindingSource !== null;
   const hasActiveFindingThemeFilter = normalizedSelectedFindingTheme.length > 0;
   const isAnyFindingFilterActive =
     isFindingsSearchActive
     || hasActiveFindingCategoryFilter
-    || hasActiveFindingPlatformFilter
+    || hasActiveFindingSourceFilter
     || hasActiveFindingThemeFilter;
   const activeHighlightQuery = isFindingsSearchActive ? findingsSearchQuery : undefined;
+
+  useEffect(() => {
+    if (!isAnyFindingFilterActive) return;
+    setConfirmDeleteScanId(null);
+  }, [isAnyFindingFilterActive]);
 
   function stopPolling() {
     if (pollRef.current) {
@@ -473,7 +498,7 @@ export default function BrandDetailPage() {
 
   function updateDrilldownUrl(updates: {
     category?: FindingCategory | null;
-    platform?: string | null;
+    source?: FindingSourceFilter | null;
     theme?: string | null;
   }) {
     const params = new URLSearchParams(searchParams.toString());
@@ -486,11 +511,11 @@ export default function BrandDetailPage() {
       }
     }
 
-    if (updates.platform !== undefined) {
-      if (updates.platform && updates.platform.trim()) {
-        params.set(DRILLDOWN_PLATFORM_QUERY_PARAM, updates.platform.trim());
+    if (updates.source !== undefined) {
+      if (updates.source) {
+        params.set(DRILLDOWN_SOURCE_QUERY_PARAM, updates.source);
       } else {
-        params.delete(DRILLDOWN_PLATFORM_QUERY_PARAM);
+        params.delete(DRILLDOWN_SOURCE_QUERY_PARAM);
       }
     }
 
@@ -513,9 +538,10 @@ export default function BrandDetailPage() {
     updateDrilldownUrl({ category: nextCategory });
   }
 
-  function handleFindingPlatformFilterChange(nextValue: string) {
-    setSelectedFindingPlatform(nextValue);
-    updateDrilldownUrl({ platform: nextValue || null });
+  function handleFindingSourceFilterChange(nextValue: string) {
+    const nextSource = parseFindingSourceFilter(nextValue);
+    setSelectedFindingSource(nextSource);
+    updateDrilldownUrl({ source: nextSource });
   }
 
   function handleFindingThemeFilterChange(nextValue: string) {
@@ -526,11 +552,11 @@ export default function BrandDetailPage() {
   function resetFindingsSearchAndFilters() {
     setFindingsSearchQuery('');
     setSelectedFindingCategory(null);
-    setSelectedFindingPlatform('');
+    setSelectedFindingSource(null);
     setSelectedFindingTheme('');
     updateDrilldownUrl({
       category: null,
-      platform: null,
+      source: null,
       theme: null,
     });
   }
@@ -692,7 +718,6 @@ export default function BrandDetailPage() {
       if (res.ok) {
         const json = await res.json();
         setFindingTaxonomyOptions({
-          platforms: json.data?.platforms ?? [],
           themes: json.data?.themes ?? [],
         });
       }
@@ -1504,28 +1529,6 @@ export default function BrandDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAnyFindingFilterActive, scans, scanFindings, scanNonHits, scanIgnored]);
 
-  const availableFindingPlatforms = useMemo(() => collectDistinctFindingTaxonomyLabels([
-    ...findingTaxonomyOptions.platforms,
-    ...allBookmarkedFindings.map((finding) => finding.platform),
-    ...allAddressedFindings.map((finding) => finding.platform),
-    ...allIgnoredFindings.map((finding) => finding.platform),
-    ...liveScanFindings.map((finding) => finding.platform),
-    ...liveScanNonHits.map((finding) => finding.platform),
-    ...Object.values(scanFindings).flat().map((finding) => finding.platform),
-    ...Object.values(scanNonHits).flat().map((finding) => finding.platform),
-    ...Object.values(scanIgnored).flat().map((finding) => finding.platform),
-  ]), [
-    findingTaxonomyOptions.platforms,
-    allBookmarkedFindings,
-    allAddressedFindings,
-    allIgnoredFindings,
-    liveScanFindings,
-    liveScanNonHits,
-    scanFindings,
-    scanNonHits,
-    scanIgnored,
-  ]);
-
   const availableFindingThemes = useMemo(() => collectDistinctFindingTaxonomyLabels([
     ...findingTaxonomyOptions.themes,
     ...allBookmarkedFindings.map((finding) => finding.theme),
@@ -1547,19 +1550,6 @@ export default function BrandDetailPage() {
     scanNonHits,
     scanIgnored,
   ]);
-
-  useEffect(() => {
-    if (!hasLoadedFindingTaxonomyOptions) return;
-    if (availableFindingPlatforms.length === 0) return;
-    if (
-      normalizedSelectedFindingPlatform
-      && !availableFindingPlatforms.some(
-        (platform) => normalizeFindingsTaxonomyValue(platform) === normalizedSelectedFindingPlatform,
-      )
-    ) {
-      setSelectedFindingPlatform('');
-    }
-  }, [availableFindingPlatforms, hasLoadedFindingTaxonomyOptions, normalizedSelectedFindingPlatform]);
 
   useEffect(() => {
     if (!hasLoadedFindingTaxonomyOptions) return;
@@ -1822,7 +1812,7 @@ export default function BrandDetailPage() {
       setAllBookmarkedFindings([]);
       setAllAddressedFindings([]);
       setAllIgnoredFindings([]);
-      setFindingTaxonomyOptions({ platforms: [], themes: [] });
+      setFindingTaxonomyOptions({ themes: [] });
       setExpandedScanIds([]);
       setActiveScan(null);
     } catch (err) {
@@ -1914,24 +1904,38 @@ export default function BrandDetailPage() {
   // ---------------------------------------------------------------------------
 
   const allRuns = activeScan?.actorRuns ? Object.values(activeScan.actorRuns) : [];
-  const inFlightRuns = allRuns.filter(
-    (r) => r.status === 'running' || r.status === 'waiting_for_preference_hints' || r.status === 'fetching_dataset' || r.status === 'analysing',
-  );
-  const activeRun =
-    inFlightRuns.find((r) => (r.searchDepth ?? 0) > 0) ??
-    inFlightRuns[0] ??
-    allRuns[0];
-
-  const runStatus = activeRun?.status;
-  const allDeepSearchRuns = allRuns.filter((r) => (r.searchDepth ?? 0) > 0);
-  const isDeepSearchActive = inFlightRuns.some((r) => (r.searchDepth ?? 0) > 0);
-  const activeDeepSearchCount = inFlightRuns.filter((r) => (r.searchDepth ?? 0) > 0).length;
-  const identifiedDeepSearchCount = Math.max(
-    allDeepSearchRuns.length,
-    allRuns.reduce((max, run) => Math.max(max, (run.searchDepth ?? 0) === 0 ? run.suggestedSearches?.length ?? 0 : 0), 0),
-  );
-  const skippedDuplicateCount = allRuns.reduce((sum, run) => sum + (run.skippedDuplicateCount ?? 0), 0);
   const isAiDeepSearchEnabled = normalizeAllowAiDeepSearches(brand?.allowAiDeepSearches);
+  const isSummarisingFindings = activeScan?.status === 'summarising';
+  const normalizedScanSources = normalizeBrandScanSources(brand?.scanSources);
+  const progressSources = GOOGLE_SCAN_SOURCE_ORDER.filter(
+    (source) => normalizedScanSources[source] || allRuns.some((run) => run.source === source),
+  );
+  const progressSourcesWithFallback: FindingSource[] = progressSources.length > 0 ? progressSources : ['google'];
+  const runsBySource = new Map(
+    progressSourcesWithFallback.map((source) => [
+      source,
+      allRuns.filter((run) => run.source === source),
+    ]),
+  );
+
+  function getRunsForSource(source: FindingSource): ActorRunInfo[] {
+    return runsBySource.get(source) ?? [];
+  }
+
+  function getInFlightRunsForSource(source: FindingSource): ActorRunInfo[] {
+    return getRunsForSource(source).filter(
+      (run) => run.status === 'running'
+        || run.status === 'waiting_for_preference_hints'
+        || run.status === 'fetching_dataset'
+        || run.status === 'analysing',
+    );
+  }
+
+  function getActiveRunForSource(source: FindingSource): ActorRunInfo | undefined {
+    const runs = getRunsForSource(source);
+    const inFlightRuns = getInFlightRunsForSource(source);
+    return inFlightRuns.find((run) => (run.searchDepth ?? 0) > 0) ?? inFlightRuns[0] ?? runs[0];
+  }
 
   function getRunAnalysisCounts(run?: ActorRunInfo): { completed: number; total: number } | null {
     if (!run || run.status !== 'analysing') return null;
@@ -1950,100 +1954,56 @@ export default function BrandDetailPage() {
     return inProgressLabel;
   }
 
-  function formatDeepSearchQueryForDisplay(query: string): string {
-    const formatted = query
-      .trim()
-      .replace(/(^|[\s([{])[`"'“”‘’]+/g, '$1')
-      .replace(/[`"'“”‘’]+(?=[\s)\]},.!?:;]|$)/g, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    return formatted || query.trim();
-  }
-
-  function renderDeepSearchQueryLabel(prefix: string, query: string, suffix = ''): ReactNode {
-    const displayQuery = formatDeepSearchQueryForDisplay(query);
-
-    return (
-      <>
-        {prefix}
-        {' '}
-        <span className="align-bottom" title={displayQuery}>
-          <em>{displayQuery}</em>
-        </span>
-        {suffix}
-      </>
+  function getIdentifiedDeepSearchCount(source: FindingSource): number {
+    const runs = getRunsForSource(source);
+    const deepSearchRuns = runs.filter((run) => (run.searchDepth ?? 0) > 0);
+    return Math.max(
+      deepSearchRuns.length,
+      runs.reduce((max, run) => Math.max(max, (run.searchDepth ?? 0) === 0 ? run.suggestedSearches?.length ?? 0 : 0), 0),
     );
   }
 
-  function renderDeepSearchAnalysisLabel(query: string, run?: ActorRunInfo): ReactNode {
-    const counts = getRunAnalysisCounts(run);
-    if (!counts) {
-      return renderDeepSearchQueryLabel('Analysing deep search results for', query);
-    }
-
-    const prefix = counts.completed >= counts.total
-      ? 'Finalising deep search results for'
-      : 'Analysing deep search results for';
-
-    return renderDeepSearchQueryLabel(prefix, query);
-  }
-
-  function getDeepSearchSelectionAnnouncement(): string | null {
-    if (identifiedDeepSearchCount <= 0) return null;
-    return `AI analysis identified ${identifiedDeepSearchCount} follow up search${identifiedDeepSearchCount !== 1 ? 'es' : ''}.`;
-  }
-
-  function getScanStatusLabel(): ReactNode {
+  function getScanStatusLabel(source: FindingSource): ReactNode {
     if (activeScan?.status === 'summarising') {
       return 'Summarising findings';
     }
+    if (activeScan?.status === 'completed') {
+      return 'Finalising results';
+    }
+    const activeRun = getActiveRunForSource(source);
     if (!activeRun) return 'Starting scan';
 
+    const inFlightRuns = getInFlightRunsForSource(source);
+    const runStatus = activeRun.status;
+    const isDeepSearchActive = inFlightRuns.some((run) => (run.searchDepth ?? 0) > 0);
+    const sourceLabel = getFindingSourceLabel(source);
+
     if (isDeepSearchActive) {
-      const query = activeRun.searchQuery;
-      switch (runStatus) {
-        case 'waiting_for_preference_hints':
-          return query
-            ? renderDeepSearchQueryLabel('Preparing analysis context for', query)
-            : 'Preparing analysis context';
-        case 'fetching_dataset':
-          return query
-            ? renderDeepSearchQueryLabel('Fetching deeper results for', query)
-            : `Investigating ${activeDeepSearchCount} more related quer${activeDeepSearchCount !== 1 ? 'ies' : 'y'}`;
-        case 'analysing':
-          return query
-            ? renderDeepSearchAnalysisLabel(query, activeRun)
-            : withAnalysisCounts('Analysing deep search results', 'Finalising deep search results', activeRun);
-        default:
-          return activeDeepSearchCount > 1
-            ? `Investigating ${activeDeepSearchCount} more related queries`
-            : query
-              ? renderDeepSearchQueryLabel('Investigating related query:', query)
-              : 'Running deeper investigation';
-      }
+      return runStatus === 'waiting_for_preference_hints'
+        ? 'Preparing analysis context'
+        : 'Investigating related queries';
     }
 
     switch (runStatus) {
       case 'waiting_for_preference_hints': return 'Preparing analysis context';
-      case 'fetching_dataset': return 'Fetching search results';
-      case 'analysing': return withAnalysisCounts('Analysing search results', 'Analysing search results', activeRun);
-      default: return 'Waiting for web search to complete';
+      case 'fetching_dataset':
+        return source === 'google' ? 'Fetching search results' : `Fetching ${sourceLabel} results`;
+      case 'analysing':
+        return source === 'google'
+          ? withAnalysisCounts('Analysing search results', 'Analysing search results', activeRun)
+          : withAnalysisCounts(`Analysing ${sourceLabel} results`, `Analysing ${sourceLabel} results`, activeRun);
+      default:
+        return source === 'google' ? 'Waiting for web search to complete' : `Waiting for ${sourceLabel} scan to complete`;
     }
   }
 
-  function getSkippedDuplicateSubtext(): string | null {
+  function getSkippedDuplicateSubtext(source: FindingSource): string | null {
+    const skippedDuplicateCount = getRunsForSource(source).reduce((sum, run) => sum + (run.skippedDuplicateCount ?? 0), 0);
     if (skippedDuplicateCount <= 0) return null;
     if (skippedDuplicateCount === 1) {
       return '1 result is being skipped because it duplicates previous findings.';
     }
     return `${skippedDuplicateCount} results are being skipped because they duplicate previous findings.`;
-  }
-
-  function getDeepSearchProgressSubtext(): string | null {
-    const announcement = getDeepSearchSelectionAnnouncement();
-    if (!announcement) return null;
-    return announcement;
   }
 
   function getRunProgressFraction(run: ActorRunInfo): number {
@@ -2068,47 +2028,149 @@ export default function BrandDetailPage() {
     }
   }
 
-  function getRawOverallScanProgressPct(): number {
+  function getRawScanProgressPct(source: FindingSource): number {
     if (!scanning) return 0;
     if (!activeScan) return 8;
-    if (activeScan.status === 'summarising') return 96;
-    if (allRuns.length === 0) return 10;
+    const runs = getRunsForSource(source);
+    if (runs.length === 0) return 0;
+    if (activeScan.status === 'summarising' || activeScan.status === 'completed') return 100;
 
     const totalFraction =
-      allRuns.reduce((sum, run) => sum + getRunProgressFraction(run), 0) / allRuns.length;
+      runs.reduce((sum, run) => sum + getRunProgressFraction(run), 0) / runs.length;
+    const activeRun = getActiveRunForSource(source);
+    const identifiedDeepSearchCount = getIdentifiedDeepSearchCount(source);
 
     if (isAiDeepSearchEnabled && identifiedDeepSearchCount === 0) {
-      const initialRun = allRuns.find((run) => (run.searchDepth ?? 0) === 0) ?? activeRun;
+      const initialRun = runs.find((run) => (run.searchDepth ?? 0) === 0) ?? activeRun;
       const initialFraction = initialRun ? getRunProgressFraction(initialRun) : totalFraction;
-      // Reserve more visible headroom while the initial pass is still deciding
-      // whether any AI deep-search follow-ups will be launched.
       return Math.round(8 + 70 * initialFraction);
     }
 
-    // Leave visible headroom so late-discovered deep-search runs do not imply the
-    // scan is effectively complete before the backend has finished all work.
     return Math.round(8 + 86 * totalFraction);
   }
 
   const progressScanKey = activeScanId ?? activeScan?.id ?? null;
-  const rawOverallScanProgressPct = getRawOverallScanProgressPct();
-  const isSummarisingFindings = activeScan?.status === 'summarising';
+  const rawScanProgressPctBySource = Object.fromEntries(
+    progressSourcesWithFallback.map((source) => [source, getRawScanProgressPct(source)]),
+  ) as Record<FindingSource, number>;
+  const progressSourceSignature = progressSourcesWithFallback
+    .map((source) => `${source}:${rawScanProgressPctBySource[source] ?? 0}`)
+    .join('|');
+  const progressStatusSignature = progressSourcesWithFallback
+    .map((source) => {
+      const runs = getRunsForSource(source);
+      const hasStarted = runs.length > 0;
+      const isInProgress = getInFlightRunsForSource(source).length > 0;
+      const status = !hasStarted ? 'not_started' : (isInProgress ? 'in_progress' : 'complete');
+      return `${source}:${status}`;
+    })
+    .join('|');
 
   useEffect(() => {
+    const progressSourceEntries = progressSourceSignature
+      .split('|')
+      .filter(Boolean)
+      .map((entry) => {
+        const [source, rawProgressPct] = entry.split(':');
+        return [source as FindingSource, Number(rawProgressPct)] as const;
+      });
+
     if (!progressScanKey) {
       progressScanKeyRef.current = null;
-      setDisplayedScanProgressPct(0);
+      setDisplayedScanProgressPctBySource({});
       return;
     }
 
     if (progressScanKeyRef.current !== progressScanKey) {
       progressScanKeyRef.current = progressScanKey;
-      setDisplayedScanProgressPct(rawOverallScanProgressPct);
+      setDisplayedScanProgressPctBySource(Object.fromEntries(progressSourceEntries));
       return;
     }
 
-    setDisplayedScanProgressPct((prev) => Math.max(prev, rawOverallScanProgressPct));
-  }, [progressScanKey, rawOverallScanProgressPct]);
+    setDisplayedScanProgressPctBySource((prev) => {
+      const next: Partial<Record<FindingSource, number>> = { ...prev };
+      for (const [source, progressPct] of progressSourceEntries) {
+        next[source] = Math.max(prev[source] ?? 0, progressPct);
+      }
+      return next;
+    });
+  }, [progressScanKey, progressSourceSignature]);
+
+  useEffect(() => {
+    const progressStatuses = progressStatusSignature
+      .split('|')
+      .filter(Boolean)
+      .map((entry) => {
+        const [source, status] = entry.split(':');
+        return {
+          source: source as FindingSource,
+          status: status as 'not_started' | 'in_progress' | 'complete',
+        };
+      });
+    const preferredProgressSource = progressStatuses.find((entry) => entry.status === 'in_progress')?.source
+      ?? progressStatuses.find((entry) => entry.status === 'complete')?.source
+      ?? progressStatuses[0]?.source;
+
+    if (!preferredProgressSource) {
+      return;
+    }
+    const validSources = progressStatuses.map((entry) => entry.source);
+
+    setSelectedScanProgressSource((current) => (
+      validSources.includes(current)
+        ? current
+        : preferredProgressSource
+    ));
+  }, [progressStatusSignature]);
+
+  const activeProgressSource = progressSourcesWithFallback.includes(selectedScanProgressSource)
+    ? selectedScanProgressSource
+    : progressSourcesWithFallback[0];
+  const activeProgressPct = displayedScanProgressPctBySource[activeProgressSource] ?? rawScanProgressPctBySource[activeProgressSource] ?? 0;
+
+  function getDisplayedProgressPctForSource(source: FindingSource): number {
+    return displayedScanProgressPctBySource[source] ?? rawScanProgressPctBySource[source] ?? 0;
+  }
+
+  function getProgressSourceState(source: FindingSource): 'not_started' | 'in_progress' | 'complete' {
+    const runs = getRunsForSource(source);
+    if (runs.length === 0) {
+      return 'not_started';
+    }
+    if (activeScan?.status === 'summarising' || activeScan?.status === 'completed') {
+      return 'complete';
+    }
+    return 'in_progress';
+  }
+
+  function getProgressSourceButtonClasses(
+    source: FindingSource,
+    selected: boolean,
+  ): { wrapper: string; icon: string } {
+    const status = getProgressSourceState(source);
+    const baseWrapper = selected
+      ? 'ring-2 ring-brand-200 ring-offset-1'
+      : 'ring-1 ring-transparent';
+
+    if (status === 'complete') {
+      return {
+        wrapper: cn('border-emerald-200 bg-emerald-50 text-emerald-700', baseWrapper),
+        icon: 'text-emerald-600',
+      };
+    }
+
+    if (status === 'in_progress') {
+      return {
+        wrapper: cn('border-brand-200 bg-brand-50 text-brand-700', baseWrapper),
+        icon: 'text-brand-600',
+      };
+    }
+
+    return {
+      wrapper: cn('border-gray-200 bg-gray-50 text-gray-500', baseWrapper),
+      icon: 'text-gray-400',
+    };
+  }
 
   // ---------------------------------------------------------------------------
   // Derived display values
@@ -2130,12 +2192,11 @@ export default function BrandDetailPage() {
         ? finding.isFalsePositive === true
         : finding.isFalsePositive !== true && finding.severity === selectedFindingCategory
     );
-    const matchesPlatform = !hasActiveFindingPlatformFilter
-      || normalizeFindingsTaxonomyValue(finding.platform) === normalizedSelectedFindingPlatform;
+    const matchesSource = !selectedFindingSource || finding.source === selectedFindingSource;
     const matchesTheme = !hasActiveFindingThemeFilter
       || normalizeFindingsTaxonomyValue(finding.theme) === normalizedSelectedFindingTheme;
 
-    return matchesSearch && matchesCategory && matchesPlatform && matchesTheme;
+    return matchesSearch && matchesCategory && matchesSource && matchesTheme;
   }
 
   function filterFindings(findings?: FindingSummary[]) {
@@ -2151,25 +2212,30 @@ export default function BrandDetailPage() {
   const totalResultsCount = totalFindings + totalNonHits + totalAddressed + totalIgnored + totalSkipped;
   const requiresClearHistoryConfirmation = totalResultsCount > 0;
   const isAwaitingClearHistoryConfirmation = confirmClear && requiresClearHistoryConfirmation;
-  const activeFindingsFilterLabel = isFindingsSearchActive && (hasActiveFindingPlatformFilter || hasActiveFindingThemeFilter)
+  const activeFindingsFilterLabel = isFindingsSearchActive && (hasActiveFindingSourceFilter || hasActiveFindingThemeFilter || hasActiveFindingCategoryFilter)
     ? 'search and filters'
     : isFindingsSearchActive
       ? 'search'
       : 'filters';
-  const findingPlatformOptions = [
-    { value: '', label: 'All platforms' },
-    ...availableFindingPlatforms.map((platform) => ({ value: platform, label: platform })),
-  ];
   const findingThemeOptions = [
     { value: '', label: 'All themes' },
     ...availableFindingThemes.map((theme) => ({ value: theme, label: theme })),
   ];
   const findingCategoryOptions = [
-    { value: '', label: 'All' },
+    { value: '', label: 'All severities' },
     { value: 'high', label: 'High' },
     { value: 'medium', label: 'Medium' },
     { value: 'low', label: 'Low' },
     { value: 'non-hit', label: 'Non-findings' },
+  ];
+  const findingSourceOptions = [
+    { value: '', label: 'All scan types' },
+    { value: 'google', label: getFindingSourceLabel('google') },
+    { value: 'reddit', label: getFindingSourceLabel('reddit') },
+    { value: 'tiktok', label: getFindingSourceLabel('tiktok') },
+    { value: 'youtube', label: getFindingSourceLabel('youtube') },
+    { value: 'facebook', label: getFindingSourceLabel('facebook') },
+    { value: 'instagram', label: getFindingSourceLabel('instagram') },
   ];
   const visibleBookmarkedFindings = filterFindings(allBookmarkedFindings) ?? [];
   const bookmarkedHits = visibleBookmarkedFindings.filter((finding) => !finding.isFalsePositive);
@@ -2339,7 +2405,7 @@ export default function BrandDetailPage() {
                     </div>
                   </div>
                   <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center">
-                    <div className="relative max-w-xl flex-1">
+                    <div className="relative max-w-lg flex-1">
                       <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                       <Input
                         value={findingsSearchQuery}
@@ -2361,28 +2427,13 @@ export default function BrandDetailPage() {
                     </div>
                     <div className="flex flex-col gap-3 sm:flex-row lg:flex-shrink-0">
                       <SelectDropdown
-                        id="findings-platform-filter"
-                        ariaLabel="Filter findings by platform"
-                        value={selectedFindingPlatform}
-                        options={findingPlatformOptions}
-                        onChange={handleFindingPlatformFilterChange}
-                        triggerClassName={cn(
-                          'min-w-[11rem] border-white/20',
-                          hasActiveFindingPlatformFilter && 'border-brand-200 bg-brand-50 text-brand-800',
-                        )}
-                        matchTriggerWidth={false}
-                        panelClassName="min-w-[16rem] max-w-[calc(100vw-1.5rem)]"
-                        dividerAfterValue=""
-                        showActiveIndicator={hasActiveFindingPlatformFilter}
-                      />
-                      <SelectDropdown
                         id="findings-theme-filter"
                         ariaLabel="Filter findings by theme"
                         value={selectedFindingTheme}
                         options={findingThemeOptions}
                         onChange={handleFindingThemeFilterChange}
                         triggerClassName={cn(
-                          'min-w-[11rem] border-white/20',
+                          'min-w-[10rem] border-white/20 text-gray-700',
                           hasActiveFindingThemeFilter && 'border-brand-200 bg-brand-50 text-brand-800',
                         )}
                         matchTriggerWidth={false}
@@ -2397,13 +2448,28 @@ export default function BrandDetailPage() {
                         options={findingCategoryOptions}
                         onChange={handleFindingCategoryFilterChange}
                         triggerClassName={cn(
-                          'min-w-[11rem] border-white/20',
+                          'min-w-[10rem] border-white/20 text-gray-700',
                           hasActiveFindingCategoryFilter && 'border-brand-200 bg-brand-50 text-brand-800',
                         )}
                         matchTriggerWidth={false}
                         panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
                         dividerAfterValue=""
                         showActiveIndicator={hasActiveFindingCategoryFilter}
+                      />
+                      <SelectDropdown
+                        id="findings-source-filter"
+                        ariaLabel="Filter findings by scan type"
+                        value={selectedFindingSource ?? ''}
+                        options={findingSourceOptions}
+                        onChange={handleFindingSourceFilterChange}
+                        triggerClassName={cn(
+                          'min-w-[10rem] border-white/20 text-gray-700',
+                          hasActiveFindingSourceFilter && 'border-brand-200 bg-brand-50 text-brand-800',
+                        )}
+                        matchTriggerWidth={false}
+                        panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
+                        dividerAfterValue=""
+                        showActiveIndicator={hasActiveFindingSourceFilter}
                       />
                       {isAnyFindingFilterActive && (
                         <button
@@ -2651,39 +2717,57 @@ export default function BrandDetailPage() {
                                         <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
                                           Scan in progress
                                         </span>
-                                        {visibleLiveScanFindings.length > 0 && (
-                                          <SeverityPills
-                                            high={visibleLiveScanFindings.filter((f) => f.severity === 'high').length}
-                                            medium={visibleLiveScanFindings.filter((f) => f.severity === 'medium').length}
-                                            low={visibleLiveScanFindings.filter((f) => f.severity === 'low').length}
-                                          />
-                                        )}
                                       </div>
-                                      <div className="mt-3 pl-7">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <span className="text-sm font-medium text-brand-700">
-                                            {cancelling ? 'Cancelling scan' : getScanStatusLabel()}
+                                      <div className="mt-4 pl-7">
+                                        <div className="mb-5 flex flex-wrap items-center gap-2.5">
+                                          {progressSourcesWithFallback.map((source) => {
+                                            const buttonClasses = getProgressSourceButtonClasses(
+                                              source,
+                                              source === activeProgressSource,
+                                            );
+
+                                            return (
+                                              <Tooltip key={source} content={getFindingSourceLabel(source)}>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setSelectedScanProgressSource(source)}
+                                                  className={cn(
+                                                    'inline-flex w-10 flex-col items-center justify-center gap-1.5 rounded-lg border px-1.5 py-1.5 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2',
+                                                    buttonClasses.wrapper,
+                                                  )}
+                                                  aria-label={`View ${getFindingSourceLabel(source)} scan progress`}
+                                                  aria-pressed={source === activeProgressSource}
+                                                >
+                                                  <ScanSourceIcon source={source} className={buttonClasses.icon} />
+                                                  <span className="h-0.5 w-full overflow-hidden rounded-full bg-current/15">
+                                                    <span
+                                                      className="block h-full rounded-full bg-current transition-all duration-500"
+                                                      style={{ width: `${getDisplayedProgressPctForSource(source)}%` }}
+                                                    />
+                                                  </span>
+                                                </button>
+                                              </Tooltip>
+                                            );
+                                          })}
+                                        </div>
+                                        <div className="flex flex-wrap items-center gap-2.5">
+                                          <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700">
+                                            <ScanSourceIcon source={activeProgressSource} className="h-3.5 w-3.5" />
+                                            {getFindingSourceLabel(activeProgressSource)}
                                           </span>
-                                          {isDeepSearchActive && !cancelling && (
-                                            <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700">
-                                              Deep search
-                                            </span>
-                                          )}
+                                          <span className="text-sm font-medium text-brand-700">
+                                            {cancelling ? 'Cancelling scan' : getScanStatusLabel(activeProgressSource)}
+                                          </span>
                                         </div>
                                         <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-brand-100">
                                           <div
                                             className="h-full rounded-full bg-brand-600 transition-all duration-500"
-                                            style={{ width: `${displayedScanProgressPct}%` }}
+                                            style={{ width: `${activeProgressPct}%` }}
                                           />
                                         </div>
-                                        {!cancelling && !isSummarisingFindings && getDeepSearchProgressSubtext() && (
-                                          <p className="mt-3 text-xs text-brand-700/80">
-                                            {getDeepSearchProgressSubtext()}
-                                          </p>
-                                        )}
-                                        {!cancelling && !isSummarisingFindings && getSkippedDuplicateSubtext() && (
+                                        {!cancelling && !isSummarisingFindings && getSkippedDuplicateSubtext(activeProgressSource) && (
                                           <p className="mt-2 text-xs text-brand-700/80">
-                                            {getSkippedDuplicateSubtext()}
+                                            {getSkippedDuplicateSubtext(activeProgressSource)}
                                           </p>
                                         )}
                                       </div>
@@ -2846,7 +2930,8 @@ export default function BrandDetailPage() {
                               + (scan.ignoredCount ?? 0)
                               + (scan.skippedCount ?? 0);
                             const requiresDeleteScanConfirmation = scanResultsCount > 0;
-                            const isConfirmingDelete = confirmDeleteScanId === scan.id;
+                            const showScanLevelActions = !isAnyFindingFilterActive;
+                            const isConfirmingDelete = showScanLevelActions && confirmDeleteScanId === scan.id;
                             const isDeleting = deletingScanId === scan.id;
                             const hasFindings = isAnyFindingFilterActive
                               ? matchingHitCount > 0
@@ -2972,31 +3057,33 @@ export default function BrandDetailPage() {
                                       </span>
                                     </button>
 
-                                    <div className="flex flex-shrink-0 items-center gap-2">
-                                      <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        loading={exportingCsvScanId === scan.id}
-                                        disabled={exportingCsvScanId !== null && exportingCsvScanId !== scan.id}
-                                        onClick={() => void exportScanFindings(scan)}
-                                        className="flex-shrink-0"
-                                      >
-                                        <Download className="w-3.5 h-3.5" />
-                                        Export CSV
-                                      </Button>
+                                    {showScanLevelActions && (
+                                      <div className="flex flex-shrink-0 items-center gap-2">
+                                        <Button
+                                          variant="secondary"
+                                          size="sm"
+                                          loading={exportingCsvScanId === scan.id}
+                                          disabled={exportingCsvScanId !== null && exportingCsvScanId !== scan.id}
+                                          onClick={() => void exportScanFindings(scan)}
+                                          className="flex-shrink-0"
+                                        >
+                                          <Download className="w-3.5 h-3.5" />
+                                          Export CSV
+                                        </Button>
 
-                                      <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        loading={exportingPdfScanId === scan.id}
-                                        disabled={exportingPdfScanId !== null && exportingPdfScanId !== scan.id}
-                                        onClick={() => void exportScanPdf(scan)}
-                                        className="flex-shrink-0"
-                                      >
-                                        <Download className="w-3.5 h-3.5" />
-                                        Export PDF
-                                      </Button>
-                                    </div>
+                                        <Button
+                                          variant="secondary"
+                                          size="sm"
+                                          loading={exportingPdfScanId === scan.id}
+                                          disabled={exportingPdfScanId !== null && exportingPdfScanId !== scan.id}
+                                          onClick={() => void exportScanPdf(scan)}
+                                          className="flex-shrink-0"
+                                        >
+                                          <Download className="w-3.5 h-3.5" />
+                                          Export PDF
+                                        </Button>
+                                      </div>
+                                    )}
 
                                     {showDebug && (
                                       <Tooltip
@@ -3024,40 +3111,42 @@ export default function BrandDetailPage() {
                                       </Tooltip>
                                     )}
 
-                                    {deleteDisabledReason ? (
-                                      <Tooltip content={deleteDisabledReason} align="end" triggerClassName="flex-shrink-0">
+                                    {showScanLevelActions && (
+                                      deleteDisabledReason ? (
+                                        <Tooltip content={deleteDisabledReason} align="end" triggerClassName="flex-shrink-0">
+                                          <button
+                                            type="button"
+                                            aria-disabled="true"
+                                            onClick={(e) => {
+                                              e.preventDefault();
+                                              e.stopPropagation();
+                                            }}
+                                            className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-300 opacity-50 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </Tooltip>
+                                      ) : (
                                         <button
                                           type="button"
-                                          aria-disabled="true"
                                           onClick={(e) => {
                                             e.preventDefault();
                                             e.stopPropagation();
+                                            if (requiresDeleteScanConfirmation) {
+                                              setConfirmDeleteScanId(scan.id);
+                                              setConfirmClear(false);
+                                              return;
+                                            }
+
+                                            void deleteScan(scan.id);
+                                            setConfirmClear(false);
                                           }}
-                                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-300 opacity-50 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                          className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                                          aria-label="Delete scan"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
                                         </button>
-                                      </Tooltip>
-                                    ) : (
-                                      <button
-                                        type="button"
-                                        onClick={(e) => {
-                                          e.preventDefault();
-                                          e.stopPropagation();
-                                          if (requiresDeleteScanConfirmation) {
-                                            setConfirmDeleteScanId(scan.id);
-                                            setConfirmClear(false);
-                                            return;
-                                          }
-
-                                          void deleteScan(scan.id);
-                                          setConfirmClear(false);
-                                        }}
-                                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                                        aria-label="Delete scan"
-                                      >
-                                        <Trash2 className="w-3.5 h-3.5" />
-                                      </button>
+                                      )
                                     )}
                                   </div>
                                 )}
@@ -3071,7 +3160,7 @@ export default function BrandDetailPage() {
                                       </div>
                                     ) : (
                                       <>
-                                        {scan.aiSummary && (
+                                        {scan.aiSummary && !isAnyFindingFilterActive && (
                                           <div className="mb-4">
                                             <ScanSummaryPanel summary={scan.aiSummary} />
                                           </div>

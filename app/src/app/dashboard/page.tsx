@@ -208,7 +208,7 @@ export default function DashboardPage() {
       : 'Covering all completed scans.';
 
   function navigateToChartDrilldown(
-    dimension: 'platform' | 'theme',
+    dimension: 'theme' | 'source',
     category: DashboardBreakdownCategory,
     row: DashboardBreakdownRow,
   ) {
@@ -225,7 +225,13 @@ export default function DashboardPage() {
     }
 
     if (row.label !== UNLABELLED_DASHBOARD_BREAKDOWN_BUCKET) {
-      params.set(dimension, row.label);
+      if (dimension === 'source') {
+        if (row.filterValue) {
+          params.set('source', row.filterValue);
+        }
+      } else {
+        params.set('theme', row.filterValue ?? row.label);
+      }
     }
 
     const hash = targetScanId ? `#scan-result-set-${targetScanId}` : '';
@@ -274,7 +280,7 @@ export default function DashboardPage() {
             <DashboardCtaCard
               eyebrow="Get started"
               title="Create your first brand to get started"
-              description="Add the brand you want DoppelSpotter to monitor, then run scans to build up analytics, themes, and platform insights."
+              description="Add the brand you want DoppelSpotter to monitor, then run scans to build up analytics, scan-type insights, and theme insights."
               href="/brands/new"
               actionLabel="Create your first brand"
               icon={Shield}
@@ -356,7 +362,7 @@ export default function DashboardPage() {
                   <DashboardCtaCard
                     eyebrow="Ready to scan"
                     title="Run your first scan to get started"
-                    description={`Kick off the first scan for ${selectedBrand.name} to populate the dashboard with severity totals, platform breakdowns, and theme insights.`}
+                    description={`Kick off the first scan for ${selectedBrand.name} to populate the dashboard with severity totals, scan-type insights, and theme insights.`}
                     href={selectedBrandHref}
                     actionLabel="Open brand and run scan"
                     icon={PlayCircle}
@@ -433,16 +439,16 @@ export default function DashboardPage() {
                   <div className="grid gap-6 xl:grid-cols-2">
                     <Card>
                       <CardHeader>
-                        <h3 className="text-base font-semibold text-gray-900">Findings by platform</h3>
+                        <h3 className="text-base font-semibold text-gray-900">Findings by scan type</h3>
                         <p className="mt-1 text-sm text-gray-500">
-                          Compare where findings are appearing across platforms.
+                          Compare where findings are appearing across scan types.
                         </p>
                       </CardHeader>
                       <CardContent>
                         <DashboardStackedBarChart
-                          data={metrics.platformBreakdown}
-                          emptyMessage="No platform-labelled findings are available in this scope yet."
-                          onSegmentClick={(category, row) => navigateToChartDrilldown('platform', category, row)}
+                          data={metrics.sourceBreakdown}
+                          emptyMessage="No scan-type findings are available in this scope yet."
+                          onSegmentClick={(category, row) => navigateToChartDrilldown('source', category, row)}
                         />
                       </CardContent>
                     </Card>

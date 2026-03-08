@@ -44,14 +44,16 @@ analysis to classify likely threats and summarise scan outcomes.
 │       │       └── webhooks/apify/  # Apify webhook receiver → AI analysis pipeline
 │       └── lib/
 │           ├── apify/
-│           │   ├── actors.ts     # Google Search actor definition + lookup helpers
+│           │   ├── actors.ts     # Logical Google scanner registry (web / Reddit / TikTok) + Apify actor lookup helpers
 │           │   └── client.ts     # Apify client: startActorRun, buildActorInput, fetchDatasetItems
-│           ├── dashboard.ts      # Dashboard metrics helpers: terminal-scan totals + platform/theme rollups
+│           ├── dashboard.ts      # Dashboard metrics helpers: terminal-scan totals + source/theme rollups
 │           ├── mailersend.ts     # MailerSend email client for transactional emails
 │           ├── scan-runner.ts    # Shared manual + scheduled scan reservation and actor startup
+│           ├── scan-sources.ts   # Shared Google scan-source config, site-operator policy, and display helpers
 │           ├── scan-summary-emails.ts # Branded scan-summary email composition + idempotent delivery
 │           ├── scan-schedules.ts # Schedule validation, timezone-aware recurrence, next-run helpers
 │           └── analysis/
+│               ├── google-scanner-policy.ts # Small prompt-policy helpers for Google specialist scans
 │               ├── prompts.ts    # Google classification + deep-search + scan-summary prompts
 │               ├── openrouter.ts # AI analysis client: chatCompletion()
 │               └── types.ts      # Google analysis output interfaces + parsers
@@ -64,11 +66,26 @@ analysis to classify likely threats and summarise scan outcomes.
 
 ## Actor Registry
 
-The app is currently Google-only. `app/src/lib/apify/actors.ts` keeps a tiny registry/lookup
-layer, but the only supported actor is `apify/google-search-scraper`.
+The scan pipeline is still Google-only at the Apify layer, but it now has six logical
+Google-based scanner variants:
 
-New scans always reserve the Google Search actor; there is no longer any request-time actor
-override path.
+- `google-web` → normal web search
+- `google-reddit` → Google Search constrained to `site:reddit.com`
+- `google-tiktok` → Google Search constrained to `site:tiktok.com`
+- `google-youtube` → Google Search constrained to `site:youtube.com`
+- `google-facebook` → Google Search constrained to `site:facebook.com`
+- `google-instagram` → Google Search constrained to `site:instagram.com`
+
+All three logical scanners reuse the same physical Apify actor
+`apify/google-search-scraper`. `app/src/lib/apify/actors.ts` therefore keys the registry by
+logical scanner id rather than raw `actorId`.
+
+The generic web scanner automatically appends `-site:` exclusions for every specialist scanner
+domain (`reddit.com`, `tiktok.com`, `youtube.com`, `facebook.com`, `instagram.com`) even when
+those specialist scans are disabled on the brand, so the main web search and its deep-search
+follow-ups never surface those platform-specific results. Specialist scanners apply
+platform-specific query scoping, while source identity lives on the finding itself and the only
+remaining lightweight taxonomy label is `theme`.
 
 ---
 
@@ -78,6 +95,7 @@ override path.
 Brand add/edit pages
  └─ persist `brands.sendScanSummaryEmails` to opt the brand into post-scan summary emails
  └─ persist `brands.searchResultPages` to control how many Google SERP pages each initial/deep search run requests
+ └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram` so each Google-based scan surface can be enabled or disabled per brand
  └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
  └─ scheduling is anchored from the chosen local start date/time and stored timezone
 
@@ -95,10 +113,10 @@ POST /api/scan
  └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
- └─ reserves the Google Search actor for the scan
+ └─ resolves the brand's enabled logical Google scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`)
  └─ uses `brands.searchResultPages` (default 3, min 1, max 10) as Google Search `maxPagesPerQuery`
- └─ starts Apify actors and scan-level user-preference-hint generation concurrently
- └─ stores runId → scan document incrementally as each actor starts, reducing the race window for early callbacks
+ └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
+ └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
  └─ once the scan-level preference hints are ready (or deliberately fail open), replays any deferred succeeded webhooks and then flips the scan to `running`
 
 DELETE /api/scan?scanId=xxx
@@ -151,21 +169,22 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ fetches up to 50 items from Apify dataset
  └─ Google Search mode: normalize SERP pages into compact organic-result candidates
       └─ excludes ads from AI analysis; keeps `relatedQueries` + `peopleAlsoAsk` as run-level context
+      └─ stores scanner-aware sighting/debug metadata so merged findings can retain which logical scan surfaces saw a URL
       └─ dedupes repeated URLs within the run before analysis
       └─ skips normalized URLs that already appeared in previous scans for the same brand before any LLM analysis
       └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
       └─ in the default `llm-final` mode, chunk calls do classification only — they do not propose deep-search queries
       └─ the webhook collects the full deduped run-level `relatedQueries` + `peopleAlsoAsk` text signals (not URLs) and passes them to the final deep-search chooser without truncating them
-      └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
-└─ before each finding-level classification pass, the webhook loads the brand's existing finding `platform` and `theme` labels so the LLM can preferentially reuse them
+ └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and scanner-specific focus, and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
+└─ before each finding-level classification pass, the webhook loads the brand's existing finding `theme` labels so the LLM can preferentially reuse them
  └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
-└─ each LLM-classified finding may also store a short primary `platform` and `theme` label (prefer 1 word, hard max 3 words); legacy findings may not have these fields
+└─ each LLM-classified finding may also store a short primary `theme` label (prefer 1 word, hard max 3 words)
  └─ isFalsePositive: true findings are stored but excluded from default API responses
  └─ normalized Google URLs that already appeared in previous scans for the same brand are filtered out before AI analysis, so historical repeats never reach the classifier
  └─ a separate scan-level `userPreferenceHints` summary is still passed into classification prompts as soft guidance only; it is derived from explicit user ignore / reclassification signals and must not override clear evidence
  └─ (batch mode, depth 0 only) if ranked chunk/fallback suggestions are present and the brand allows deep search → triggers deep-search runs
       └─ suggestions are reserved on the originating run so duplicate callbacks do not fan out extra searches
-      └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
+      └─ each deep-search run inherits the parent scanner policy, is registered on the scan document (actorRunIds, actorRuns), and preserves raw vs display query text separately
       └─ each deep-search Google run uses the same `brands.searchResultPages` setting as the initial search
       └─ `actorRuns.*.analysedCount` increments as chunks finish so the UI can show meaningful `X / N` AI-analysis progress
       └─ `actorRuns.*.skippedDuplicateCount` tracks how many previous-scan duplicate URLs were filtered out for progress UI + scan summaries
@@ -194,8 +213,9 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
 - **Historical URL suppression:** Google runs load previously seen normalized finding URLs for the brand and filter them out before any LLM classification begins
 - **User preference hints:** each scan prepares a tiny LLM-authored soft-guidance summary from explicit user-review signals before actor-run analysis begins; this is now the only historical-review context sent into classification prompts
-- **Existing taxonomy hints:** prompts receive the current brand's distinct `platform` and `theme` labels so the LLM can reuse them exactly where appropriate, while still inventing a new short label when none fit
-- **Google chunk output:** structured JSON `{ items: [{ resultId, title, severity, platform?, theme?, analysis, isFalsePositive }] }`
+- **Existing taxonomy hints:** prompts receive the current brand's distinct `theme` labels so the LLM can reuse them exactly where appropriate, while still inventing a new short label when none fit
+- **Scanner-aware prompt policy:** specialist Google scans reuse the same shared prompt builders, but small scanner-policy helpers inject specialist-focus instructions instead of duplicating whole prompt families
+- **Google chunk output:** structured JSON `{ items: [{ resultId, title, severity, theme?, analysis, isFalsePositive }] }`
 - **Debug prompt transcript:** the exact system + user prompt used for finding-level AI analysis is stored on each finding as `llmAnalysisPrompt` for `?debug=true` inspection
 - **Raw AI response** string is stored on every finding as `rawLlmResponse` for debugging
 - **False positives** are written to Firestore with `isFalsePositive: true`; filtered from default API responses; visible in the brand page "Non-hits" section
@@ -213,15 +233,17 @@ See `REVIEW.md` for full prompt text and AI analysis pipeline details.
 
 ### Deep search (`suggestedSearches`)
 
-When the Google Search actor runs at depth 0 (initial scan), the webhook collects the full
+When any logical Google scanner runs at depth 0 (initial scan), the webhook collects the full
 deduped run-level `relatedQueries` and `peopleAlsoAsk` text signals from every SERP page.
 Chunked Google classification assesses candidates only; it does not propose deep-search queries.
 The final deep-search chooser then sees that run-level intent context directly and synthesizes up
 to the brand's configured `maxAiDeepSearches` follow-up Google queries (1-10). Deep-search
 prompts treat that configured count as a hard cap rather than a target, and steer the model
 towards broader theme-led queries instead of narrow named websites, platforms, resources, books,
-or tools unless a named target is itself the key abuse vector. Deep search is only enabled when
-the brand's `allowAiDeepSearches` setting is true.
+or tools unless a named target is itself the key abuse vector. Specialist scanners additionally
+receive platform-specific focus guidance, while query execution still applies the actual `site:`
+/ `-site:` operators outside the user-visible UI. Deep search is only enabled when the brand's
+`allowAiDeepSearches` setting is true.
 
 The webhook handler calls `startDeepSearchRun()` for each suggested query, registers the new
 Apify run IDs on the scan document, and processes results via the same webhook pipeline at
@@ -234,9 +256,11 @@ runs are skipped entirely when `allowAiDeepSearches` is false for the brand. Whe
 the initial Google scan and each deep-search Google run use the brand's `searchResultPages`
 setting, which defaults to 3 and is constrained to 1-10.
 
-`ActorRunInfo` carries `searchDepth` (0 or 1) and `searchQuery` (the literal query string for
-depth-1 runs). The brand page progress indicator shows a "Deep search" badge and surfaces the
-query being investigated when a depth-1 run is active.
+`ActorRunInfo` now carries `scannerId`, `searchDepth`, raw `searchQuery`, and operator-free
+`displayQuery`. The brand page progress indicator groups active work by source (`Web search`,
+`Reddit`, `TikTok`, `YouTube`, `Facebook`, `Instagram`), lets the user switch between those
+source-specific progress bars, and only ever surfaces `displayQuery` so internal `site:` /
+`-site:` operators are never shown to users.
 
 ---
 
@@ -329,17 +353,17 @@ Users can add notes to any finding, regardless of whether it is bookmarked, igno
 
 ## Finding Taxonomy
 
-Findings can now carry two optional lightweight taxonomy labels: `platform` and `theme`.
+Findings can now carry one optional lightweight taxonomy label: `theme`.
 
 **Behaviour:**
 - Labels are LLM-assigned during finding classification for newly analysed findings only; existing historical findings are not backfilled automatically
 - Labels are brand-scoped: the webhook loads the current brand's existing labels before classification so the LLM can prefer exact reuse where appropriate
-- Both labels are intentionally short for UI/filtering purposes: prefer 1 word where natural, hard maximum 3 words
+- Labels are intentionally short for UI/filtering purposes: prefer 1 word where natural, hard maximum 3 words
 - The brand page shows these labels subtly on finding cards when present
-- The brand page also supports client-side platform/theme filtering alongside the existing free-text search, and the active filters apply to whichever findings tab is currently in view (`Scans`, `Bookmarks`, `Addressed`, or `Ignored`)
+- The brand page also supports client-side theme filtering alongside the existing free-text search, source filter, and severity filter, and the active filters apply to whichever findings tab is currently in view (`Scans`, `Bookmarks`, `Addressed`, or `Ignored`)
 
 **API:**
-- `GET /api/brands/[brandId]/findings/taxonomy` — returns distinct brand-scoped `platforms[]` and `themes[]` for filter dropdowns
+- `GET /api/brands/[brandId]/findings/taxonomy` — returns distinct brand-scoped `themes[]` for filter dropdowns
 
 ---
 
@@ -355,10 +379,11 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 - Dashboard analytics call `GET /api/dashboard/metrics?brandId=...&scanId=...`
 - The metrics route returns all terminal scans for the selected brand (newest first) for the scan-scope dropdown
 - Dashboard KPI totals come from denormalized per-scan `highCount`, `mediumCount`, `lowCount`, and `nonHitCount` fields so all-time rollups do not require hydrating every finding
-- Platform and theme charts aggregate findings for the selected scope and use the same visible-count semantics as the rest of the app: actionable hits plus non-hits, excluding ignored and addressed real findings
-- Missing `platform` / `theme` labels are grouped into an `Unlabelled` chart bucket
+- The scan-type and theme charts aggregate findings for the selected scope and use the same visible-count semantics as the rest of the app: actionable hits plus non-hits, excluding ignored and addressed real findings
+- Missing `theme` labels are grouped into an `Unlabelled` chart bucket
 - Each chart row also tracks the newest matching scan id per severity bucket so stacked-bar segments can drill into the brand page
-- Chart drill-down links navigate to the brand page with `scanResultSet`, `category`, and optional `platform` / `theme` query params so the matching scan opens with the relevant filter state applied
+- Scan-type chart drill-down links navigate to the brand page with `scanResultSet`, `category`, and optional `source` query params so the matching scan opens with the relevant scan-type filter state applied
+- Theme chart drill-down links navigate to the brand page with `scanResultSet`, `category`, and optional `theme` query params so the matching scan opens with the relevant filter state applied
 - Dashboard severity metric cards use the same drill-down pattern, applying the matching `category` filter and, when a specific scan is in scope, anchoring into the relevant section of that scan
 - Dashboard-originated links into a brand page also carry `returnTo=dashboard`, so the brand-page back arrow returns to the dashboard instead of the brands index for that navigation path
 - When a brand has no terminal scans yet, the dashboard shows a CTA to run the first scan; if the first scan is already in progress, it instead shows a progress-focused CTA linked to the brand page
@@ -366,7 +391,7 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 **API:**
 - `GET /api/dashboard/bootstrap` — returns brand selector options plus the resolved selected brand id
 - `PATCH /api/dashboard/preferences` — persists `{ selectedBrandId }` on the authenticated user document
-- `GET /api/dashboard/metrics?brandId=...&scanId=...` — returns scan selector options, KPI totals, active-scan state, and platform/theme stacked-bar datasets
+- `GET /api/dashboard/metrics?brandId=...&scanId=...` — returns scan selector options, KPI totals, active-scan state, and the scan-type/theme stacked-bar datasets
 
 ---
 
@@ -393,9 +418,9 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, **sessionVersion?**, **passwordChangedAt?**, **dashboardPreferences?** (`selectedBrandId?`), createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
-| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source, actorId, severity, title, **platform?**, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
+| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`scannerId`, `source`, `status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`, `displayQuery?`, `deepSearchSuggestionsProcessed?`, `suggestedSearches?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
+| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 
 ---
 
@@ -455,11 +480,11 @@ The findings API is optimised to minimise Firestore reads and HTTP round-trips o
   3. **Ignored** — fetched when the user first opens the "Ignored" sub-section
 - **Eager cross-scan bookmark fetch** — the brand page separately loads `GET /api/brands/[brandId]/findings?bookmarkedOnly=true` on mount so the bookmark follow-up panel is immediately available without expanding individual scans
 - **Eager cross-scan addressed fetch** — the brand page separately loads `GET /api/brands/[brandId]/findings?addressedOnly=true` on mount so addressed findings are available in their dedicated tab without loading individual scan accordions
-- **Dedicated taxonomy bootstrap** — the brand page loads `GET /api/brands/[brandId]/findings/taxonomy` on mount (and after scan-history changes) so the platform/theme filter dropdowns can populate without hydrating every scan bucket first
+- **Dedicated taxonomy bootstrap** — the brand page loads `GET /api/brands/[brandId]/findings/taxonomy` on mount (and after scan-history changes) so the theme filter dropdown can populate without hydrating every scan bucket first
 - **Lightweight list payloads** — the findings list endpoints (`GET /api/brands/[brandId]/findings` and `GET /api/findings`) return a compact `FindingSummary` shape via Firestore `.select(...)`, excluding `rawData`, `llmAnalysisPrompt`, `rawLlmResponse`, and other fields not needed for normal rendering. This avoids repeatedly shipping the full SERP batch payload on every finding card.
 - **Dedicated scan export paths** — `GET /api/brands/[brandId]/scans/[scanId]/export` performs a single scan-scoped findings query and returns a CSV attachment containing hits, non-hits, notes, and review-state flags, while `GET /api/brands/[brandId]/scans/[scanId]/export/pdf` returns a branded PDF report containing the scan AI summary, actionable high/medium/low findings, notes, and a dedicated addressed-findings section. Neither path forces the UI to eagerly load every findings bucket first.
 - **Dashboard bootstrap + metrics split** — the main dashboard uses `GET /api/dashboard/bootstrap` for brand selection state and `GET /api/dashboard/metrics` for brand/scan-scoped analytics, instead of reusing the lightweight recent-findings feed.
-- **All-time dashboard totals** — dashboard KPI cards use terminal scan denormalized counts, while stacked platform/theme charts aggregate selected findings with a minimal Firestore `.select(...)` projection.
+- **All-time dashboard totals** — dashboard KPI cards use terminal scan denormalized counts, while the stacked scan-type and theme charts aggregate selected findings with a minimal Firestore `.select(...)` projection.
 - **Recent activity feed remains lightweight** — `GET /api/findings` still pages through the newest findings until it has filled the requested limit, instead of always fetching a fixed `limit * 4` window and filtering in memory. This keeps that cross-brand recent-activity query close to the number of cards rendered.
 - **Debug details fetched on demand** — `FindingCard` fetches `GET /api/brands/[brandId]/findings/[findingId]` only when a debug section is opened (`?debug=true`). Normal list views never load raw actor data or raw AI responses.
 - **No redundant brand ownership checks on per-scan findings** — the `GET /api/brands/[brandId]/findings` route relies solely on `userId == uid` in the Firestore query for authorization (no extra brand doc read per request). The PATCH (ignore/un-ignore) route similarly skips the brand doc read, verifying ownership via the finding document itself.

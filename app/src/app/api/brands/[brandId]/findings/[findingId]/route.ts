@@ -86,7 +86,6 @@ function buildFindingSummary(
     source: sourceFinding.source,
     severity: nextState.severity,
     title: sourceFinding.title,
-    platform: sourceFinding.platform,
     theme: sourceFinding.theme,
     llmAnalysis: sourceFinding.llmAnalysis,
     url: sourceFinding.url,

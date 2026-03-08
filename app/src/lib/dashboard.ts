@@ -3,14 +3,17 @@ import type {
   DashboardBreakdownRow,
   DashboardMetricTotals,
   Finding,
+  FindingSource,
   ScanSummary,
   ScanStatus,
 } from './types';
+import { getFindingSourceLabel } from './scan-sources';
 
 export const TERMINAL_DASHBOARD_SCAN_STATUSES: ScanStatus[] = ['completed', 'cancelled', 'failed'];
 export const UNLABELLED_DASHBOARD_BREAKDOWN_BUCKET = 'Unlabelled';
 
-type DashboardFindingRecord = Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'platform' | 'theme'>;
+type DashboardFindingRecord = Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'theme'>;
+type DashboardSourceFindingRecord = Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'source'>;
 type DashboardCountSource = Pick<ScanSummary, 'highCount' | 'mediumCount' | 'lowCount' | 'nonHitCount'>;
 
 export function emptyDashboardMetricTotals(): DashboardMetricTotals {
@@ -45,7 +48,6 @@ export function buildDashboardMetricTotalsFromScans(scans: DashboardCountSource[
 
 export function buildDashboardBreakdownRows(
   findings: DashboardFindingRecord[],
-  field: 'platform' | 'theme',
   scanOrderById?: ReadonlyMap<string, number>,
 ): DashboardBreakdownRow[] {
   const rows = new Map<string, DashboardBreakdownRow>();
@@ -54,10 +56,10 @@ export function buildDashboardBreakdownRows(
     const category = getDashboardFindingCategory(finding);
     if (!category) continue;
 
-    const rawLabel = field === 'platform' ? finding.platform : finding.theme;
-    const label = rawLabel?.trim() ? rawLabel.trim() : UNLABELLED_DASHBOARD_BREAKDOWN_BUCKET;
+    const label = finding.theme?.trim() ? finding.theme.trim() : UNLABELLED_DASHBOARD_BREAKDOWN_BUCKET;
     const existing = rows.get(label) ?? {
       label,
+      filterValue: label,
       ...emptyDashboardMetricTotals(),
       total: 0,
       drilldownScanIds: {},
@@ -80,6 +82,48 @@ export function buildDashboardBreakdownRows(
     }
 
     rows.set(label, existing);
+  }
+
+  return [...rows.values()].sort((left, right) => (
+    right.total - left.total || left.label.localeCompare(right.label)
+  ));
+}
+
+export function buildDashboardSourceBreakdownRows(
+  findings: DashboardSourceFindingRecord[],
+  scanOrderById?: ReadonlyMap<string, number>,
+): DashboardBreakdownRow[] {
+  const rows = new Map<FindingSource, DashboardBreakdownRow>();
+
+  for (const finding of findings) {
+    const category = getDashboardFindingCategory(finding);
+    if (!category) continue;
+
+    const existing = rows.get(finding.source) ?? {
+      label: getFindingSourceLabel(finding.source),
+      filterValue: finding.source,
+      ...emptyDashboardMetricTotals(),
+      total: 0,
+      drilldownScanIds: {},
+    };
+
+    existing[category] += 1;
+    existing.total += 1;
+
+    const currentDrilldownScanId = existing.drilldownScanIds?.[category];
+    const nextScanOrder = scanOrderById?.get(finding.scanId) ?? Number.POSITIVE_INFINITY;
+    const currentScanOrder = currentDrilldownScanId
+      ? (scanOrderById?.get(currentDrilldownScanId) ?? Number.POSITIVE_INFINITY)
+      : Number.POSITIVE_INFINITY;
+
+    if (!currentDrilldownScanId || nextScanOrder < currentScanOrder) {
+      existing.drilldownScanIds = {
+        ...existing.drilldownScanIds,
+        [category]: finding.scanId,
+      };
+    }
+
+    rows.set(finding.source, existing);
   }
 
   return [...rows.values()].sort((left, right) => (

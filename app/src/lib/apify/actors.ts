@@ -1,29 +1,28 @@
-import type { FindingSource } from '@/lib/types';
+import {
+  getEnabledGoogleScannerConfigs,
+  getGoogleScannerConfigById,
+  GOOGLE_SEARCH_ACTOR_ID,
+  type GoogleScannerConfig,
+} from '@/lib/scan-sources';
+import type { BrandProfile, GoogleScannerId } from '@/lib/types';
 
-export interface ActorConfig {
-  actorId: string;
-  source: FindingSource;
-  displayName: string;
-}
+export type ActorConfig = GoogleScannerConfig;
 
-export const GOOGLE_SEARCH_ACTOR_ID = 'apify/google-search-scraper';
-
-/** The only supported Apify actor in the current Google-only scan pipeline. */
-export const GOOGLE_SEARCH_ACTOR: ActorConfig = {
-  actorId: GOOGLE_SEARCH_ACTOR_ID,
-  source: 'google',
-  displayName: 'Google Search',
-};
-
-/** Registry kept for compatibility with scan/webhook lookup helpers. */
-export const ACTOR_REGISTRY: ActorConfig[] = [
-  GOOGLE_SEARCH_ACTOR,
+export const CORE_SCANNER_IDS: GoogleScannerId[] = [
+  'google-web',
+  'google-reddit',
+  'google-tiktok',
+  'google-youtube',
+  'google-facebook',
+  'google-instagram',
 ];
 
-/** IDs requested when a new scan starts. */
-export const CORE_ACTOR_IDS: string[] = [GOOGLE_SEARCH_ACTOR_ID];
-
-/** Look up an actor config by its Apify actor ID */
-export function getActorConfig(actorId: string): ActorConfig | undefined {
-  return ACTOR_REGISTRY.find((a) => a.actorId === actorId);
+export function getActorConfigByScannerId(scannerId: GoogleScannerId): ActorConfig {
+  return getGoogleScannerConfigById(scannerId);
 }
+
+export function getTargetActorConfigs(brand: BrandProfile): ActorConfig[] {
+  return getEnabledGoogleScannerConfigs(brand.scanSources);
+}
+
+export { GOOGLE_SEARCH_ACTOR_ID };

@@ -49,6 +49,15 @@ export interface BrandScanScheduleInput {
   startTime: string;
 }
 
+export interface BrandScanSources {
+  google: boolean;
+  reddit: boolean;
+  tiktok: boolean;
+  youtube: boolean;
+  facebook: boolean;
+  instagram: boolean;
+}
+
 // ─── Brand Profile ─────────────────────────────────────────────────────────
 
 export interface BrandProfile {
@@ -65,6 +74,8 @@ export interface BrandProfile {
   allowAiDeepSearches?: boolean;
   /** Maximum number of AI-requested Google follow-up searches allowed for this brand. */
   maxAiDeepSearches?: number;
+  /** Which Google-based scan surfaces are enabled for this brand. */
+  scanSources?: BrandScanSources;
   /** Internal pointer to the currently active scan for this brand, if any. */
   activeScanId?: string;
   /** Terms AI analysis should flag if found associated with the brand in search results. */
@@ -85,6 +96,7 @@ export interface BrandProfileCreateInput {
   sendScanSummaryEmails?: boolean;
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
+  scanSources?: BrandScanSources;
   watchWords?: string[];
   safeWords?: string[];
   scanSchedule?: BrandScanScheduleInput;
@@ -98,6 +110,7 @@ export interface BrandProfileUpdateInput {
   sendScanSummaryEmails?: boolean;
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
+  scanSources?: BrandScanSources;
   watchWords?: string[];
   safeWords?: string[];
   scanSchedule?: BrandScanScheduleInput;
@@ -136,6 +149,11 @@ export type UserPreferenceSignalReason =
 
 export type FindingSource =
   | 'google'
+  | 'reddit'
+  | 'tiktok'
+  | 'youtube'
+  | 'facebook'
+  | 'instagram'
   | 'unknown';
 
 export interface FindingSummary {
@@ -145,8 +163,6 @@ export interface FindingSummary {
   source: FindingSource;
   severity: Severity;
   title: string;
-  /** Short LLM-assigned platform label (preferably 1 word, max 3 words). */
-  platform?: string;
   /** Short LLM-assigned theme label (preferably 1 word, max 3 words). */
   theme?: string;
   llmAnalysis: string;
@@ -196,6 +212,13 @@ export interface Finding extends FindingSummary {
 export type ScanStatus = 'pending' | 'running' | 'summarising' | 'completed' | 'failed' | 'cancelled';
 export type ScanSummaryEmailStatus = 'sending' | 'sent' | 'failed' | 'skipped';
 export type UserPreferenceHintsStatus = 'pending' | 'ready' | 'failed';
+export type GoogleScannerId =
+  | 'google-web'
+  | 'google-reddit'
+  | 'google-tiktok'
+  | 'google-youtube'
+  | 'google-facebook'
+  | 'google-instagram';
 
 export type ActorRunStatus =
   | 'pending'
@@ -214,6 +237,8 @@ export interface UserPreferenceHints {
 }
 
 export interface ActorRunInfo {
+  /** Stable logical scanner identifier, independent from the underlying Apify actor ID. */
+  scannerId: GoogleScannerId;
   actorId: string;
   source: FindingSource;
   /** Apify run status for this individual actor */
@@ -231,8 +256,10 @@ export interface ActorRunInfo {
    * Deep searches are never spawned from depth > 0 (loop guard).
    */
   searchDepth?: number;
-  /** The literal query string used for this run — set on deep follow-up runs */
+  /** The literal executable query string used for this run. */
   searchQuery?: string;
+  /** The user-visible query text with internal site operators removed. */
+  displayQuery?: string;
   /** Set once a depth-0 Google run has reserved its deep-search suggestions. */
   deepSearchSuggestionsProcessed?: boolean;
   /** The follow-up queries reserved for this run, if any. */
@@ -321,6 +348,7 @@ export type DashboardBreakdownCategory = keyof DashboardMetricTotals;
 
 export interface DashboardBreakdownRow extends DashboardMetricTotals {
   label: string;
+  filterValue?: string;
   total: number;
   drilldownScanIds?: Partial<Record<DashboardBreakdownCategory, string>>;
 }
@@ -338,7 +366,7 @@ export interface DashboardMetricsData {
   activeScan: DashboardActiveScanSummary | null;
   scanOptions: ScanSummary[];
   totals: DashboardMetricTotals;
-  platformBreakdown: DashboardBreakdownRow[];
+  sourceBreakdown: DashboardBreakdownRow[];
   themeBreakdown: DashboardBreakdownRow[];
 }
 
@@ -347,7 +375,6 @@ export interface DashboardMetricsData {
 export interface AnalysisResult {
   severity: Severity;
   title: string;
-  platform?: string;
   theme?: string;
   llmAnalysis: string;
   isFalsePositive: boolean;
