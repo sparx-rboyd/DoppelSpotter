@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
+import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
 import {
@@ -19,7 +20,6 @@ import {
 import type { BrandProfile, BrandProfileUpdateInput } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
-const DELETE_BATCH_LIMIT = 500;
 
 // GET /api/brands/[brandId]
 export async function GET(request: NextRequest, { params }: Params) {
@@ -159,13 +159,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
 
   const docsToDelete = [...findingsSnapshot.docs, ...scanSnapshot.docs, doc];
 
-  for (let index = 0; index < docsToDelete.length; index += DELETE_BATCH_LIMIT) {
-    const batch = db.batch();
-    docsToDelete
-      .slice(index, index + DELETE_BATCH_LIMIT)
-      .forEach((snapshot) => batch.delete(snapshot.ref));
-    await batch.commit();
-  }
+  await runWriteBatchInChunks(docsToDelete, (batch, snapshot) => batch.delete(snapshot.ref));
 
   return new NextResponse(null, { status: 204 });
 }

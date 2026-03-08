@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
+import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
+import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
 import type { BrandProfile, FindingSummary } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
@@ -125,15 +127,17 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     db.collection('scans').where('brandId', '==', brandId).where('userId', '==', uid).get(),
   ]);
 
+  const activeScan = scansSnap.docs
+    .map(scanFromSnapshot)
+    .find((scan) => isScanInProgress(scan.status));
+
+  if (activeScan) {
+    return errorResponse('Cannot clear history while a scan is still in progress', 409);
+  }
+
   const allDocs = [...findingsSnap.docs, ...scansSnap.docs];
 
-  // Firestore batch limit is 500 — chunk if needed
-  const BATCH_LIMIT = 500;
-  for (let i = 0; i < allDocs.length; i += BATCH_LIMIT) {
-    const batch = db.batch();
-    allDocs.slice(i, i + BATCH_LIMIT).forEach((doc) => batch.delete(doc.ref));
-    await batch.commit();
-  }
+  await runWriteBatchInChunks(allDocs, (batch, doc) => batch.delete(doc.ref));
 
   return new NextResponse(null, { status: 204 });
 }

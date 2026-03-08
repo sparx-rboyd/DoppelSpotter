@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
+import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import type { BrandProfile, Scan } from '@/lib/types';
 
@@ -37,14 +38,8 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     .where('userId', '==', uid)
     .get();
 
-  // Batch-delete findings + scan doc (Firestore limit: 500 ops per batch)
   const allDocs = [...findingsSnap.docs, scanDoc];
-  const BATCH_LIMIT = 500;
-  for (let i = 0; i < allDocs.length; i += BATCH_LIMIT) {
-    const batch = db.batch();
-    allDocs.slice(i, i + BATCH_LIMIT).forEach((doc) => batch.delete(doc.ref));
-    await batch.commit();
-  }
+  await runWriteBatchInChunks(allDocs, (batch, doc) => batch.delete(doc.ref));
 
   return new NextResponse(null, { status: 204 });
 }

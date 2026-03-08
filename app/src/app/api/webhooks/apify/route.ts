@@ -65,13 +65,13 @@ import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails
 import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
 
 /** Maximum normalized candidates per LLM request chunk. */
-const GOOGLE_ANALYSIS_CHUNK_SIZE = 50;
+const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
 const GOOGLE_ANALYSIS_CONCURRENCY = 3;
-const DISCORD_ANALYSIS_CHUNK_SIZE = 50;
+const DISCORD_ANALYSIS_CHUNK_SIZE = 10;
 const DISCORD_ANALYSIS_CONCURRENCY = 3;
-const GITHUB_ANALYSIS_CHUNK_SIZE = 50;
+const GITHUB_ANALYSIS_CHUNK_SIZE = 10;
 const GITHUB_ANALYSIS_CONCURRENCY = 3;
-const X_ANALYSIS_CHUNK_SIZE = 50;
+const X_ANALYSIS_CHUNK_SIZE = 10;
 const X_ANALYSIS_CONCURRENCY = 3;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';

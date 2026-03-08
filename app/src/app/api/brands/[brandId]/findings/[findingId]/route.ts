@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { FieldValue, type DocumentSnapshot, type QueryDocumentSnapshot } from '@google-cloud/firestore';
 type FindingDocSnapshot = DocumentSnapshot | QueryDocumentSnapshot;
 import { db } from '@/lib/firestore';
+import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import type { Finding, FindingCategory, FindingSummary } from '@/lib/types';
 
@@ -331,24 +332,19 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const reclassifiedCategory = body.reclassifiedCategory as FindingCategory;
     const affectedDocs = await loadUrlScopedFindingDocs(brandId, uid, finding.url, findingDoc);
 
-    const BATCH_LIMIT = 500;
-    for (let i = 0; i < affectedDocs.length; i += BATCH_LIMIT) {
-      const batch = db.batch();
-      affectedDocs.slice(i, i + BATCH_LIMIT).forEach((doc) => {
-        const sourceFinding = doc.data() as Finding;
-        const nextState = buildReclassifiedState(sourceFinding, reclassifiedCategory);
-        batch.update(doc.ref, {
-          severity: nextState.severity,
-          isFalsePositive: nextState.isFalsePositive,
-          isIgnored: nextState.isIgnored,
-          ignoredAt: nextState.isIgnored ? FieldValue.serverTimestamp() : FieldValue.delete(),
-          isAddressed: false,
-          addressedAt: FieldValue.delete(),
-          ...buildReclassificationSignalUpdates(sourceFinding, reclassifiedCategory),
-        });
+    await runWriteBatchInChunks(affectedDocs, (batch, doc) => {
+      const sourceFinding = doc.data() as Finding;
+      const nextState = buildReclassifiedState(sourceFinding, reclassifiedCategory);
+      batch.update(doc.ref, {
+        severity: nextState.severity,
+        isFalsePositive: nextState.isFalsePositive,
+        isIgnored: nextState.isIgnored,
+        ignoredAt: nextState.isIgnored ? FieldValue.serverTimestamp() : FieldValue.delete(),
+        isAddressed: false,
+        addressedAt: FieldValue.delete(),
+        ...buildReclassificationSignalUpdates(sourceFinding, reclassifiedCategory),
       });
-      await batch.commit();
-    }
+    });
 
     affectedFindings = affectedDocs.map((doc) => {
       const sourceFinding = doc.data() as Finding;
@@ -396,12 +392,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       addressedAt: body.isAddressed ? FieldValue.serverTimestamp() : FieldValue.delete(),
     };
 
-    const BATCH_LIMIT = 500;
-    for (let i = 0; i < addressAffectedDocs.length; i += BATCH_LIMIT) {
-      const batch = db.batch();
-      addressAffectedDocs.slice(i, i + BATCH_LIMIT).forEach((doc) => batch.update(doc.ref, addressUpdates));
-      await batch.commit();
-    }
+    await runWriteBatchInChunks(addressAffectedDocs, (batch, doc) => batch.update(doc.ref, addressUpdates));
 
     affectedFindings = addressAffectedDocs.map((doc) => {
       const sourceFinding = doc.data() as Finding;
@@ -470,13 +461,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
         return errorResponse('Addressed findings must be un-addressed before they can be ignored', 409);
       }
 
-      const BATCH_LIMIT = 500;
       const allDocs = siblingsSnap.docs; // includes the target finding itself
-      for (let i = 0; i < allDocs.length; i += BATCH_LIMIT) {
-        const batch = db.batch();
-        allDocs.slice(i, i + BATCH_LIMIT).forEach((doc) => batch.update(doc.ref, ignoreUpdates));
-        await batch.commit();
-      }
+      await runWriteBatchInChunks(allDocs, (batch, doc) => batch.update(doc.ref, ignoreUpdates));
 
       // Update denormalized severity counts on each affected scan document.
       // Only non-false-positive findings that actually change state affect counts.

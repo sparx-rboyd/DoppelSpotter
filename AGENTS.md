@@ -191,7 +191,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ if the scan's preference hints are still `pending`, the run is parked in `actorRuns.*.status = 'waiting_for_preference_hints'` and no analysis starts yet
  └─ once the scan-level preference hints are `ready` or `failed`, deferred succeeded callbacks are replayed through the same webhook route so they resume normal processing
  └─ duplicate callbacks for a run already in `fetching_dataset` / `analysing` are acknowledged and skipped before expensive work starts
- └─ fetches source-specific capped items from Apify dataset (Google and Discord currently cap at 50 analysed items; GitHub and X can analyse up to the requested `50..500`)
+ └─ fetches source-specific capped items from Apify dataset (source-level actor limits still apply before post-normalization chunked analysis: Google via requested SERP pages, Discord via `maxTotalChargeUsd` spend cap, and GitHub / X via the requested `50..500` result volume)
  └─ Google Search mode: normalize SERP pages into compact organic-result candidates
       └─ excludes ads from AI analysis; keeps `relatedQueries` + `peopleAlsoAsk` as run-level context
       └─ stores scanner-aware sighting/debug metadata so merged findings can retain which logical scan surfaces saw a URL
