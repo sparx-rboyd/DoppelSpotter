@@ -47,6 +47,7 @@ type SelectDropdownProps = {
   panelClassName?: string;
   matchTriggerWidth?: boolean;
   dividerAfterValue?: string;
+  showActiveIndicator?: boolean;
 };
 
 const FLOATING_PANEL_GAP_PX = 8;
@@ -253,6 +254,7 @@ export function SelectDropdown({
   panelClassName,
   matchTriggerWidth = true,
   dividerAfterValue,
+  showActiveIndicator = false,
 }: SelectDropdownProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
@@ -338,6 +340,12 @@ export function SelectDropdown({
         <span className="min-w-0 flex-1 truncate text-left">
           {selectedOption?.label ?? value}
         </span>
+        {showActiveIndicator && (
+          <span
+            aria-hidden="true"
+            className="h-2 w-2 flex-shrink-0 rounded-full bg-brand-500"
+          />
+        )}
         <ChevronDown className={cn('h-4 w-4 text-gray-400 transition', isOpen && 'rotate-180')} />
       </button>
 

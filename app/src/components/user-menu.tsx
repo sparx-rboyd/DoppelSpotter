@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, KeyRound, LogOut } from 'lucide-react';
+import { ChevronDown, KeyRound, LogOut, User } from 'lucide-react';
 import { useAuth } from '@/lib/auth/auth-context';
 import { cn } from '@/lib/utils';
 
@@ -57,7 +57,6 @@ export function UserMenu() {
   }
 
   const email = user?.email ?? 'Account';
-  const initial = email.slice(0, 1).toUpperCase() || 'A';
 
   return (
     <div ref={menuRef} className="relative">
@@ -74,8 +73,8 @@ export function UserMenu() {
             : 'border-white/15 text-white/80 hover:border-white/25 hover:bg-white/10 hover:text-white',
         )}
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-xs font-semibold text-white">
-          {initial}
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-white">
+          <User className="h-4 w-4" aria-hidden="true" />
         </span>
         <ChevronDown className={cn('h-4 w-4 transition', isOpen && 'rotate-180')} />
       </button>

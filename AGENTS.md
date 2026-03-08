@@ -37,6 +37,7 @@ analysis to classify likely threats and summarise scan outcomes.
 │       │   └── api/
 │       │       ├── auth/         # login, logout, me, forgot/reset password, change-password (signup disabled — use add-user CLI)
 │       │       ├── brands/       # CRUD + findings + scans per brand
+│       │       ├── dashboard/    # Dashboard bootstrap, persisted selection, and analytics metrics
 │       │       ├── findings/     # Cross-brand findings query
 │       │       ├── internal/     # Internal service-to-service routes (scheduled scan dispatch)
 │       │       ├── scan/         # Trigger scan + poll status
@@ -45,6 +46,7 @@ analysis to classify likely threats and summarise scan outcomes.
 │           ├── apify/
 │           │   ├── actors.ts     # Google Search actor definition + lookup helpers
 │           │   └── client.ts     # Apify client: startActorRun, buildActorInput, fetchDatasetItems
+│           ├── dashboard.ts      # Dashboard metrics helpers: terminal-scan totals + platform/theme rollups
 │           ├── mailersend.ts     # MailerSend email client for transactional emails
 │           ├── scan-runner.ts    # Shared manual + scheduled scan reservation and actor startup
 │           ├── scan-summary-emails.ts # Branded scan-summary email composition + idempotent delivery
@@ -341,6 +343,33 @@ Findings can now carry two optional lightweight taxonomy labels: `platform` and 
 
 ---
 
+## Dashboard Analytics
+
+The authenticated dashboard is now fully brand-scoped rather than a cross-brand recent-findings feed.
+
+**Behaviour:**
+- The dashboard first calls `GET /api/dashboard/bootstrap` to load the user's brands plus the persisted default brand selection
+- The selected dashboard brand is stored on the user document as `users.dashboardPreferences.selectedBrandId`
+- If the saved brand no longer exists or no longer belongs to the user, bootstrap falls back to the oldest remaining brand and repairs the saved preference
+- Brand selection changes call `PATCH /api/dashboard/preferences` so the same default brand is restored across reloads and devices
+- Dashboard analytics call `GET /api/dashboard/metrics?brandId=...&scanId=...`
+- The metrics route returns all terminal scans for the selected brand (newest first) for the scan-scope dropdown
+- Dashboard KPI totals come from denormalized per-scan `highCount`, `mediumCount`, `lowCount`, and `nonHitCount` fields so all-time rollups do not require hydrating every finding
+- Platform and theme charts aggregate findings for the selected scope and use the same visible-count semantics as the rest of the app: actionable hits plus non-hits, excluding ignored and addressed real findings
+- Missing `platform` / `theme` labels are grouped into an `Unlabelled` chart bucket
+- Each chart row also tracks the newest matching scan id per severity bucket so stacked-bar segments can drill into the brand page
+- Chart drill-down links navigate to the brand page with `scanResultSet`, `category`, and optional `platform` / `theme` query params so the matching scan opens with the relevant filter state applied
+- Dashboard severity metric cards use the same drill-down pattern, applying the matching `category` filter and, when a specific scan is in scope, anchoring into the relevant section of that scan
+- Dashboard-originated links into a brand page also carry `returnTo=dashboard`, so the brand-page back arrow returns to the dashboard instead of the brands index for that navigation path
+- When a brand has no terminal scans yet, the dashboard shows a CTA to run the first scan; if the first scan is already in progress, it instead shows a progress-focused CTA linked to the brand page
+
+**API:**
+- `GET /api/dashboard/bootstrap` — returns brand selector options plus the resolved selected brand id
+- `PATCH /api/dashboard/preferences` — persists `{ selectedBrandId }` on the authenticated user document
+- `GET /api/dashboard/metrics?brandId=...&scanId=...` — returns scan selector options, KPI totals, active-scan state, and platform/theme stacked-bar datasets
+
+---
+
 ## Environment Variables
 
 | Variable | Purpose |
@@ -363,7 +392,7 @@ Findings can now carry two optional lightweight taxonomy labels: `platform` and 
 
 | Collection | Key Fields |
 |---|---|
-| `users` | id, email, passwordHash, **sessionVersion?**, **passwordChangedAt?**, createdAt |
+| `users` | id, email, passwordHash, **sessionVersion?**, **passwordChangedAt?**, **dashboardPreferences?** (`selectedBrandId?`), createdAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source, actorId, severity, title, **platform?**, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
@@ -429,7 +458,9 @@ The findings API is optimised to minimise Firestore reads and HTTP round-trips o
 - **Dedicated taxonomy bootstrap** — the brand page loads `GET /api/brands/[brandId]/findings/taxonomy` on mount (and after scan-history changes) so the platform/theme filter dropdowns can populate without hydrating every scan bucket first
 - **Lightweight list payloads** — the findings list endpoints (`GET /api/brands/[brandId]/findings` and `GET /api/findings`) return a compact `FindingSummary` shape via Firestore `.select(...)`, excluding `rawData`, `llmAnalysisPrompt`, `rawLlmResponse`, and other fields not needed for normal rendering. This avoids repeatedly shipping the full SERP batch payload on every finding card.
 - **Dedicated scan export paths** — `GET /api/brands/[brandId]/scans/[scanId]/export` performs a single scan-scoped findings query and returns a CSV attachment containing hits, non-hits, notes, and review-state flags, while `GET /api/brands/[brandId]/scans/[scanId]/export/pdf` returns a branded PDF report containing the scan AI summary, actionable high/medium/low findings, notes, and a dedicated addressed-findings section. Neither path forces the UI to eagerly load every findings bucket first.
-- **Incremental dashboard fetch** — `GET /api/findings` pages through the newest findings until it has filled the requested limit, instead of always fetching a fixed `limit * 4` window and filtering in memory. This keeps dashboard reads closer to the actual number of cards rendered.
+- **Dashboard bootstrap + metrics split** — the main dashboard uses `GET /api/dashboard/bootstrap` for brand selection state and `GET /api/dashboard/metrics` for brand/scan-scoped analytics, instead of reusing the lightweight recent-findings feed.
+- **All-time dashboard totals** — dashboard KPI cards use terminal scan denormalized counts, while stacked platform/theme charts aggregate selected findings with a minimal Firestore `.select(...)` projection.
+- **Recent activity feed remains lightweight** — `GET /api/findings` still pages through the newest findings until it has filled the requested limit, instead of always fetching a fixed `limit * 4` window and filtering in memory. This keeps that cross-brand recent-activity query close to the number of cards rendered.
 - **Debug details fetched on demand** — `FindingCard` fetches `GET /api/brands/[brandId]/findings/[findingId]` only when a debug section is opened (`?debug=true`). Normal list views never load raw actor data or raw AI responses.
 - **No redundant brand ownership checks on per-scan findings** — the `GET /api/brands/[brandId]/findings` route relies solely on `userId == uid` in the Firestore query for authorization (no extra brand doc read per request). The PATCH (ignore/un-ignore) route similarly skips the brand doc read, verifying ownership via the finding document itself.
 

@@ -2,10 +2,10 @@
 
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
-  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check, Download,
+  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check, Download, RotateCcw,
   Sparkles,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -32,6 +32,11 @@ const ACTIVE_SCAN_DELETE_TOOLTIP =
 const CLEARING_HISTORY_DELETE_TOOLTIP = 'Please wait while scan history is being deleted.';
 const SCAN_RESULT_SET_HASH_PREFIX = 'scan-result-set-';
 const OTHER_FINDING_TAXONOMY_KEY = 'other';
+const DRILLDOWN_CATEGORY_QUERY_PARAM = 'category';
+const DRILLDOWN_PLATFORM_QUERY_PARAM = 'platform';
+const DRILLDOWN_THEME_QUERY_PARAM = 'theme';
+const RETURN_TO_QUERY_PARAM = 'returnTo';
+const RETURN_TO_DASHBOARD_VALUE = 'dashboard';
 
 type BookmarkUpdate = {
   isBookmarked?: boolean;
@@ -123,6 +128,8 @@ function SeverityGroup({
   onNoteUpdate,
   forceExpanded = false,
   highlightQuery,
+  autoExpandToken,
+  sectionAnchorId,
 }: {
   severity: 'high' | 'medium' | 'low';
   findings: FindingSummary[];
@@ -133,12 +140,19 @@ function SeverityGroup({
   onNoteUpdate?: (finding: FindingSummary, note: string | null) => Promise<void>;
   forceExpanded?: boolean;
   highlightQuery?: string;
+  autoExpandToken?: string | null;
+  sectionAnchorId?: string;
 }) {
   const [isExpanded, setIsExpanded] = useState(severity === 'high');
   const [ignoringAll, setIgnoringAll] = useState(false);
 
   const { variant, label, icon: Icon, headerBg, headerBorder, hoverBg } = SEVERITY_GROUP_CONFIG[severity];
   const expanded = forceExpanded || isExpanded;
+
+  useEffect(() => {
+    if (!autoExpandToken) return;
+    setIsExpanded(true);
+  }, [autoExpandToken]);
 
   async function handleIgnoreAll(e: React.MouseEvent) {
     e.stopPropagation();
@@ -154,7 +168,7 @@ function SeverityGroup({
   }
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+    <div id={sectionAnchorId} className="scroll-mt-28 bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className={cn("flex items-center transition border-b", headerBg, headerBorder, !forceExpanded && hoverBg)}>
         <button
           type="button"
@@ -236,6 +250,14 @@ function normalizeFindingsTaxonomyValue(value?: string) {
   return value?.toLowerCase().replace(/\s+/g, ' ').trim() ?? '';
 }
 
+function parseFindingCategoryFilter(value?: string | null): FindingCategory | null {
+  const normalized = value?.toLowerCase().replace(/\s+/g, '').trim();
+  if (!normalized) return null;
+  if (normalized === 'high' || normalized === 'medium' || normalized === 'low') return normalized;
+  if (normalized === 'non-hit' || normalized === 'nonhit' || normalized === 'nonhits') return 'non-hit';
+  return null;
+}
+
 function compareFindingTaxonomyLabels(a: string, b: string) {
   const aIsOther = normalizeFindingsTaxonomyValue(a) === OTHER_FINDING_TAXONOMY_KEY;
   const bIsOther = normalizeFindingsTaxonomyValue(b) === OTHER_FINDING_TAXONOMY_KEY;
@@ -265,6 +287,10 @@ function collectDistinctFindingTaxonomyLabels(values: Array<string | undefined>)
 
 function getScanResultSetAnchorId(scanId: string) {
   return `${SCAN_RESULT_SET_HASH_PREFIX}${scanId}`;
+}
+
+function getScanCategorySectionAnchorId(scanId: string, category: FindingCategory) {
+  return `${getScanResultSetAnchorId(scanId)}-${category}`;
 }
 
 function extractScanResultSetId(value: string) {
@@ -335,14 +361,43 @@ function scrollToScanResultSet(scanId: string, attempt = 0) {
   });
 }
 
+function scrollToScanCategorySection(scanId: string, category: FindingCategory, attempt = 0) {
+  if (typeof window === 'undefined') return;
+
+  const element = document.getElementById(getScanCategorySectionAnchorId(scanId, category));
+  if (!element) {
+    if (attempt < 8) {
+      window.setTimeout(() => scrollToScanCategorySection(scanId, category, attempt + 1), 100);
+    }
+    return;
+  }
+
+  window.requestAnimationFrame(() => {
+    const top = window.scrollY + element.getBoundingClientRect().top - 108;
+    window.scrollTo({ top: Math.max(0, top), behavior: 'auto' });
+
+    if (attempt < 4) {
+      window.setTimeout(() => scrollToScanCategorySection(scanId, category, attempt + 1), 120);
+    }
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
 export default function BrandDetailPage() {
   const { brandId } = useParams<{ brandId: string }>();
+  const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const showDebug = searchParams.get('debug') === 'true';
+  const backHref = searchParams.get(RETURN_TO_QUERY_PARAM) === RETURN_TO_DASHBOARD_VALUE
+    ? '/dashboard'
+    : '/brands';
+  const initialFindingCategory = parseFindingCategoryFilter(searchParams.get(DRILLDOWN_CATEGORY_QUERY_PARAM));
+  const initialFindingPlatform = searchParams.get(DRILLDOWN_PLATFORM_QUERY_PARAM)?.trim() ?? '';
+  const initialFindingTheme = searchParams.get(DRILLDOWN_THEME_QUERY_PARAM)?.trim() ?? '';
 
   const [brand, setBrand] = useState<BrandProfile | null>(null);
   const [scans, setScans] = useState<ScanSummary[]>([]);
@@ -366,8 +421,10 @@ export default function BrandDetailPage() {
     platforms: [],
     themes: [],
   });
-  const [selectedFindingPlatform, setSelectedFindingPlatform] = useState('');
-  const [selectedFindingTheme, setSelectedFindingTheme] = useState('');
+  const [hasLoadedFindingTaxonomyOptions, setHasLoadedFindingTaxonomyOptions] = useState(false);
+  const [selectedFindingCategory, setSelectedFindingCategory] = useState<FindingCategory | null>(initialFindingCategory);
+  const [selectedFindingPlatform, setSelectedFindingPlatform] = useState(initialFindingPlatform);
+  const [selectedFindingTheme, setSelectedFindingTheme] = useState(initialFindingTheme);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
   const [exportingCsvScanId, setExportingCsvScanId] = useState<string | null>(null);
@@ -397,10 +454,12 @@ export default function BrandDetailPage() {
   const normalizedSelectedFindingPlatform = normalizeFindingsTaxonomyValue(selectedFindingPlatform);
   const normalizedSelectedFindingTheme = normalizeFindingsTaxonomyValue(selectedFindingTheme);
   const isFindingsSearchActive = normalizedFindingsSearchQuery.length > 0;
+  const hasActiveFindingCategoryFilter = selectedFindingCategory !== null;
   const hasActiveFindingPlatformFilter = normalizedSelectedFindingPlatform.length > 0;
   const hasActiveFindingThemeFilter = normalizedSelectedFindingTheme.length > 0;
   const isAnyFindingFilterActive =
     isFindingsSearchActive
+    || hasActiveFindingCategoryFilter
     || hasActiveFindingPlatformFilter
     || hasActiveFindingThemeFilter;
   const activeHighlightQuery = isFindingsSearchActive ? findingsSearchQuery : undefined;
@@ -410,6 +469,70 @@ export default function BrandDetailPage() {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
+  }
+
+  function updateDrilldownUrl(updates: {
+    category?: FindingCategory | null;
+    platform?: string | null;
+    theme?: string | null;
+  }) {
+    const params = new URLSearchParams(searchParams.toString());
+
+    if (updates.category !== undefined) {
+      if (updates.category) {
+        params.set(DRILLDOWN_CATEGORY_QUERY_PARAM, updates.category);
+      } else {
+        params.delete(DRILLDOWN_CATEGORY_QUERY_PARAM);
+      }
+    }
+
+    if (updates.platform !== undefined) {
+      if (updates.platform && updates.platform.trim()) {
+        params.set(DRILLDOWN_PLATFORM_QUERY_PARAM, updates.platform.trim());
+      } else {
+        params.delete(DRILLDOWN_PLATFORM_QUERY_PARAM);
+      }
+    }
+
+    if (updates.theme !== undefined) {
+      if (updates.theme && updates.theme.trim()) {
+        params.set(DRILLDOWN_THEME_QUERY_PARAM, updates.theme.trim());
+      } else {
+        params.delete(DRILLDOWN_THEME_QUERY_PARAM);
+      }
+    }
+
+    const queryString = params.toString();
+    const hash = typeof window !== 'undefined' ? window.location.hash : '';
+    router.replace(`${pathname}${queryString ? `?${queryString}` : ''}${hash}`, { scroll: false });
+  }
+
+  function handleFindingCategoryFilterChange(nextValue: string) {
+    const nextCategory = parseFindingCategoryFilter(nextValue);
+    setSelectedFindingCategory(nextCategory);
+    updateDrilldownUrl({ category: nextCategory });
+  }
+
+  function handleFindingPlatformFilterChange(nextValue: string) {
+    setSelectedFindingPlatform(nextValue);
+    updateDrilldownUrl({ platform: nextValue || null });
+  }
+
+  function handleFindingThemeFilterChange(nextValue: string) {
+    setSelectedFindingTheme(nextValue);
+    updateDrilldownUrl({ theme: nextValue || null });
+  }
+
+  function resetFindingsSearchAndFilters() {
+    setFindingsSearchQuery('');
+    setSelectedFindingCategory(null);
+    setSelectedFindingPlatform('');
+    setSelectedFindingTheme('');
+    updateDrilldownUrl({
+      category: null,
+      platform: null,
+      theme: null,
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -575,6 +698,8 @@ export default function BrandDetailPage() {
       }
     } catch {
       // Non-critical
+    } finally {
+      setHasLoadedFindingTaxonomyOptions(true);
     }
   }, [brandId]);
 
@@ -1302,6 +1427,21 @@ export default function BrandDetailPage() {
   }, [anchorTargetScanId, scans]);
 
   useEffect(() => {
+    if (!anchorTargetScanId || selectedFindingCategory !== 'non-hit') return;
+    if (!scans.some((scan) => scan.id === anchorTargetScanId)) return;
+
+    void loadScanNonHits(anchorTargetScanId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorTargetScanId, selectedFindingCategory, scans]);
+
+  useEffect(() => {
+    if (!anchorTargetScanId || !selectedFindingCategory) return;
+    if (!scans.some((scan) => scan.id === anchorTargetScanId)) return;
+
+    scrollToScanCategorySection(anchorTargetScanId, selectedFindingCategory);
+  }, [anchorTargetScanId, scanFindings, scanNonHits, scans, selectedFindingCategory]);
+
+  useEffect(() => {
     if (loading || scanning) return;
 
     const idlePoll = setInterval(() => {
@@ -1409,6 +1549,8 @@ export default function BrandDetailPage() {
   ]);
 
   useEffect(() => {
+    if (!hasLoadedFindingTaxonomyOptions) return;
+    if (availableFindingPlatforms.length === 0) return;
     if (
       normalizedSelectedFindingPlatform
       && !availableFindingPlatforms.some(
@@ -1417,9 +1559,11 @@ export default function BrandDetailPage() {
     ) {
       setSelectedFindingPlatform('');
     }
-  }, [availableFindingPlatforms, normalizedSelectedFindingPlatform]);
+  }, [availableFindingPlatforms, hasLoadedFindingTaxonomyOptions, normalizedSelectedFindingPlatform]);
 
   useEffect(() => {
+    if (!hasLoadedFindingTaxonomyOptions) return;
+    if (availableFindingThemes.length === 0) return;
     if (
       normalizedSelectedFindingTheme
       && !availableFindingThemes.some(
@@ -1428,7 +1572,7 @@ export default function BrandDetailPage() {
     ) {
       setSelectedFindingTheme('');
     }
-  }, [availableFindingThemes, normalizedSelectedFindingTheme]);
+  }, [availableFindingThemes, hasLoadedFindingTaxonomyOptions, normalizedSelectedFindingTheme]);
 
   useEffect(() => {
     return () => {
@@ -1981,12 +2125,17 @@ export default function BrandDetailPage() {
     const matchesSearch = !isFindingsSearchActive || normalizeFindingsSearchText(
       `${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis}`,
     ).includes(normalizedFindingsSearchQuery);
+    const matchesCategory = !selectedFindingCategory || (
+      selectedFindingCategory === 'non-hit'
+        ? finding.isFalsePositive === true
+        : finding.isFalsePositive !== true && finding.severity === selectedFindingCategory
+    );
     const matchesPlatform = !hasActiveFindingPlatformFilter
       || normalizeFindingsTaxonomyValue(finding.platform) === normalizedSelectedFindingPlatform;
     const matchesTheme = !hasActiveFindingThemeFilter
       || normalizeFindingsTaxonomyValue(finding.theme) === normalizedSelectedFindingTheme;
 
-    return matchesSearch && matchesPlatform && matchesTheme;
+    return matchesSearch && matchesCategory && matchesPlatform && matchesTheme;
   }
 
   function filterFindings(findings?: FindingSummary[]) {
@@ -2014,6 +2163,13 @@ export default function BrandDetailPage() {
   const findingThemeOptions = [
     { value: '', label: 'All themes' },
     ...availableFindingThemes.map((theme) => ({ value: theme, label: theme })),
+  ];
+  const findingCategoryOptions = [
+    { value: '', label: 'All' },
+    { value: 'high', label: 'High' },
+    { value: 'medium', label: 'Medium' },
+    { value: 'low', label: 'Low' },
+    { value: 'non-hit', label: 'Non-findings' },
   ];
   const visibleBookmarkedFindings = filterFindings(allBookmarkedFindings) ?? [];
   const bookmarkedHits = visibleBookmarkedFindings.filter((finding) => !finding.isFalsePositive);
@@ -2060,7 +2216,7 @@ export default function BrandDetailPage() {
           {/* Back link */}
           <div className="flex items-center justify-between gap-3 mb-8">
             <div className="flex items-center gap-3">
-              <Link href="/brands" className="text-brand-600 hover:text-brand-700 transition">
+              <Link href={backHref} className="text-brand-600 hover:text-brand-700 transition">
                 <ArrowLeft className="w-5 h-5" />
               </Link>
               {brand && (
@@ -2209,23 +2365,56 @@ export default function BrandDetailPage() {
                         ariaLabel="Filter findings by platform"
                         value={selectedFindingPlatform}
                         options={findingPlatformOptions}
-                        onChange={setSelectedFindingPlatform}
-                        triggerClassName="min-w-[11rem] border-white/20"
+                        onChange={handleFindingPlatformFilterChange}
+                        triggerClassName={cn(
+                          'min-w-[11rem] border-white/20',
+                          hasActiveFindingPlatformFilter && 'border-brand-200 bg-brand-50 text-brand-800',
+                        )}
                         matchTriggerWidth={false}
                         panelClassName="min-w-[16rem] max-w-[calc(100vw-1.5rem)]"
                         dividerAfterValue=""
+                        showActiveIndicator={hasActiveFindingPlatformFilter}
                       />
                       <SelectDropdown
                         id="findings-theme-filter"
                         ariaLabel="Filter findings by theme"
                         value={selectedFindingTheme}
                         options={findingThemeOptions}
-                        onChange={setSelectedFindingTheme}
-                        triggerClassName="min-w-[11rem] border-white/20"
+                        onChange={handleFindingThemeFilterChange}
+                        triggerClassName={cn(
+                          'min-w-[11rem] border-white/20',
+                          hasActiveFindingThemeFilter && 'border-brand-200 bg-brand-50 text-brand-800',
+                        )}
                         matchTriggerWidth={false}
                         panelClassName="min-w-[16rem] max-w-[calc(100vw-1.5rem)]"
                         dividerAfterValue=""
+                        showActiveIndicator={hasActiveFindingThemeFilter}
                       />
+                      <SelectDropdown
+                        id="findings-severity-filter"
+                        ariaLabel="Filter findings by severity"
+                        value={selectedFindingCategory ?? ''}
+                        options={findingCategoryOptions}
+                        onChange={handleFindingCategoryFilterChange}
+                        triggerClassName={cn(
+                          'min-w-[11rem] border-white/20',
+                          hasActiveFindingCategoryFilter && 'border-brand-200 bg-brand-50 text-brand-800',
+                        )}
+                        matchTriggerWidth={false}
+                        panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
+                        dividerAfterValue=""
+                        showActiveIndicator={hasActiveFindingCategoryFilter}
+                      />
+                      {isAnyFindingFilterActive && (
+                        <button
+                          type="button"
+                          onClick={resetFindingsSearchAndFilters}
+                          className="inline-flex items-center justify-center gap-1.5 rounded-full border border-white/15 bg-white/8 px-3 py-2 text-xs font-medium text-white/85 transition hover:bg-white/12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          Reset
+                        </button>
+                      )}
                     </div>
                   </div>
                   {isAnyFindingFilterActive && (
@@ -2545,13 +2734,24 @@ export default function BrandDetailPage() {
                                                 onNoteUpdate={handleFindingNoteUpdate}
                                                 forceExpanded={isAnyFindingFilterActive}
                                                 highlightQuery={activeHighlightQuery}
+                                                autoExpandToken={
+                                                  anchorTargetScanId === activeScan?.id && selectedFindingCategory === sev
+                                                    ? `live-${sev}`
+                                                    : null
+                                                }
+                                                sectionAnchorId={
+                                                  activeScan?.id ? getScanCategorySectionAnchorId(activeScan.id, sev) : undefined
+                                                }
                                               />
                                             ))}
                                         </div>
                                       )}
 
                                       {visibleLiveScanNonHits.length > 0 && (
-                                        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                                        <div
+                                          id={activeScan?.id ? getScanCategorySectionAnchorId(activeScan.id, 'non-hit') : undefined}
+                                          className="scroll-mt-28 overflow-hidden rounded-xl border border-gray-200 bg-white"
+                                        >
                                           <button
                                             type="button"
                                             onClick={() => {
@@ -2904,13 +3104,22 @@ export default function BrandDetailPage() {
                                                   onNoteUpdate={handleFindingNoteUpdate}
                                                   forceExpanded={isAnyFindingFilterActive}
                                                   highlightQuery={activeHighlightQuery}
+                                                  autoExpandToken={
+                                                    anchorTargetScanId === scan.id && selectedFindingCategory === sev
+                                                      ? `${scan.id}-${sev}`
+                                                      : null
+                                                  }
+                                                  sectionAnchorId={getScanCategorySectionAnchorId(scan.id, sev)}
                                                 />
                                               ))}
                                           </div>
                                         )}
 
                                         {displayedNonHitCount > 0 && (
-                                          <div className="mt-4 overflow-hidden rounded-xl border border-gray-200 bg-white">
+                                          <div
+                                            id={getScanCategorySectionAnchorId(scan.id, 'non-hit')}
+                                            className="mt-4 scroll-mt-28 overflow-hidden rounded-xl border border-gray-200 bg-white"
+                                          >
                                             <button
                                               type="button"
                                               onClick={() => {

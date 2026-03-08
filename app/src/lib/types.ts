@@ -10,7 +10,14 @@ export interface UserRecord {
   sessionVersion?: number;
   /** Timestamp when the password was last changed. */
   passwordChangedAt?: Timestamp;
+  /** Optional per-user dashboard state persisted across devices. */
+  dashboardPreferences?: DashboardPreferences;
   createdAt: Timestamp;
+}
+
+export interface DashboardPreferences {
+  /** The user's preferred dashboard brand selection. */
+  selectedBrandId?: string;
 }
 
 // ─── Scheduling ─────────────────────────────────────────────────────────────
@@ -106,6 +113,15 @@ export interface BrandSummary {
   lastScanStartedAt?: Timestamp;
   scanSchedule?: Pick<BrandScanSchedule, 'enabled' | 'timeZone' | 'nextRunAt'>;
   createdAt: Timestamp;
+}
+
+export interface DashboardBootstrapData {
+  brands: BrandSummary[];
+  selectedBrandId: string | null;
+}
+
+export interface DashboardPreferenceUpdateInput {
+  selectedBrandId: string | null;
 }
 
 // ─── Findings ──────────────────────────────────────────────────────────────
@@ -292,6 +308,38 @@ export interface ScanSummary {
   addressedCount: number;
   skippedCount: number;
   aiSummary?: string;
+}
+
+export interface DashboardMetricTotals {
+  high: number;
+  medium: number;
+  low: number;
+  nonHit: number;
+}
+
+export type DashboardBreakdownCategory = keyof DashboardMetricTotals;
+
+export interface DashboardBreakdownRow extends DashboardMetricTotals {
+  label: string;
+  total: number;
+  drilldownScanIds?: Partial<Record<DashboardBreakdownCategory, string>>;
+}
+
+export interface DashboardActiveScanSummary {
+  id: string;
+  status: ScanStatus;
+  startedAt: Timestamp;
+}
+
+export interface DashboardMetricsData {
+  brandId: string;
+  selectedScanId: string | null;
+  hasTerminalScans: boolean;
+  activeScan: DashboardActiveScanSummary | null;
+  scanOptions: ScanSummary[];
+  totals: DashboardMetricTotals;
+  platformBreakdown: DashboardBreakdownRow[];
+  themeBreakdown: DashboardBreakdownRow[];
 }
 
 // ─── AI Analysis ───────────────────────────────────────────────────────────
