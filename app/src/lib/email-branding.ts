@@ -38,19 +38,19 @@ export function buildBrandedEmailFrame({ title, bodyHtml }: BrandedEmailFrameInp
   const logoUrl = buildLogoUrl();
 
   return `
-    <div style="margin:0;background:#f0f9ff;padding:24px;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
-      <div style="margin:0 auto;max-width:640px;overflow:hidden;border:1px solid #e5e7eb;border-radius:20px;background:#ffffff;">
-        <div style="background:linear-gradient(135deg,#0369a1 0%,#0284c7 52%,#0ea5e9 100%);padding:28px 32px;color:#ffffff;">
+    <div style="margin:0;background:#f8fafc;padding:20px 12px;font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
+      <div style="margin:0 auto;max-width:620px;overflow:hidden;border:1px solid #dbe5ef;border-radius:18px;background:#ffffff;">
+        <div style="background:linear-gradient(135deg,#075985 0%,#0284c7 55%,#22c1f1 100%);padding:22px 24px 24px;color:#ffffff;">
           <img
             src="${escapeHtml(logoUrl)}"
             alt="DoppelSpotter"
-            width="248"
-            height="40"
-            style="display:block;height:auto;max-width:248px;width:100%;"
+            width="176"
+            height="28"
+            style="display:block;height:auto;max-width:176px;width:100%;"
           />
-          <h1 style="margin:20px 0 0;font-size:30px;line-height:1.15;color:#ffffff;">${escapeHtml(title)}</h1>
+          <h1 style="margin:14px 0 0;font-size:28px;line-height:1.15;font-weight:700;color:#ffffff;">${escapeHtml(title)}</h1>
         </div>
-        <div style="padding:32px;">
+        <div style="padding:28px 24px 24px;">
           ${bodyHtml}
         </div>
       </div>

@@ -92,50 +92,52 @@ function buildScanSummaryEmailContent(scan: Scan, brand: BrandProfile) {
   const html = buildBrandedEmailFrame({
     title: 'Scan summary',
     bodyHtml: `
-      <div style="margin:0 0 24px;border:1px solid #e0f2fe;border-radius:16px;background:#f0f9ff;padding:20px;">
-        <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0369a1;">Brand</div>
-        <div style="margin-top:8px;font-size:24px;font-weight:700;color:#111827;">${escapeHtml(brand.name)}</div>
-        <div style="margin-top:8px;font-size:14px;color:#0c4a6e;">Scan completed: ${escapeHtml(completedLabel)}</div>
+      <div style="margin:0 0 18px;border:1px solid #dbeafe;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#eff6ff 100%);padding:18px 18px 16px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#0369a1;">Brand</div>
+        <div style="margin-top:6px;font-size:22px;line-height:1.2;font-weight:700;color:#0f172a;">${escapeHtml(brand.name)}</div>
+        <div style="margin-top:8px;font-size:13px;line-height:1.5;color:#475569;">Scan completed: <span style="color:#0f172a;font-weight:600;">${escapeHtml(completedLabel)}</span></div>
       </div>
 
-      <div style="margin-bottom:24px;">
-        <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0369a1;">AI summary</div>
-        <p style="margin:12px 0 0;font-size:15px;line-height:1.7;color:#111827;">${escapeHtml(summary)}</p>
+      <div style="margin-bottom:18px;border:1px solid #dbeafe;border-radius:14px;background:#f8fbff;padding:16px 18px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#0369a1;">AI summary</div>
+        <p style="margin:10px 0 0;font-size:14px;line-height:1.65;color:#334155;">${escapeHtml(summary)}</p>
       </div>
 
-      <div style="margin-bottom:24px;">
-        <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#0369a1;">Result totals</div>
-        <table role="presentation" style="margin-top:12px;width:100%;border-collapse:collapse;">
-          <tbody>
-            ${countRows.map((row) => `
-              <tr>
-                <td style="border-bottom:1px solid #e5e7eb;padding:12px 0;font-size:14px;color:#4b5563;">
-                  <span
-                    style="display:inline-block;border:1px solid ${getCountRowStyles(row.tone).chipBorder};border-radius:9999px;background:${getCountRowStyles(row.tone).chipBackground};padding:6px 10px;font-size:13px;font-weight:700;color:${getCountRowStyles(row.tone).chipText};"
-                  >
-                    ${escapeHtml(row.label)}
-                  </span>
-                </td>
-                <td style="border-bottom:1px solid #e5e7eb;padding:12px 0;text-align:right;font-size:18px;font-weight:700;color:${getCountRowStyles(row.tone).chipText};">${row.value}</td>
-              </tr>
-            `).join('')}
-          </tbody>
-        </table>
-        <p style="margin:14px 0 0;border-left:3px solid #0ea5e9;padding-left:12px;font-size:13px;line-height:1.6;color:#0c4a6e;">
+      <div style="margin-bottom:20px;">
+        <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#0369a1;">Result totals</div>
+        <div style="margin-top:10px;border:1px solid #e2e8f0;border-radius:14px;background:#ffffff;overflow:hidden;">
+          <table role="presentation" style="width:100%;border-collapse:collapse;">
+            <tbody>
+              ${countRows.map((row, index) => `
+                <tr>
+                  <td style="${index < countRows.length - 1 ? 'border-bottom:1px solid #edf2f7;' : ''}padding:11px 14px;font-size:14px;color:#475569;">
+                    <span
+                      style="display:inline-block;border:1px solid ${getCountRowStyles(row.tone).chipBorder};border-radius:9999px;background:${getCountRowStyles(row.tone).chipBackground};padding:5px 9px;font-size:12px;font-weight:700;line-height:1.2;color:${getCountRowStyles(row.tone).chipText};"
+                    >
+                      ${escapeHtml(row.label)}
+                    </span>
+                  </td>
+                  <td style="${index < countRows.length - 1 ? 'border-bottom:1px solid #edf2f7;' : ''}padding:11px 14px;text-align:right;font-size:20px;line-height:1.1;font-weight:700;color:${row.label === 'Skipped' ? '#0f172a' : getCountRowStyles(row.tone).chipText};">${row.value}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <p style="margin:12px 0 0;border-left:3px solid #38bdf8;padding-left:12px;font-size:12px;line-height:1.6;color:#475569;">
           <strong>Skipped:</strong> ${escapeHtml(SKIPPED_FINDINGS_EXPLAINER)}
         </p>
       </div>
 
-      <div style="margin-top:32px;">
+      <div style="margin-top:24px;border-top:1px solid #e2e8f0;padding-top:18px;">
         <a
           href="${escapeHtml(deepLink)}"
-          style="display:inline-block;border-radius:9999px;background:#0284c7;padding:13px 20px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;"
+          style="display:inline-block;border-radius:9999px;background:#0284c7;padding:12px 18px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;"
         >
           View scan results
         </a>
-        <p style="margin:14px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
+        <p style="margin:12px 0 0;font-size:12px;line-height:1.6;color:#64748b;">
           If the button does not work, open this link:<br />
-          <a href="${escapeHtml(deepLink)}" style="color:#111827;text-decoration:underline;word-break:break-all;">${escapeHtml(deepLink)}</a>
+          <a href="${escapeHtml(deepLink)}" style="color:#0f172a;text-decoration:underline;word-break:break-all;">${escapeHtml(deepLink)}</a>
         </p>
       </div>
     `,

@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
 import { BrandScanScheduleFields } from '@/components/brand-scan-schedule-fields';
 import { BrandScanSourceFields } from '@/components/brand-scan-source-fields';
+import { BrandScanTuningFields } from '@/components/brand-scan-tuning-fields';
 import { Navbar } from '@/components/navbar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -23,10 +24,6 @@ import {
   normalizeMaxAiDeepSearches,
   DEFAULT_MAX_AI_DEEP_SEARCHES,
   hasEnabledBrandScanSource,
-  MIN_AI_DEEP_SEARCHES,
-  MAX_AI_DEEP_SEARCHES,
-  MIN_SEARCH_RESULT_PAGES,
-  MAX_SEARCH_RESULT_PAGES,
 } from '@/lib/brands';
 import {
   DEFAULT_SCAN_SCHEDULE_FREQUENCY,
@@ -443,127 +440,27 @@ export default function EditBrandPage() {
                     value={scanSchedule}
                     onChange={setScanSchedule}
                   />
+
+                  <BrandScanTuningFields
+                    searchResultPages={searchResultPages}
+                    onSearchResultPagesChange={setSearchResultPages}
+                    allowAiDeepSearches={allowAiDeepSearches}
+                    onAllowAiDeepSearchesChange={setAllowAiDeepSearches}
+                    maxAiDeepSearches={maxAiDeepSearches}
+                    onMaxAiDeepSearchesChange={setMaxAiDeepSearches}
+                  />
                 </CardContent>
               </Card>
 
               <Card>
                 <CardHeader className="px-6 py-5">
-                  <h2 className="font-semibold text-gray-900">Web scan settings</h2>
+                  <div className="inline-flex items-center gap-1.5">
+                    <h2 className="font-semibold text-gray-900">Scan types</h2>
+                    <InfoTooltip content="Choose which scan types DoppelSpotter should run for this brand. At least one scan source must remain enabled." />
+                  </div>
                 </CardHeader>
-                <CardContent className="space-y-4 p-6">
-                  <div className="space-y-3 border-b border-gray-100 pb-4">
-                    <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-                      Scan sources
-                      <InfoTooltip content="Choose which scan types DoppelSpotter should run for this brand. At least one scan source must remain enabled." />
-                    </div>
-                    <BrandScanSourceFields value={scanSources} onChange={setScanSources} />
-                  </div>
-
-                  <div className="pb-4">
-                    <label htmlFor="search-result-pages" className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-                      Search result pages
-                      <InfoTooltip content="The number of search result pages to request (10 results per page). More pages increases coverage, but scans will be slower." />
-                    </label>
-                    <div className="mt-3">
-                    <div className="flex items-end justify-between gap-4">
-                        <div className="min-w-0">
-                          <p className="text-sm text-gray-500">Fewer pages</p>
-                          <p className="text-xs text-gray-400">Faster</p>
-                        </div>
-                      <span className="text-xs text-gray-400">
-                          {searchResultPages} {searchResultPages === 1 ? 'page' : 'pages'}
-                        </span>
-                        <div className="min-w-0 text-right">
-                          <p className="text-sm text-gray-500">More pages</p>
-                          <p className="text-xs text-gray-400">Slower</p>
-                        </div>
-                      </div>
-                      <input
-                        id="search-result-pages"
-                        type="range"
-                        min={MIN_SEARCH_RESULT_PAGES}
-                        max={MAX_SEARCH_RESULT_PAGES}
-                        step={1}
-                        value={searchResultPages}
-                        onChange={(e) => setSearchResultPages(Number(e.target.value))}
-                        className="mt-4 w-full accent-brand-600"
-                      />
-                      <div className="mt-2 flex justify-between text-xs text-gray-500">
-                        <span>{MIN_SEARCH_RESULT_PAGES}</span>
-                        <span>{MAX_SEARCH_RESULT_PAGES}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex min-w-0 flex-col gap-1">
-                      <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-                        Allow AI analysis to request deeper searches
-                        <InfoTooltip content="Deeper searches allow AI analysis to perform additional searches if it sees something in the search results that gives cause for concern. Deeper searches result in slower scans." />
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={allowAiDeepSearches}
-                      aria-label="Allow AI analysis to request deeper searches"
-                      onClick={() => setAllowAiDeepSearches((prev) => !prev)}
-                      className={`inline-flex items-center gap-2 rounded-md text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
-                        allowAiDeepSearches ? 'text-brand-700' : 'text-gray-600'
-                      }`}
-                    >
-                      <span>{allowAiDeepSearches ? 'On' : 'Off'}</span>
-                      <span
-                        className={`relative inline-flex h-6 w-11 rounded-full transition ${
-                          allowAiDeepSearches ? 'bg-brand-600' : 'bg-gray-300'
-                        }`}
-                      >
-                        <span
-                          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${
-                            allowAiDeepSearches ? 'left-[22px]' : 'left-0.5'
-                          }`}
-                        />
-                      </span>
-                    </button>
-                  </div>
-
-                  {allowAiDeepSearches && (
-                    <div className="-mx-6 border-t border-gray-100 bg-gray-50 px-6 py-4">
-                      <div>
-                        <label htmlFor="max-ai-deep-searches" className="inline-flex items-center gap-1.5 text-xs font-medium text-gray-500">
-                          AI deep searches
-                          <InfoTooltip content="The maximum number of follow-up Google searches that AI analysis is permitted to run. More searches increase coverage, but scans will be slower." />
-                        </label>
-                        <div className="mt-3">
-                          <div className="flex items-end justify-between gap-4">
-                            <div className="min-w-0">
-                              <p className="text-sm text-gray-500">Fewer searches</p>
-                              <p className="text-xs text-gray-400">Faster</p>
-                            </div>
-                            <span className="text-xs text-gray-400">{maxAiDeepSearches} searches</span>
-                            <div className="min-w-0 text-right">
-                              <p className="text-sm text-gray-500">More searches</p>
-                              <p className="text-xs text-gray-400">Slower</p>
-                            </div>
-                          </div>
-                          <input
-                            id="max-ai-deep-searches"
-                            type="range"
-                            min={MIN_AI_DEEP_SEARCHES}
-                            max={MAX_AI_DEEP_SEARCHES}
-                            step={1}
-                            value={maxAiDeepSearches}
-                            onChange={(e) => setMaxAiDeepSearches(Number(e.target.value))}
-                            className="mt-4 w-full accent-brand-600"
-                          />
-                          <div className="mt-2 flex justify-between text-xs text-gray-500">
-                            <span>{MIN_AI_DEEP_SEARCHES}</span>
-                            <span>{MAX_AI_DEEP_SEARCHES}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
+                <CardContent className="p-6">
+                  <BrandScanSourceFields value={scanSources} onChange={setScanSources} />
                 </CardContent>
               </Card>
 
@@ -573,11 +470,20 @@ export default function EditBrandPage() {
                 </p>
               )}
 
-              <Card className="border-red-200">
+              <div className="flex gap-3 justify-end">
+                <Link href={`/brands/${brandId}`}>
+                  <Button type="button" variant="secondary" disabled={deleting}>Cancel</Button>
+                </Link>
+                <Button type="submit" loading={saving} disabled={deleting}>
+                  Save changes
+                </Button>
+              </div>
+
+              <Card className="border-red-200 bg-red-50/40">
                 <CardHeader className="px-6 py-5">
                   <h2 className="font-semibold text-red-700">Danger zone</h2>
                 </CardHeader>
-                <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
+                <CardContent className="flex flex-col gap-4 bg-red-50/40 p-6 sm:flex-row sm:items-center sm:justify-between">
                   <div className="space-y-1">
                     <p className="font-medium text-gray-900">Delete this brand</p>
                     <p className="text-sm text-gray-500">
@@ -605,15 +511,6 @@ export default function EditBrandPage() {
                   {deleteError}
                 </p>
               )}
-
-              <div className="flex gap-3 justify-end">
-                <Link href={`/brands/${brandId}`}>
-                  <Button type="button" variant="secondary" disabled={deleting}>Cancel</Button>
-                </Link>
-                <Button type="submit" loading={saving} disabled={deleting}>
-                  Save changes
-                </Button>
-              </div>
             </form>
           )}
         </div>

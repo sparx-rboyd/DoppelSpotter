@@ -66,15 +66,15 @@ export interface BrandProfile {
   name: string;
   keywords: string[];
   officialDomains: string[];
-  /** Number of Google search result pages to request for both initial and deep-search runs. */
+  /** User-configured scan depth (1-10); Google-backed scans currently map this to search result pages. */
   searchResultPages?: number;
   /** Whether completed scans should send a summary email to the brand owner's account email. */
   sendScanSummaryEmails?: boolean;
-  /** Whether AI analysis may trigger Google deep-search follow-up runs for this brand. */
+  /** Whether AI analysis may trigger follow-up deep-search runs for this brand. */
   allowAiDeepSearches?: boolean;
-  /** Maximum number of AI-requested Google follow-up searches allowed for this brand. */
+  /** User-configured deep search breadth (1-10) limiting AI-requested follow-up searches. */
   maxAiDeepSearches?: number;
-  /** Which Google-based scan surfaces are enabled for this brand. */
+  /** Which scan surfaces are enabled for this brand; current implementations are Google-backed. */
   scanSources?: BrandScanSources;
   /** Internal pointer to the currently active scan for this brand, if any. */
   activeScanId?: string;

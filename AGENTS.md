@@ -94,7 +94,9 @@ remaining lightweight taxonomy label is `theme`.
 ```
 Brand add/edit pages
  └─ persist `brands.sendScanSummaryEmails` to opt the brand into post-scan summary emails
- └─ persist `brands.searchResultPages` to control how many Google SERP pages each initial/deep search run requests
+ └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans currently map it to requested SERP pages
+ └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches
+ └─ persist `brands.maxAiDeepSearches` as the user-facing `Deep search breadth` setting; it caps AI-requested follow-up searches from 1-10
  └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram` so each Google-based scan surface can be enabled or disabled per brand
  └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
  └─ scheduling is anchored from the chosen local start date/time and stored timezone
@@ -114,7 +116,7 @@ POST /api/scan
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
  └─ resolves the brand's enabled logical Google scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`)
- └─ uses `brands.searchResultPages` (default 3, min 1, max 10) as Google Search `maxPagesPerQuery`
+ └─ maps `brands.searchResultPages` (default 3, min 1, max 10) to Google Search `maxPagesPerQuery`
  └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
  └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
  └─ once the scan-level preference hints are ready (or deliberately fail open), replays any deferred succeeded webhooks and then flips the scan to `running`
@@ -237,7 +239,8 @@ When any logical Google scanner runs at depth 0 (initial scan), the webhook coll
 deduped run-level `relatedQueries` and `peopleAlsoAsk` text signals from every SERP page.
 Chunked Google classification assesses candidates only; it does not propose deep-search queries.
 The final deep-search chooser then sees that run-level intent context directly and synthesizes up
-to the brand's configured `maxAiDeepSearches` follow-up Google queries (1-10). Deep-search
+to the brand's configured `maxAiDeepSearches` follow-up queries (1-10). In the current
+Google-backed pipeline, these are follow-up Google queries. Deep-search
 prompts treat that configured count as a hard cap rather than a target, and steer the model
 towards broader theme-led queries instead of narrow named websites, platforms, resources, books,
 or tools unless a named target is itself the key abuse vector. Specialist scanners additionally
