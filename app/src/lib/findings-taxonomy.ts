@@ -1,6 +1,7 @@
 import { db } from '@/lib/firestore';
 
 export const MAX_FINDING_TAXONOMY_WORDS = 3;
+const OTHER_FINDING_TAXONOMY_KEY = 'other';
 
 export interface FindingTaxonomyOptions {
   platforms: string[];
@@ -9,6 +10,19 @@ export interface FindingTaxonomyOptions {
 
 function normalizeFindingTaxonomyKey(label: string) {
   return label.toLowerCase();
+}
+
+function compareFindingTaxonomyLabels(a: string, b: string) {
+  const aKey = normalizeFindingTaxonomyKey(a);
+  const bKey = normalizeFindingTaxonomyKey(b);
+  const aIsOther = aKey === OTHER_FINDING_TAXONOMY_KEY;
+  const bIsOther = bKey === OTHER_FINDING_TAXONOMY_KEY;
+
+  if (aIsOther !== bIsOther) {
+    return aIsOther ? 1 : -1;
+  }
+
+  return a.localeCompare(b, 'en', { sensitivity: 'base' });
 }
 
 export function normalizeFindingTaxonomyLabel(value: unknown): string | undefined {
@@ -37,14 +51,15 @@ export function dedupeFindingTaxonomyLabels(values: Iterable<unknown>): string[]
     }
   }
 
-  return Array.from(deduped.values()).sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+  return Array.from(deduped.values()).sort(compareFindingTaxonomyLabels);
 }
 
 export async function loadBrandFindingTaxonomy(params: {
   brandId: string;
   userId: string;
+  excludeScanId?: string;
 }): Promise<FindingTaxonomyOptions> {
-  const { brandId, userId } = params;
+  const { brandId, userId, excludeScanId } = params;
 
   const snapshot = await db
     .collection('findings')
@@ -52,9 +67,12 @@ export async function loadBrandFindingTaxonomy(params: {
     .where('userId', '==', userId)
     .select('platform', 'theme')
     .get();
+  const docs = excludeScanId
+    ? snapshot.docs.filter((doc) => doc.get('scanId') !== excludeScanId)
+    : snapshot.docs;
 
   return {
-    platforms: dedupeFindingTaxonomyLabels(snapshot.docs.map((doc) => doc.get('platform'))),
-    themes: dedupeFindingTaxonomyLabels(snapshot.docs.map((doc) => doc.get('theme'))),
+    platforms: dedupeFindingTaxonomyLabels(docs.map((doc) => doc.get('platform'))),
+    themes: dedupeFindingTaxonomyLabels(docs.map((doc) => doc.get('theme'))),
   };
 }

@@ -13,7 +13,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   if (error) return error;
 
   const { brandId } = await params;
-  void request;
+  const excludeScanId = request.nextUrl.searchParams.get('excludeScanId')?.trim() || undefined;
 
   const brandDoc = await db.collection('brands').doc(brandId).get();
   if (!brandDoc.exists) return errorResponse('Brand not found', 404);
@@ -22,6 +22,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const taxonomy = await loadBrandFindingTaxonomy({
     brandId,
     userId: uid,
+    excludeScanId,
   });
 
   return NextResponse.json({ data: taxonomy });

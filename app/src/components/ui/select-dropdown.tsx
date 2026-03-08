@@ -45,6 +45,8 @@ type SelectDropdownProps = {
   emptyMessage?: string;
   triggerClassName?: string;
   panelClassName?: string;
+  matchTriggerWidth?: boolean;
+  dividerAfterValue?: string;
 };
 
 const FLOATING_PANEL_GAP_PX = 8;
@@ -249,10 +251,14 @@ export function SelectDropdown({
   emptyMessage = 'No matching options.',
   triggerClassName,
   panelClassName,
+  matchTriggerWidth = true,
+  dividerAfterValue,
 }: SelectDropdownProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const listContainerRef = useRef<HTMLDivElement>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [scrollCueState, setScrollCueState] = useState({ showTop: false, showBottom: false });
 
   const selectedOption = options.find((option) => option.value === value) ?? options[0];
   const filteredOptions = useMemo(() => {
@@ -261,6 +267,28 @@ export function SelectDropdown({
     const normalizedQuery = query.trim().toLowerCase();
     return options.filter((option) => option.label.toLowerCase().includes(normalizedQuery));
   }, [options, query, searchable]);
+
+  const updateScrollCues = useCallback(() => {
+    const container = listContainerRef.current;
+    if (!container) {
+      setScrollCueState((current) => (
+        current.showTop || current.showBottom
+          ? { showTop: false, showBottom: false }
+          : current
+      ));
+      return;
+    }
+
+    const canScroll = container.scrollHeight - container.clientHeight > 1;
+    const showTop = canScroll && container.scrollTop > 1;
+    const showBottom = canScroll && container.scrollTop + container.clientHeight < container.scrollHeight - 1;
+
+    setScrollCueState((current) => (
+      current.showTop === showTop && current.showBottom === showBottom
+        ? current
+        : { showTop, showBottom }
+    ));
+  }, []);
 
   useEffect(() => {
     if (disabled) {
@@ -273,6 +301,22 @@ export function SelectDropdown({
       setQuery('');
     }
   }, [isOpen]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setScrollCueState((current) => (
+        current.showTop || current.showBottom
+          ? { showTop: false, showBottom: false }
+          : current
+      ));
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(updateScrollCues);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [filteredOptions, isOpen, updateScrollCues]);
 
   return (
     <div className="flex flex-col gap-1">
@@ -301,6 +345,7 @@ export function SelectDropdown({
         anchorRef={triggerRef as MutableRefObject<HTMLElement | null>}
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
+        matchTriggerWidth={matchTriggerWidth}
         className={panelClassName}
       >
         {searchable && (
@@ -315,34 +360,63 @@ export function SelectDropdown({
           </div>
         )}
 
-        <div className="max-h-64 overflow-auto">
-          {filteredOptions.length > 0 ? (
-            filteredOptions.map((option) => {
-              const isSelected = option.value === value;
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  role="option"
-                  aria-selected={isSelected}
-                  onClick={() => {
-                    onChange(option.value);
-                    setIsOpen(false);
-                  }}
-                  className={cn(
-                    'flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm transition',
-                    isSelected
-                      ? 'bg-brand-50 text-brand-700'
-                      : 'text-gray-700 hover:bg-gray-50',
-                  )}
-                >
-                  <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
-                  <Check className={cn('h-4 w-4', isSelected ? 'opacity-100' : 'opacity-0')} />
-                </button>
-              );
-            })
-          ) : (
-            <p className="px-3 py-2 text-sm text-gray-400">{emptyMessage}</p>
+        <div className="relative">
+          <div
+            ref={listContainerRef}
+            className="max-h-64 overflow-auto"
+            onScroll={updateScrollCues}
+          >
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((option, index) => {
+                const isSelected = option.value === value;
+                const shouldShowDivider = option.value === dividerAfterValue && index < filteredOptions.length - 1;
+                return (
+                  <div
+                    key={option.value}
+                    className={cn(shouldShowDivider && 'mb-1 border-b border-gray-100 pb-1')}
+                  >
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      onClick={() => {
+                        onChange(option.value);
+                        setIsOpen(false);
+                      }}
+                      className={cn(
+                        'flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm transition',
+                        isSelected
+                          ? 'bg-brand-50 text-brand-700'
+                          : 'text-gray-700 hover:bg-gray-50',
+                      )}
+                    >
+                      <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
+                      <Check className={cn('h-4 w-4', isSelected ? 'opacity-100' : 'opacity-0')} />
+                    </button>
+                  </div>
+                );
+              })
+            ) : (
+              <p className="px-3 py-2 text-sm text-gray-400">{emptyMessage}</p>
+            )}
+          </div>
+
+          {scrollCueState.showTop && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-6 items-start justify-center bg-gradient-to-b from-white via-white/95 to-transparent"
+            >
+              <ChevronDown className="mt-0.5 h-3.5 w-3.5 rotate-180 text-gray-300" />
+            </div>
+          )}
+
+          {scrollCueState.showBottom && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex h-6 items-end justify-center bg-gradient-to-t from-white via-white/95 to-transparent"
+            >
+              <ChevronDown className="mb-0.5 h-3.5 w-3.5 text-gray-300" />
+            </div>
           )}
         </div>
       </FloatingPanel>

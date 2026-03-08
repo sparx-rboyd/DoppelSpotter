@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
@@ -31,6 +31,7 @@ const ACTIVE_SCAN_DELETE_TOOLTIP =
   "Scan history can't be changed while a scan is running because current results are compared against previous findings.";
 const CLEARING_HISTORY_DELETE_TOOLTIP = 'Please wait while scan history is being deleted.';
 const SCAN_RESULT_SET_HASH_PREFIX = 'scan-result-set-';
+const OTHER_FINDING_TAXONOMY_KEY = 'other';
 
 type BookmarkUpdate = {
   isBookmarked?: boolean;
@@ -235,6 +236,33 @@ function normalizeFindingsTaxonomyValue(value?: string) {
   return value?.toLowerCase().replace(/\s+/g, ' ').trim() ?? '';
 }
 
+function compareFindingTaxonomyLabels(a: string, b: string) {
+  const aIsOther = normalizeFindingsTaxonomyValue(a) === OTHER_FINDING_TAXONOMY_KEY;
+  const bIsOther = normalizeFindingsTaxonomyValue(b) === OTHER_FINDING_TAXONOMY_KEY;
+
+  if (aIsOther !== bIsOther) {
+    return aIsOther ? 1 : -1;
+  }
+
+  return a.localeCompare(b, 'en', { sensitivity: 'base' });
+}
+
+function collectDistinctFindingTaxonomyLabels(values: Array<string | undefined>) {
+  const byKey = new Map<string, string>();
+
+  for (const value of values) {
+    const normalized = value?.replace(/\s+/g, ' ').trim();
+    if (!normalized) continue;
+
+    const key = normalizeFindingsTaxonomyValue(normalized);
+    if (!key || !byKey.has(key)) {
+      byKey.set(key, normalized);
+    }
+  }
+
+  return Array.from(byKey.values()).sort(compareFindingTaxonomyLabels);
+}
+
 function getScanResultSetAnchorId(scanId: string) {
   return `${SCAN_RESULT_SET_HASH_PREFIX}${scanId}`;
 }
@@ -352,6 +380,8 @@ export default function BrandDetailPage() {
   const [activeScanId, setActiveScanId] = useState<string | null>(null);
   const [activeScan, setActiveScan] = useState<Scan | null>(null);
   const [liveScanFindings, setLiveScanFindings] = useState<FindingSummary[]>([]);
+  const [liveScanNonHits, setLiveScanNonHits] = useState<FindingSummary[]>([]);
+  const [showLiveScanNonHits, setShowLiveScanNonHits] = useState(false);
   const [error, setError] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -525,9 +555,17 @@ export default function BrandDetailPage() {
     }
   }
 
-  async function loadFindingTaxonomyOptions() {
+  const loadFindingTaxonomyOptions = useCallback(async (options?: { excludeScanId?: string | null }) => {
     try {
-      const res = await fetch(`/api/brands/${brandId}/findings/taxonomy`, { credentials: 'same-origin' });
+      const params = new URLSearchParams();
+      if (options?.excludeScanId) {
+        params.set('excludeScanId', options.excludeScanId);
+      }
+      const queryString = params.toString();
+      const res = await fetch(
+        `/api/brands/${brandId}/findings/taxonomy${queryString ? `?${queryString}` : ''}`,
+        { credentials: 'same-origin' },
+      );
       if (res.ok) {
         const json = await res.json();
         setFindingTaxonomyOptions({
@@ -538,7 +576,13 @@ export default function BrandDetailPage() {
     } catch {
       // Non-critical
     }
-  }
+  }, [brandId]);
+
+  useEffect(() => {
+    void loadFindingTaxonomyOptions({
+      excludeScanId: activeScanId,
+    });
+  }, [activeScanId, loadFindingTaxonomyOptions]);
 
   async function fetchLiveFindings(scanId: string) {
     try {
@@ -550,6 +594,25 @@ export default function BrandDetailPage() {
     } catch {
       // Non-critical — polling will retry
     }
+  }
+
+  async function fetchLiveNonHits(scanId: string) {
+    try {
+      const res = await fetch(`/api/brands/${brandId}/findings?scanId=${scanId}&nonHitsOnly=true`, { credentials: 'same-origin' });
+      if (res.ok) {
+        const json = await res.json();
+        setLiveScanNonHits(json.data ?? []);
+      }
+    } catch {
+      // Non-critical — polling will retry
+    }
+  }
+
+  async function fetchLiveScanBuckets(scanId: string) {
+    await Promise.all([
+      fetchLiveFindings(scanId),
+      fetchLiveNonHits(scanId),
+    ]);
   }
 
   function updateFindingList(
@@ -609,9 +672,11 @@ export default function BrandDetailPage() {
     setActiveScanId(scan.id);
     setActiveScan(scan);
     setLiveScanFindings([]);
+    setLiveScanNonHits([]);
+    setShowLiveScanNonHits(false);
     setStoredScanId(brandId, scan.id);
     startPolling(scan.id);
-    void fetchLiveFindings(scan.id);
+    void fetchLiveScanBuckets(scan.id);
   }
 
   async function restoreActiveScan(): Promise<boolean> {
@@ -665,6 +730,7 @@ export default function BrandDetailPage() {
     setScanNonHits((prev) => updateFindingMap(prev, triggerFinding.id, applyMetadataUpdate));
     setScanIgnored((prev) => updateFindingMap(prev, triggerFinding.id, applyMetadataUpdate));
     setLiveScanFindings((prev) => updateFindingList(prev, triggerFinding.id, applyMetadataUpdate));
+    setLiveScanNonHits((prev) => updateFindingList(prev, triggerFinding.id, applyMetadataUpdate));
     setAllAddressedFindings((prev) => updateFindingList(prev, triggerFinding.id, applyMetadataUpdate));
     setAllIgnoredFindings((prev) => updateFindingList(prev, triggerFinding.id, applyMetadataUpdate));
     setAllBookmarkedFindings((prev) => {
@@ -979,6 +1045,7 @@ export default function BrandDetailPage() {
       return acc;
     }, {});
     const nextAddressedFindings = affectedFindings.filter((finding) => getFindingDisplayBucket(finding) === 'addressed');
+    const nextLiveHits = affectedFindings.filter((finding) => getFindingDisplayBucket(finding) === 'hit');
 
     setScanFindings((prev) => {
       let changed = false;
@@ -995,11 +1062,8 @@ export default function BrandDetailPage() {
       return changed ? next : prev;
     });
 
-    setLiveScanFindings((prev) => prev.flatMap((finding) => {
-      const updated = affectedFindingsById.get(finding.id);
-      if (!updated) return [finding];
-      return getFindingDisplayBucket(updated) === 'hit' ? [updated] : [];
-    }));
+    setLiveScanFindings((prev) => upsertFindingsIntoList(removeFindingsFromList(prev, affectedIds), nextLiveHits));
+    setLiveScanNonHits((prev) => removeFindingsFromList(prev, affectedIds));
     setAllAddressedFindings((prev) => {
       const next = removeFindingsFromList(prev, affectedIds);
       return nextAddressedFindings.length > 0 ? upsertFindingsIntoList(next, nextAddressedFindings) : next;
@@ -1080,6 +1144,8 @@ export default function BrandDetailPage() {
       nextIgnoredByScanId[scanId] = findings.filter((finding) => getFindingDisplayBucket(finding) === 'ignored');
       nextAddressedFindings.push(...findings.filter((finding) => getFindingDisplayBucket(finding) === 'addressed'));
     }
+    const nextLiveHits = affectedFindings.filter((finding) => getFindingDisplayBucket(finding) === 'hit');
+    const nextLiveNonHits = affectedFindings.filter((finding) => getFindingDisplayBucket(finding) === 'non-hit');
 
     setScanFindings((prev) => {
       let changed = false;
@@ -1126,11 +1192,8 @@ export default function BrandDetailPage() {
       return changed ? next : prev;
     });
 
-    setLiveScanFindings((prev) => prev.flatMap((finding) => {
-      const updated = affectedFindingsById.get(finding.id);
-      if (!updated) return [finding];
-      return getFindingDisplayBucket(updated) === 'hit' ? [updated] : [];
-    }));
+    setLiveScanFindings((prev) => upsertFindingsIntoList(removeFindingsFromList(prev, affectedIds), nextLiveHits));
+    setLiveScanNonHits((prev) => upsertFindingsIntoList(removeFindingsFromList(prev, affectedIds), nextLiveNonHits));
     setAllIgnoredFindings((prev) => {
       const next = removeFindingsFromList(prev, affectedIds);
       const additions = affectedFindings.filter((finding) => getFindingDisplayBucket(finding) === 'ignored');
@@ -1301,27 +1364,71 @@ export default function BrandDetailPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAnyFindingFilterActive, scans, scanFindings, scanNonHits, scanIgnored]);
 
+  const availableFindingPlatforms = useMemo(() => collectDistinctFindingTaxonomyLabels([
+    ...findingTaxonomyOptions.platforms,
+    ...allBookmarkedFindings.map((finding) => finding.platform),
+    ...allAddressedFindings.map((finding) => finding.platform),
+    ...allIgnoredFindings.map((finding) => finding.platform),
+    ...liveScanFindings.map((finding) => finding.platform),
+    ...liveScanNonHits.map((finding) => finding.platform),
+    ...Object.values(scanFindings).flat().map((finding) => finding.platform),
+    ...Object.values(scanNonHits).flat().map((finding) => finding.platform),
+    ...Object.values(scanIgnored).flat().map((finding) => finding.platform),
+  ]), [
+    findingTaxonomyOptions.platforms,
+    allBookmarkedFindings,
+    allAddressedFindings,
+    allIgnoredFindings,
+    liveScanFindings,
+    liveScanNonHits,
+    scanFindings,
+    scanNonHits,
+    scanIgnored,
+  ]);
+
+  const availableFindingThemes = useMemo(() => collectDistinctFindingTaxonomyLabels([
+    ...findingTaxonomyOptions.themes,
+    ...allBookmarkedFindings.map((finding) => finding.theme),
+    ...allAddressedFindings.map((finding) => finding.theme),
+    ...allIgnoredFindings.map((finding) => finding.theme),
+    ...liveScanFindings.map((finding) => finding.theme),
+    ...liveScanNonHits.map((finding) => finding.theme),
+    ...Object.values(scanFindings).flat().map((finding) => finding.theme),
+    ...Object.values(scanNonHits).flat().map((finding) => finding.theme),
+    ...Object.values(scanIgnored).flat().map((finding) => finding.theme),
+  ]), [
+    findingTaxonomyOptions.themes,
+    allBookmarkedFindings,
+    allAddressedFindings,
+    allIgnoredFindings,
+    liveScanFindings,
+    liveScanNonHits,
+    scanFindings,
+    scanNonHits,
+    scanIgnored,
+  ]);
+
   useEffect(() => {
     if (
       normalizedSelectedFindingPlatform
-      && !findingTaxonomyOptions.platforms.some(
+      && !availableFindingPlatforms.some(
         (platform) => normalizeFindingsTaxonomyValue(platform) === normalizedSelectedFindingPlatform,
       )
     ) {
       setSelectedFindingPlatform('');
     }
-  }, [findingTaxonomyOptions.platforms, normalizedSelectedFindingPlatform]);
+  }, [availableFindingPlatforms, normalizedSelectedFindingPlatform]);
 
   useEffect(() => {
     if (
       normalizedSelectedFindingTheme
-      && !findingTaxonomyOptions.themes.some(
+      && !availableFindingThemes.some(
         (theme) => normalizeFindingsTaxonomyValue(theme) === normalizedSelectedFindingTheme,
       )
     ) {
       setSelectedFindingTheme('');
     }
-  }, [findingTaxonomyOptions.themes, normalizedSelectedFindingTheme]);
+  }, [availableFindingThemes, normalizedSelectedFindingTheme]);
 
   useEffect(() => {
     return () => {
@@ -1378,7 +1485,7 @@ export default function BrandDetailPage() {
           // Fetch the final findings so they appear in the live section right before
           // the transition — this catches results from batch-mode scans that complete
           // in one go and are otherwise too brief to catch via polling.
-          await fetchLiveFindings(scanId);
+          await fetchLiveScanBuckets(scanId);
           // Fetch the scan list before transitioning so that:
           //   (a) the completed scan row and its loading state are ready to render
           //       the moment the live section disappears, and
@@ -1395,6 +1502,8 @@ export default function BrandDetailPage() {
           setActiveScanId(null);
           setActiveScan(null);
           setLiveScanFindings([]);
+          setLiveScanNonHits([]);
+          setShowLiveScanNonHits(false);
           // (scan complete — findings visible in the scan list row)
         } else if (scan.status === 'failed') {
           stopPolling();
@@ -1403,6 +1512,8 @@ export default function BrandDetailPage() {
           setCancelling(false);
           setActiveScanId(null);
           setLiveScanFindings([]);
+          setLiveScanNonHits([]);
+          setShowLiveScanNonHits(false);
           setError(scan.errorMessage ?? 'Scan failed');
           setActiveScan(null);
           await refreshBrandProfile().catch(() => {
@@ -1416,6 +1527,8 @@ export default function BrandDetailPage() {
           setCancelling(false);
           setActiveScanId(null);
           setLiveScanFindings([]);
+          setLiveScanNonHits([]);
+          setShowLiveScanNonHits(false);
           setActiveScan(null);
           await refreshBrandProfile().catch(() => {
             // Non-critical
@@ -1423,7 +1536,7 @@ export default function BrandDetailPage() {
           await fetchScans();
         } else {
           // Scan still running — refresh live findings
-          await fetchLiveFindings(scanId);
+          await fetchLiveScanBuckets(scanId);
         }
       } catch {
         // Transient poll failure — keep trying
@@ -1441,6 +1554,8 @@ export default function BrandDetailPage() {
     setActiveScanId(null);
     setActiveScan(null);
     setLiveScanFindings([]);
+    setLiveScanNonHits([]);
+    setShowLiveScanNonHits(false);
 
     try {
       const res = await fetch('/api/scan', {
@@ -1894,11 +2009,11 @@ export default function BrandDetailPage() {
       : 'filters';
   const findingPlatformOptions = [
     { value: '', label: 'All platforms' },
-    ...findingTaxonomyOptions.platforms.map((platform) => ({ value: platform, label: platform })),
+    ...availableFindingPlatforms.map((platform) => ({ value: platform, label: platform })),
   ];
   const findingThemeOptions = [
     { value: '', label: 'All themes' },
-    ...findingTaxonomyOptions.themes.map((theme) => ({ value: theme, label: theme })),
+    ...availableFindingThemes.map((theme) => ({ value: theme, label: theme })),
   ];
   const visibleBookmarkedFindings = filterFindings(allBookmarkedFindings) ?? [];
   const bookmarkedHits = visibleBookmarkedFindings.filter((finding) => !finding.isFalsePositive);
@@ -1909,6 +2024,7 @@ export default function BrandDetailPage() {
   const visibleIgnoredFindings = filterFindings(allIgnoredFindings) ?? [];
   const visibleIgnoredCount = visibleIgnoredFindings.length;
   const visibleLiveScanFindings = filterFindings(liveScanFindings) ?? [];
+  const visibleLiveScanNonHits = sortBySeverity(filterFindings(liveScanNonHits) ?? []);
   const scansToRender = anchorTargetScanId
     ? scans
     : isAnyFindingFilterActive
@@ -1921,6 +2037,7 @@ export default function BrandDetailPage() {
       : scans;
   const hasVisibleScanMatches = (
     visibleLiveScanFindings.length > 0
+    || visibleLiveScanNonHits.length > 0
     || scansToRender.length > 0
   );
   const clearHistoryDisabledReason = scanning
@@ -2094,6 +2211,9 @@ export default function BrandDetailPage() {
                         options={findingPlatformOptions}
                         onChange={setSelectedFindingPlatform}
                         triggerClassName="min-w-[11rem] border-white/20"
+                        matchTriggerWidth={false}
+                        panelClassName="min-w-[16rem] max-w-[calc(100vw-1.5rem)]"
+                        dividerAfterValue=""
                       />
                       <SelectDropdown
                         id="findings-theme-filter"
@@ -2102,6 +2222,9 @@ export default function BrandDetailPage() {
                         options={findingThemeOptions}
                         onChange={setSelectedFindingTheme}
                         triggerClassName="min-w-[11rem] border-white/20"
+                        matchTriggerWidth={false}
+                        panelClassName="min-w-[16rem] max-w-[calc(100vw-1.5rem)]"
+                        dividerAfterValue=""
                       />
                     </div>
                   </div>
@@ -2324,93 +2447,155 @@ export default function BrandDetailPage() {
                     {activeTab === 'scans' && (
                       <div className="space-y-4">
                         {scanning && (
-                          <div className="overflow-hidden rounded-xl border border-brand-200 bg-white">
-                            <div className="bg-brand-50/40 px-6 py-4">
-                              <div className="flex items-start justify-between gap-4">
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex min-w-0 items-center gap-3 text-left">
-                                    <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
-                                    <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
-                                      Scan in progress
-                                    </span>
-                                    {visibleLiveScanFindings.length > 0 && (
-                                      <SeverityPills
-                                        high={visibleLiveScanFindings.filter((f) => f.severity === 'high').length}
-                                        medium={visibleLiveScanFindings.filter((f) => f.severity === 'medium').length}
-                                        low={visibleLiveScanFindings.filter((f) => f.severity === 'low').length}
-                                      />
+                          (() => {
+                            const showLiveNonHitsSection = isAnyFindingFilterActive
+                              ? visibleLiveScanNonHits.length > 0
+                              : showLiveScanNonHits;
+
+                            return (
+                              <div className="overflow-hidden rounded-xl border border-brand-200 bg-white">
+                                <div className="bg-brand-50/40 px-6 py-4">
+                                  <div className="flex items-start justify-between gap-4">
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex min-w-0 items-center gap-3 text-left">
+                                        <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
+                                        <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
+                                          Scan in progress
+                                        </span>
+                                        {visibleLiveScanFindings.length > 0 && (
+                                          <SeverityPills
+                                            high={visibleLiveScanFindings.filter((f) => f.severity === 'high').length}
+                                            medium={visibleLiveScanFindings.filter((f) => f.severity === 'medium').length}
+                                            low={visibleLiveScanFindings.filter((f) => f.severity === 'low').length}
+                                          />
+                                        )}
+                                      </div>
+                                      <div className="mt-3 pl-7">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <span className="text-sm font-medium text-brand-700">
+                                            {cancelling ? 'Cancelling scan' : getScanStatusLabel()}
+                                          </span>
+                                          {isDeepSearchActive && !cancelling && (
+                                            <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700">
+                                              Deep search
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-brand-100">
+                                          <div
+                                            className="h-full rounded-full bg-brand-600 transition-all duration-500"
+                                            style={{ width: `${displayedScanProgressPct}%` }}
+                                          />
+                                        </div>
+                                        {!cancelling && !isSummarisingFindings && getDeepSearchProgressSubtext() && (
+                                          <p className="mt-3 text-xs text-brand-700/80">
+                                            {getDeepSearchProgressSubtext()}
+                                          </p>
+                                        )}
+                                        {!cancelling && !isSummarisingFindings && getSkippedDuplicateSubtext() && (
+                                          <p className="mt-2 text-xs text-brand-700/80">
+                                            {getSkippedDuplicateSubtext()}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {!cancelling && (
+                                      <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={cancelScan}
+                                        className="flex-shrink-0 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
+                                      >
+                                        <X className="w-3.5 h-3.5" />
+                                        Cancel
+                                      </Button>
                                     )}
                                   </div>
-                                  <div className="mt-3 pl-7">
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <span className="text-sm font-medium text-brand-700">
-                                        {cancelling ? 'Cancelling scan' : getScanStatusLabel()}
+                                </div>
+                                <div className="border-t border-brand-100 bg-brand-50/30 px-4 py-5 sm:px-6">
+                                  {visibleLiveScanFindings.length === 0 && visibleLiveScanNonHits.length === 0 ? (
+                                    <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
+                                      <Loader2 className="w-4 h-4 animate-spin" />
+                                      <span className="text-sm">
+                                        {isAnyFindingFilterActive ? `No live findings match the current ${activeFindingsFilterLabel} yet.` : 'Waiting for first results…'}
                                       </span>
-                                      {isDeepSearchActive && !cancelling && (
-                                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700">
-                                          Deep search
-                                        </span>
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-4">
+                                      {visibleLiveScanFindings.length === 0 ? (
+                                        !isAnyFindingFilterActive && (
+                                          <div className="flex flex-col items-center justify-center gap-2 py-6">
+                                            <Shield className="w-5 h-5 text-brand-300" />
+                                            <p className="text-sm text-gray-400">
+                                              No live findings detected yet.
+                                            </p>
+                                          </div>
+                                        )
+                                      ) : (
+                                        <div className="space-y-3">
+                                          {(['high', 'medium', 'low'] as const)
+                                            .filter((sev) => visibleLiveScanFindings.some((f) => f.severity === sev))
+                                            .map((sev) => (
+                                              <SeverityGroup
+                                                key={`live-${sev}`}
+                                                severity={sev}
+                                                findings={visibleLiveScanFindings.filter((f) => f.severity === sev)}
+                                                onReclassify={handleReclassifyFinding}
+                                                onBookmarkUpdate={handleBookmarkUpdate}
+                                                onNoteUpdate={handleFindingNoteUpdate}
+                                                forceExpanded={isAnyFindingFilterActive}
+                                                highlightQuery={activeHighlightQuery}
+                                              />
+                                            ))}
+                                        </div>
+                                      )}
+
+                                      {visibleLiveScanNonHits.length > 0 && (
+                                        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              if (isAnyFindingFilterActive) return;
+                                              setShowLiveScanNonHits((prev) => !prev);
+                                            }}
+                                            className={cn(
+                                              "flex w-full items-center gap-2 px-4 py-3 text-left transition",
+                                              showLiveNonHitsSection ? "border-b border-gray-100 bg-gray-50" : "hover:bg-gray-50",
+                                            )}
+                                          >
+                                            {showLiveNonHitsSection
+                                              ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
+                                              : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
+                                            <span className="text-sm font-medium text-gray-500">
+                                              Non-hits
+                                              <span className="ml-1.5 text-xs font-normal text-gray-400">
+                                                ({visibleLiveScanNonHits.length})
+                                              </span>
+                                            </span>
+                                            <span className="text-xs text-gray-400">· classified as false positives by AI · reclassify to any category</span>
+                                          </button>
+                                          {showLiveNonHitsSection && (
+                                            <div className="space-y-4 border-t border-gray-100 p-4">
+                                              {visibleLiveScanNonHits.map((finding) => (
+                                                <FindingCard
+                                                  key={finding.id}
+                                                  finding={finding}
+                                                  highlightQuery={activeHighlightQuery}
+                                                  onReclassify={handleReclassifyFinding}
+                                                  onBookmarkUpdate={handleBookmarkUpdate}
+                                                  onNoteUpdate={handleFindingNoteUpdate}
+                                                />
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
                                       )}
                                     </div>
-                                    <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-brand-100">
-                                      <div
-                                        className="h-full rounded-full bg-brand-600 transition-all duration-500"
-                                        style={{ width: `${displayedScanProgressPct}%` }}
-                                      />
-                                    </div>
-                                    {!cancelling && !isSummarisingFindings && getDeepSearchProgressSubtext() && (
-                                      <p className="mt-3 text-xs text-brand-700/80">
-                                        {getDeepSearchProgressSubtext()}
-                                      </p>
-                                    )}
-                                    {!cancelling && !isSummarisingFindings && getSkippedDuplicateSubtext() && (
-                                      <p className="mt-2 text-xs text-brand-700/80">
-                                        {getSkippedDuplicateSubtext()}
-                                      </p>
-                                    )}
-                                  </div>
+                                  )}
                                 </div>
-                                {!cancelling && (
-                                  <Button
-                                    variant="secondary"
-                                    size="sm"
-                                    onClick={cancelScan}
-                                    className="flex-shrink-0 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
-                                  >
-                                    <X className="w-3.5 h-3.5" />
-                                    Cancel
-                                  </Button>
-                                )}
                               </div>
-                            </div>
-                            <div className="border-t border-brand-100 bg-brand-50/30 px-4 py-5 sm:px-6">
-                              {visibleLiveScanFindings.length === 0 ? (
-                                <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
-                                  <Loader2 className="w-4 h-4 animate-spin" />
-                                  <span className="text-sm">
-                                    {isAnyFindingFilterActive ? `No live findings match the current ${activeFindingsFilterLabel} yet.` : 'Waiting for first results…'}
-                                  </span>
-                                </div>
-                              ) : (
-                                <div className="space-y-3">
-                                  {(['high', 'medium', 'low'] as const)
-                                    .filter((sev) => visibleLiveScanFindings.some((f) => f.severity === sev))
-                                    .map((sev) => (
-                                      <SeverityGroup
-                                        key={`live-${sev}`}
-                                        severity={sev}
-                                        findings={visibleLiveScanFindings.filter((f) => f.severity === sev)}
-                                        onReclassify={handleReclassifyFinding}
-                                        onBookmarkUpdate={handleBookmarkUpdate}
-                                        onNoteUpdate={handleFindingNoteUpdate}
-                                        forceExpanded={isAnyFindingFilterActive}
-                                        highlightQuery={activeHighlightQuery}
-                                      />
-                                    ))}
-                                </div>
-                              )}
-                            </div>
-                          </div>
+                            );
+                          })()
                         )}
 
                         {isAnyFindingFilterActive && findingsSearchLoading ? (

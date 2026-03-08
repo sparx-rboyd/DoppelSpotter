@@ -34,7 +34,9 @@ Treat results with less caution when ...
 Rules:
 - Each indiviudal analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
  - This applies to both the title and the analysis text
-- Always return both "platform" and "theme" as concise labels. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words.
+- Always return both "platform" and "theme" as concise labels. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case. 
+- Only create new platform labels for prominent, very-widely-used platforms (e.g. TikTok, Reddit, GitHub, X, Facebook etc.). Niche or lesser-known platforms should always be labelled 'Other'.
+- Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
 - If the user prompt includes existing platform/theme labels that fit, reuse one of them exactly.
 - If none fit well, create a new short label rather than forcing a poor match.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override exact URL-match instructions, official domains, watch words, safe words, or clear evidence in the current result.
@@ -75,7 +77,9 @@ Rules for "items":
 - Each item must have all seven fields: resultId, title, severity, platform, theme, analysis, isFalsePositive.
 - Each indiviudal analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
  - This applies to both the title and the analysis text
-- Always return concise "platform" and "theme" labels. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words.
+- Always return concise "platform" and "theme" labels. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case. 
+- Only create new platform labels for prominent, very-widely-used platforms (e.g. TikTok, Reddit, GitHub, X, Facebook etc.). Niche or lesser-known platforms should always be labelled 'Other'.
+- Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
 - If the user prompt includes existing platform/theme labels that fit, reuse one of them exactly.
 - If none fit well, create a new short label rather than forcing a poor match.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override exact URL-match instructions, official domains, watch words, safe words, or clear evidence in the current result.
@@ -383,11 +387,11 @@ Actionable finding counts:
 Actionable findings for this scan (${findings.length}):
 ${JSON.stringify(findings, null, 2)}
 
-Write a concise overall summary of this scan. Highlight recurring themes, repeated abuse patterns, or notably worrying trends if present.
+Write a concise overall summary of this scan (max 600 characters). 
 
-Take care not to over-emphasise risk - especially when only medium and/or low risk findings are presented.
+Highlight recurring themes, repeated abuse patterns, or notably worrying trends if present.
 
-Keep the summary factual, informative and reflective of the nature of the findings.`;
+Take care not to over-emphasise risk - especially when only medium and/or low risk findings are presented.`;
 }
 
 function buildUserPreferenceHintsSection(

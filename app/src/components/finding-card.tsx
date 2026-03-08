@@ -10,7 +10,6 @@ import {
   Instagram,
   Twitter,
   Facebook,
-  Search,
   Smartphone,
   BookMarked,
   Info,
@@ -124,10 +123,10 @@ const sourceConfig: Record<
     label: 'TikTok',
   },
   google: {
-    icon: Search,
+    icon: Globe,
     bgClass: 'bg-brand-50',
     textClass: 'text-brand-600',
-    label: 'Google Search',
+    label: 'Web search',
     iconClassName: 'w-4 h-4 sm:w-[18px] sm:h-[18px]',
   },
   'google-play': {
@@ -454,14 +453,18 @@ export function FindingCard({
       >
         {/* Source icon */}
         <div className="flex items-start gap-3 sm:gap-5">
-          <div
-            className={cn(
-              'p-2 sm:p-3 rounded-lg flex-shrink-0',
-              muted ? 'bg-gray-100 text-gray-400' : cn(src.bgClass, src.textClass),
-            )}
-          >
-            <Icon className={src.iconClassName ?? 'w-5 h-5 sm:w-6 sm:h-6'} />
-          </div>
+          <Tooltip content={src.label}>
+            <span
+              role="img"
+              aria-label={src.label}
+              className={cn(
+                'inline-flex p-2 sm:p-3 rounded-lg flex-shrink-0',
+                muted ? 'bg-gray-100 text-gray-400' : cn(src.bgClass, src.textClass),
+              )}
+            >
+              <Icon className={src.iconClassName ?? 'w-5 h-5 sm:w-6 sm:h-6'} />
+            </span>
+          </Tooltip>
 
           {/* Content */}
           <div className="flex-1 min-w-0">
@@ -640,16 +643,14 @@ export function FindingCard({
               <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
                 {finding.platform && (
                   <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5">
-                    <span className="font-medium text-gray-500">Platform:</span>
-                    <span className="ml-1 text-gray-700">
+                    <span className="text-gray-700">
                       {renderHighlightedText(finding.platform, highlightQuery)}
                     </span>
                   </span>
                 )}
                 {finding.theme && (
                   <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5">
-                    <span className="font-medium text-gray-500">Theme:</span>
-                    <span className="ml-1 text-gray-700">
+                    <span className="text-gray-700">
                       {renderHighlightedText(finding.theme, highlightQuery)}
                     </span>
                   </span>
