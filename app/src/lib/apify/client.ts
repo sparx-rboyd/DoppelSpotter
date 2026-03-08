@@ -1,6 +1,7 @@
 import { ApifyClient } from 'apify-client';
 import type { BrandProfile } from '@/lib/types';
 import {
+  getInitialDiscordMaxTotalChargeUsd,
   getDeepSearchGooglePageCount,
   getInitialGitHubMaxResults,
   getInitialGooglePageCount,
@@ -96,8 +97,7 @@ export async function startActorRun(
 ): Promise<{ runId: string; query: string; displayQuery: string }> {
   const client = getClient();
   const { input, query, displayQuery } = buildActorInput(actor, brand);
-
-  const run = await client.actor(actor.actorId).start(input, {
+  const startOptions: Record<string, unknown> = {
     webhooks: [
       {
         eventTypes: ['ACTOR.RUN.SUCCEEDED', 'ACTOR.RUN.FAILED', 'ACTOR.RUN.ABORTED'],
@@ -105,7 +105,13 @@ export async function startActorRun(
         headersTemplate: `{"X-Apify-Webhook-Secret": "${process.env.APIFY_WEBHOOK_SECRET}"}`,
       },
     ],
-  });
+  };
+
+  if (actor.kind === 'discord') {
+    startOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(brand.searchResultPages);
+  }
+
+  const run = await client.actor(actor.actorId).start(input, startOptions);
 
   return { runId: run.id, query, displayQuery };
 }
@@ -136,11 +142,21 @@ export async function startDeepSearchRun(
   let runInput: Record<string, unknown>;
   let executableQuery: string;
   let displayQuery: string;
+  const startOptions: Record<string, unknown> = {
+    webhooks: [
+      {
+        eventTypes: ['ACTOR.RUN.SUCCEEDED', 'ACTOR.RUN.FAILED', 'ACTOR.RUN.ABORTED'],
+        requestUrl: webhookUrl,
+        headersTemplate: `{"X-Apify-Webhook-Secret": "${process.env.APIFY_WEBHOOK_SECRET}"}`,
+      },
+    ],
+  };
 
   if (actor.kind === 'discord') {
     runInput = { keywords: normalizeSearchTerms([trimmedQuery]) };
     executableQuery = trimmedQuery;
     displayQuery = trimmedQuery;
+    startOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(searchResultPages);
   } else if (actor.kind === 'google') {
     executableQuery = buildGoogleScannerQuery(actor.source, trimmedQuery);
     runInput = {
@@ -152,18 +168,7 @@ export async function startDeepSearchRun(
     throw new Error(`Deep search is not implemented for ${actor.displayName}`);
   }
 
-  const run = await client.actor(actor.actorId).start(
-    runInput,
-    {
-      webhooks: [
-        {
-          eventTypes: ['ACTOR.RUN.SUCCEEDED', 'ACTOR.RUN.FAILED', 'ACTOR.RUN.ABORTED'],
-          requestUrl: webhookUrl,
-          headersTemplate: `{"X-Apify-Webhook-Secret": "${process.env.APIFY_WEBHOOK_SECRET}"}`,
-        },
-      ],
-    },
-  );
+  const run = await client.actor(actor.actorId).start(runInput, startOptions);
 
   return {
     runId: run.id,
@@ -204,6 +209,9 @@ export async function runActor(
   const { input } = buildActorInput(actor, brand);
 
   const runOptions: Record<string, unknown> = { input };
+  if (actor.kind === 'discord') {
+    runOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(brand.searchResultPages);
+  }
 
   if (webhookUrl) {
     runOptions.webhooks = [

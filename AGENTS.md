@@ -95,8 +95,9 @@ remaining lightweight taxonomy label is `theme`.
 `discord-servers` is the first true non-Google source. It does not use `site:` operators or SERP
 pages. Instead it queries Discord's public server-discovery index through the Apify actor,
 filters out non-joinable servers without `vanity_url_code`, derives `https://discord.gg/<code>`
-as the user-visible URL, and uses the Discord server `id` as the canonical identity for
-per-scan upserts and historical repeat suppression.
+as the user-visible URL, uses the Discord server `id` as the canonical identity for per-scan
+upserts and historical repeat suppression, and maps the brand-page `Search depth` setting to an
+Apify `maxTotalChargeUsd` cap from `$0.20` to `$1.00` per run.
 
 `github-repos` is a repository-level source. It queries public GitHub repository search through
 the Apify actor, maps the brand-page `Search depth` setting from `1..10` to `maxResults = 50..500`,
@@ -116,7 +117,7 @@ support deep-search follow-up runs.
 ```
 Brand add/edit pages
  └─ persist `brands.sendScanSummaryEmails` to opt the brand into post-scan summary emails
- └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, GitHub maps it to requested repo volume (`50..500`), and X maps it to requested tweet volume (`50..500`)
+ └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Discord maps it to an Apify spend cap (`$0.20..$1.00` per run), GitHub maps it to requested repo volume (`50..500`), and X maps it to requested tweet volume (`50..500`)
  └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches
  └─ persist `brands.maxAiDeepSearches` as the user-facing `Deep search breadth` setting; it caps AI-requested follow-up searches from 1-10
  └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|discord|github|x` so each scan surface can be enabled or disabled per brand
@@ -138,7 +139,7 @@ POST /api/scan
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
  └─ resolves the brand's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `discord-servers`, `github-repos`, `x-search`)
- └─ maps `brands.searchResultPages` (default 3, min 1, max 10) to Google Search `maxPagesPerQuery`; GitHub maps the same setting to `maxResults = 50..500`; X maps it to `maxItems = 50..500`; Discord server scans currently ignore this setting
+ └─ maps `brands.searchResultPages` (default 3, min 1, max 10) to Google Search `maxPagesPerQuery`; Discord maps the same setting to `maxTotalChargeUsd = $0.20..$1.00` per run; GitHub maps it to `maxResults = 50..500`; X maps it to `maxItems = 50..500`
  └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
  └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
  └─ once the scan-level preference hints are ready (or deliberately fail open), replays any deferred succeeded webhooks and then flips the scan to `running`

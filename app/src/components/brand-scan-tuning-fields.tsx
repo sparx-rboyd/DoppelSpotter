@@ -97,7 +97,7 @@ export function BrandScanTuningFields({
         <SliderField
           id="search-result-pages"
           label="Search depth"
-          tooltip="Controls how extensively DoppelSpotter searches for potential matches. Google-backed scan types use this as search-result depth, GitHub repos and X map it to result volume from 50 to 500 items, and Discord servers currently ignore this setting."
+          tooltip="Controls how extensively DoppelSpotter searches for potential matches. Google-backed scan types use this as search-result depth, GitHub repos and X map it to result volume from 50 to 500 items, and Discord servers map it to an Apify spend cap from $0.20 to $1.00 per run."
           value={searchResultPages}
           min={MIN_SEARCH_RESULT_PAGES}
           max={MAX_SEARCH_RESULT_PAGES}

@@ -49,8 +49,6 @@ import {
 } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo, GoogleScannerId } from '@/lib/types';
 import {
-  getInitialGitHubMaxResults,
-  getInitialXMaxItems,
   normalizeAllowAiDeepSearches,
   normalizeMaxAiDeepSearches,
 } from '@/lib/brands';
@@ -66,15 +64,14 @@ import {
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
 
-/** Maximum items to analyse per actor run — caps AI analysis cost and latency */
-const MAX_ITEMS_PER_RUN = 50;
-const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
+/** Maximum normalized candidates per LLM request chunk. */
+const GOOGLE_ANALYSIS_CHUNK_SIZE = 50;
 const GOOGLE_ANALYSIS_CONCURRENCY = 3;
-const DISCORD_ANALYSIS_CHUNK_SIZE = 10;
+const DISCORD_ANALYSIS_CHUNK_SIZE = 50;
 const DISCORD_ANALYSIS_CONCURRENCY = 3;
-const GITHUB_ANALYSIS_CHUNK_SIZE = 10;
+const GITHUB_ANALYSIS_CHUNK_SIZE = 50;
 const GITHUB_ANALYSIS_CONCURRENCY = 3;
-const X_ANALYSIS_CHUNK_SIZE = 10;
+const X_ANALYSIS_CHUNK_SIZE = 50;
 const X_ANALYSIS_CONCURRENCY = 3;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';
@@ -394,19 +391,9 @@ async function handleSucceededRun({
     return;
   }
 
-  // Cap items to control AI analysis cost while still allowing source-specific limits.
-  const maxItemsToAnalyse = getMaxItemsToAnalyse(scannerConfig, brand);
-  const itemsToAnalyse = items.slice(0, maxItemsToAnalyse);
-  if (items.length > maxItemsToAnalyse) {
-    console.warn(
-      `[webhook] Dataset ${datasetId} has ${items.length} items — truncating to ${maxItemsToAnalyse}`,
-    );
-  }
-
   // Phase 2 → Phase 3: signal that AI analysis is starting, and record total item count
   await scanDoc.ref.update({
     [`actorRuns.${runId}.status`]: 'analysing',
-    [`actorRuns.${runId}.itemCount`]: itemsToAnalyse.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
     [`actorRuns.${runId}.skippedDuplicateCount`]: 0,
   });
@@ -429,7 +416,7 @@ async function handleSucceededRun({
       actorId,
       datasetId,
       runId,
-      items: itemsToAnalyse,
+      items,
       searchDepth,
       searchQuery,
       displayQuery,
@@ -447,7 +434,7 @@ async function handleSucceededRun({
         actorId,
         datasetId,
         runId,
-        items: itemsToAnalyse,
+        items,
         searchDepth,
         searchQuery,
         displayQuery,
@@ -465,7 +452,7 @@ async function handleSucceededRun({
           actorId,
           datasetId,
           runId,
-          items: itemsToAnalyse,
+        items,
           searchDepth,
           searchQuery,
           displayQuery,
@@ -482,7 +469,7 @@ async function handleSucceededRun({
       actorId,
       datasetId,
       runId,
-      items: itemsToAnalyse,
+        items,
       searchDepth,
       searchQuery,
       displayQuery,
@@ -528,7 +515,7 @@ async function handleSucceededRun({
   }
 
   console.log(
-    `[webhook] Actor ${actorId} (run ${runId}, scanner ${scannerConfig.id}, depth ${searchDepth}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items, ${skippedDuplicateCount} skipped as previous duplicates (mode: ${scannerConfig.kind}-batch)`,
+    `[webhook] Actor ${actorId} (run ${runId}, scanner ${scannerConfig.id}, depth ${searchDepth}): ${newFindingCount} findings written from ${items.length} raw items, ${skippedDuplicateCount} skipped as previous duplicates (mode: ${scannerConfig.kind}-batch)`,
   );
 
   await markActorRunComplete(scanDoc, runId, 'succeeded', newFindingCount, counts, skippedDuplicateCount);
@@ -3445,18 +3432,6 @@ function buildExecutableSearchQuery(
   return scannerConfig.kind === 'google'
     ? buildGoogleScannerQuery(scannerConfig.source, trimmedQuery)
     : trimmedQuery;
-}
-
-function getMaxItemsToAnalyse(scannerConfig: ScannerConfig, brand: BrandProfile): number {
-  if (scannerConfig.kind === 'x') {
-    return getInitialXMaxItems(brand.searchResultPages);
-  }
-
-  if (scannerConfig.kind === 'github') {
-    return getInitialGitHubMaxResults(brand.searchResultPages);
-  }
-
-  return MAX_ITEMS_PER_RUN;
 }
 
 function choosePreferredGoogleOutcome(existing: Finding | null, next: GoogleFindingOutcome): GoogleFindingOutcome {

@@ -53,6 +53,15 @@ export function getInitialXMaxItems(searchResultPages?: unknown): number {
   return normalizeSearchResultPages(searchResultPages) * 50;
 }
 
+export function getInitialDiscordMaxTotalChargeUsd(searchResultPages?: unknown): number {
+  const depth = normalizeSearchResultPages(searchResultPages);
+  const minUsd = 0.2;
+  const maxUsd = 1.0;
+  const ratio = (depth - MIN_SEARCH_RESULT_PAGES) / (MAX_SEARCH_RESULT_PAGES - MIN_SEARCH_RESULT_PAGES);
+  const value = minUsd + ((maxUsd - minUsd) * ratio);
+  return Math.round(value * 100) / 100;
+}
+
 export function getInitialGitHubMaxResults(searchResultPages?: unknown): number {
   return normalizeSearchResultPages(searchResultPages) * 50;
 }
