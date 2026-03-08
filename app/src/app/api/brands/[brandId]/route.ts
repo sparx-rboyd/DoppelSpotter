@@ -9,6 +9,10 @@ import {
   isValidBrandScanSources,
   isValidMaxAiDeepSearches,
   isValidSearchResultPages,
+  MAX_AI_DEEP_SEARCHES,
+  MAX_SEARCH_RESULT_PAGES,
+  MIN_AI_DEEP_SEARCHES,
+  MIN_SEARCH_RESULT_PAGES,
   normalizeBrandScanSources,
 } from '@/lib/brands';
 import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
@@ -69,7 +73,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
   if (body.searchResultPages !== undefined) {
     if (!isValidSearchResultPages(body.searchResultPages)) {
-      return errorResponse('searchResultPages must be a whole number from 1 to 10');
+      return errorResponse(
+        `searchResultPages must be a whole number from ${MIN_SEARCH_RESULT_PAGES} to ${MAX_SEARCH_RESULT_PAGES}`,
+      );
     }
     updates.searchResultPages = body.searchResultPages;
   }
@@ -81,7 +87,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
   if (body.maxAiDeepSearches !== undefined) {
     if (!isValidMaxAiDeepSearches(body.maxAiDeepSearches)) {
-      return errorResponse('maxAiDeepSearches must be a whole number from 1 to 10');
+      return errorResponse(
+        `maxAiDeepSearches must be a whole number from ${MIN_AI_DEEP_SEARCHES} to ${MAX_AI_DEEP_SEARCHES}`,
+      );
     }
     updates.maxAiDeepSearches = body.maxAiDeepSearches;
   }

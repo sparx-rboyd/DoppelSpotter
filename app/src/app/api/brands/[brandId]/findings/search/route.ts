@@ -103,6 +103,13 @@ function getFindingDisplayBucket(finding: FindingSummary): FindingSearchDisplayB
   return 'hit';
 }
 
+function getFindingSearchPriority(finding: FindingSummary) {
+  if (finding.isFalsePositive === true) return 3;
+  if (finding.severity === 'high') return 0;
+  if (finding.severity === 'medium') return 1;
+  return 2;
+}
+
 function buildFindingSearchText(finding: FindingSummary) {
   return normalizeSearchText(`${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis}`);
 }
@@ -276,9 +283,28 @@ export async function GET(request: NextRequest, { params }: Params) {
     }
   }
 
-  const hasMore = collectedMatches.length > resultLimit;
-  const visibleMatches = hasMore ? collectedMatches.slice(0, resultLimit) : collectedMatches;
-  const visibleMatchCursors = hasMore ? collectedMatchCursors.slice(0, resultLimit) : collectedMatchCursors;
+  const sortedMatchEntries = collectedMatches
+    .map((finding, index) => ({
+      finding,
+      cursor: collectedMatchCursors[index],
+    }))
+    .sort((left, right) => {
+      const priorityDiff = getFindingSearchPriority(left.finding) - getFindingSearchPriority(right.finding);
+      if (priorityDiff !== 0) return priorityDiff;
+
+      const secondsDiff = right.finding.createdAt.seconds - left.finding.createdAt.seconds;
+      if (secondsDiff !== 0) return secondsDiff;
+
+      const nanosDiff = right.finding.createdAt.nanoseconds - left.finding.createdAt.nanoseconds;
+      if (nanosDiff !== 0) return nanosDiff;
+
+      return right.finding.id.localeCompare(left.finding.id);
+    });
+
+  const hasMore = sortedMatchEntries.length > resultLimit;
+  const visibleMatchEntries = hasMore ? sortedMatchEntries.slice(0, resultLimit) : sortedMatchEntries;
+  const visibleMatches = visibleMatchEntries.map((entry) => entry.finding);
+  const visibleMatchCursors = visibleMatchEntries.map((entry) => entry.cursor);
   const nextCursor = hasMore && visibleMatchCursors.length > 0
     ? encodeCursor(visibleMatchCursors[visibleMatchCursors.length - 1])
     : null;

@@ -11,6 +11,10 @@ import {
   isValidAllowAiDeepSearches,
   isValidBrandScanSources,
   DEFAULT_MAX_AI_DEEP_SEARCHES,
+  MAX_AI_DEEP_SEARCHES,
+  MAX_SEARCH_RESULT_PAGES,
+  MIN_AI_DEEP_SEARCHES,
+  MIN_SEARCH_RESULT_PAGES,
   isValidMaxAiDeepSearches,
   normalizeBrandScanSources,
 } from '@/lib/brands';
@@ -137,7 +141,9 @@ export async function POST(request: NextRequest) {
   }
 
   if (!isValidSearchResultPages(searchResultPages)) {
-    return errorResponse('searchResultPages must be a whole number from 1 to 10');
+    return errorResponse(
+      `searchResultPages must be a whole number from ${MIN_SEARCH_RESULT_PAGES} to ${MAX_SEARCH_RESULT_PAGES}`,
+    );
   }
 
   if (typeof sendScanSummaryEmails !== 'boolean') {
@@ -145,7 +151,9 @@ export async function POST(request: NextRequest) {
   }
 
   if (!isValidMaxAiDeepSearches(maxAiDeepSearches)) {
-    return errorResponse('maxAiDeepSearches must be a whole number from 1 to 10');
+    return errorResponse(
+      `maxAiDeepSearches must be a whole number from ${MIN_AI_DEEP_SEARCHES} to ${MAX_AI_DEEP_SEARCHES}`,
+    );
   }
   if (!isValidBrandScanSources(scanSources)) {
     return errorResponse('scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, discord, github, and x values');

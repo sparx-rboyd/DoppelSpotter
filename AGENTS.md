@@ -97,16 +97,16 @@ pages. Instead it queries Discord's public server-discovery index through the Ap
 filters out non-joinable servers without `vanity_url_code`, derives `https://discord.gg/<code>`
 as the user-visible URL, uses the Discord server `id` as the canonical identity for per-scan
 upserts and historical repeat suppression, and maps the brand-page `Search depth` setting to an
-Apify `maxTotalChargeUsd` cap from `$0.20` to `$1.00` per run.
+Apify `maxTotalChargeUsd` cap from `$0.20` to `$0.60` per run.
 
 `github-repos` is a repository-level source. It queries public GitHub repository search through
-the Apify actor, maps the brand-page `Search depth` setting from `1..10` to `maxResults = 50..500`,
+the Apify actor, maps the brand-page `Search depth` setting from `1..5` to `maxResults = 50..250`,
 stores one finding per repository, derives `https://github.com/<fullName>` as the user-visible
 URL, uses repo `fullName` (`owner/repo`) as the canonical identity for per-scan upserts and
 historical repeat suppression, and does **not** support deep-search follow-up runs.
 
 `x-search` is a tweet-level source. It uses `searchTerms` only, maps the brand-page `Search depth`
-setting from `1..10` to `maxItems = 50..500`, stores one finding per tweet, uses tweet `id` as
+setting from `1..5` to `maxItems = 50..250`, stores one finding per tweet, uses tweet `id` as
 the canonical identity for per-scan upserts and historical repeat suppression, and does **not**
 support deep-search follow-up runs.
 
@@ -117,9 +117,9 @@ support deep-search follow-up runs.
 ```
 Brand add/edit pages
  └─ persist `brands.sendScanSummaryEmails` to opt the brand into post-scan summary emails
- └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Discord maps it to an Apify spend cap (`$0.20..$1.00` per run), GitHub maps it to requested repo volume (`50..500`), and X maps it to requested tweet volume (`50..500`)
+ └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Discord maps it to an Apify spend cap (`$0.20..$0.60` per run), GitHub maps it to requested repo volume (`50..250`), and X maps it to requested tweet volume (`50..250`)
  └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches
- └─ persist `brands.maxAiDeepSearches` as the user-facing `Deep search breadth` setting; it caps AI-requested follow-up searches from 1-10
+ └─ persist `brands.maxAiDeepSearches` as the user-facing `Deep search breadth` setting; it caps AI-requested follow-up searches from 1-5
  └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|discord|github|x` so each scan surface can be enabled or disabled per brand
  └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
  └─ scheduling is anchored from the chosen local start date/time and stored timezone
@@ -139,7 +139,7 @@ POST /api/scan
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
  └─ resolves the brand's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `discord-servers`, `github-repos`, `x-search`)
- └─ maps `brands.searchResultPages` (default 3, min 1, max 10) to Google Search `maxPagesPerQuery`; Discord maps the same setting to `maxTotalChargeUsd = $0.20..$1.00` per run; GitHub maps it to `maxResults = 50..500`; X maps it to `maxItems = 50..500`
+ └─ maps `brands.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Discord maps the same setting to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to `maxResults = 50..250`; X maps it to `maxItems = 50..250`
  └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
  └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
  └─ once the scan-level preference hints are ready (or deliberately fail open), replays any deferred succeeded webhooks and then flips the scan to `running`
@@ -198,7 +198,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ if the scan's preference hints are still `pending`, the run is parked in `actorRuns.*.status = 'waiting_for_preference_hints'` and no analysis starts yet
  └─ once the scan-level preference hints are `ready` or `failed`, deferred succeeded callbacks are replayed through the same webhook route so they resume normal processing
  └─ duplicate callbacks for a run already in `fetching_dataset` / `analysing` are acknowledged and skipped before expensive work starts
- └─ fetches source-specific capped items from Apify dataset (source-level actor limits still apply before post-normalization chunked analysis: Google via requested SERP pages, Discord via `maxTotalChargeUsd` spend cap, and GitHub / X via the requested `50..500` result volume)
+ └─ fetches source-specific capped items from Apify dataset (source-level actor limits still apply before post-normalization chunked analysis: Google via requested SERP pages, Discord via `maxTotalChargeUsd` spend cap, and GitHub / X via the requested `50..250` result volume)
  └─ Google Search mode: normalize SERP pages into compact organic-result candidates
       └─ excludes ads from AI analysis; keeps `relatedQueries` + `peopleAlsoAsk` as run-level context
       └─ stores scanner-aware sighting/debug metadata so merged findings can retain which logical scan surfaces saw a URL
@@ -314,7 +314,7 @@ When any logical Google scanner runs at depth 0 (initial scan), the webhook coll
 deduped run-level `relatedQueries` and `peopleAlsoAsk` text signals from every SERP page.
 Chunked Google classification assesses candidates only; it does not propose deep-search queries.
 The final deep-search chooser then sees that run-level intent context directly and synthesizes up
-to the brand's configured `maxAiDeepSearches` follow-up queries (1-10). Google prompts treat that
+to the brand's configured `maxAiDeepSearches` follow-up queries (1-5). Google prompts treat that
 configured count as a hard cap rather than a target, and steer the model towards broader
 theme-led queries instead of narrow named websites, platforms, resources, books, or tools unless
 a named target is itself the key abuse vector. Specialist scanners additionally receive
@@ -345,7 +345,7 @@ Apify runs are started, so duplicate webhook callbacks do not fan out duplicate 
 its transaction, so dynamically-added runs are counted correctly for scan completion. Deep-search
 runs are skipped entirely when `allowAiDeepSearches` is false for the brand. When enabled, both
 the initial Google scan and each deep-search Google run use the brand's `searchResultPages`
-setting, which defaults to 3 and is constrained to 1-10.
+setting, which defaults to 3 and is constrained to 1-5.
 
 `ActorRunInfo` now carries `scannerId`, `searchDepth`, raw `searchQuery`, and operator-free
 `displayQuery`. The brand page progress indicator groups active work by source (`Web search`,

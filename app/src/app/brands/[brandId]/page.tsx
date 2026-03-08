@@ -661,45 +661,6 @@ export default function BrandDetailPage() {
     }
   }
 
-  function openSearchResult(result: FindingSearchResult) {
-    setFindingsSearchQuery('');
-    setDebouncedFindingsSearchQuery('');
-    setSearchResults([]);
-    setSearchResultsNextCursor(null);
-    setSearchResultsError('');
-    setSearchResultsTruncated(false);
-    setExpandedScanIds([result.scanId]);
-    setSelectedFindingSource(null);
-    setSelectedFindingTheme('');
-    setSelectedFindingCategory(result.displayBucket === 'non-hit' ? 'non-hit' : null);
-
-    if (result.displayBucket === 'addressed') {
-      setActiveTab('addressed');
-      updateDrilldownUrl({
-        category: null,
-        source: null,
-        theme: null,
-      });
-      return;
-    }
-
-    setActiveTab('scans');
-    setAnchorTargetScanId(result.scanId);
-    updateDrilldownUrl({
-      category: result.displayBucket === 'non-hit' ? 'non-hit' : null,
-      source: null,
-      theme: null,
-      hash: `#${getScanResultSetAnchorId(result.scanId)}`,
-    });
-    void loadScanFindings(result.scanId);
-
-    if (result.displayBucket === 'non-hit') {
-      void loadScanNonHits(result.scanId);
-    } else if (result.displayBucket === 'ignored') {
-      void loadScanIgnored(result.scanId);
-    }
-  }
-
   // ---------------------------------------------------------------------------
   // Fetch scans list and auto-expand + pre-load the most recent scan
   // ---------------------------------------------------------------------------
@@ -2887,30 +2848,40 @@ export default function BrandDetailPage() {
                             <div className="space-y-4">
                               {searchResults.map((result) => (
                                 <div key={result.id} className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
-                                  <div className="flex flex-wrap items-center justify-between gap-3">
-                                    <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                                  <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                                    {result.isFalsePositive ? (
                                       <Badge variant="default" className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
-                                        {result.displayBucket === 'non-hit'
-                                          ? 'Non-hit'
-                                          : result.displayBucket === 'ignored'
-                                            ? 'Ignored'
-                                            : result.displayBucket === 'addressed'
-                                              ? 'Addressed'
-                                              : 'Finding'}
+                                        Non-hit
                                       </Badge>
-                                      <span>· {getFindingSourceLabel(result.source)}</span>
-                                      <span>· {formatScanDate(result.scanStartedAt ?? result.createdAt)}</span>
-                                      {result.scanStatus && result.scanStatus !== 'completed' && (
-                                        <span>· {result.scanStatus}</span>
-                                      )}
-                                    </div>
-                                    <Button
-                                      variant="secondary"
-                                      size="sm"
-                                      onClick={() => openSearchResult(result)}
-                                    >
-                                      {result.displayBucket === 'addressed' ? 'Open addressed view' : 'Open scan result set'}
-                                    </Button>
+                                    ) : (
+                                      <Badge
+                                        variant={
+                                          result.severity === 'high'
+                                            ? 'danger'
+                                            : result.severity === 'medium'
+                                              ? 'warning'
+                                              : 'success'
+                                        }
+                                        className="gap-1 px-2 py-0.5 text-[11px]"
+                                      >
+                                        {result.severity === 'high' ? (
+                                          <AlertCircle className="w-3 h-3" />
+                                        ) : result.severity === 'medium' ? (
+                                          <AlertTriangle className="w-3 h-3" />
+                                        ) : (
+                                          <Info className="w-3 h-3" />
+                                        )}
+                                        {result.severity === 'high'
+                                          ? 'High'
+                                          : result.severity === 'medium'
+                                            ? 'Medium'
+                                            : 'Low'}
+                                      </Badge>
+                                    )}
+                                    <span>· {formatScanDate(result.scanStartedAt ?? result.createdAt)}</span>
+                                    {result.scanStatus && result.scanStatus !== 'completed' && (
+                                      <span>· {result.scanStatus}</span>
+                                    )}
                                   </div>
 
                                   <FindingCard

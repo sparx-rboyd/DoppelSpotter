@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { errorResponse, requireAuth } from '@/lib/api-utils';
 import {
   buildCsvFilename,
+  filterNonHitFindingsFromExport,
   formatBoolean,
   formatFindingSource,
   formatScanDateTimeIso,
@@ -37,7 +38,7 @@ function serializeCsvRow(values: string[]): string {
 }
 
 // GET /api/brands/[brandId]/scans/[scanId]/export
-// Downloads a CSV export of every finding for the scan, including non-hits.
+// Downloads a CSV export of the scan's findings, excluding AI-classified non-hits.
 export async function GET(request: NextRequest, { params }: Params) {
   const { uid, error } = await requireAuth(request);
   if (error) return error;
@@ -47,7 +48,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   try {
     const { brand, scan, findings } = await loadScanExportData({ uid, brandId, scanId });
     const scanDateTime = formatScanDateTimeIso(scan.startedAt);
-    const orderedFindings = orderFindingsForExport(findings);
+    const orderedFindings = orderFindingsForExport(filterNonHitFindingsFromExport(findings));
 
     const rows = orderedFindings.map((finding: ExportableFinding) => serializeCsvRow([
       scanDateTime,

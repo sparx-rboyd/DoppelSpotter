@@ -139,6 +139,10 @@ export function filterActionableFindings(findings: ExportableFinding[]): Exporta
   return findings.filter((finding) => !finding.isFalsePositive && !finding.isIgnored && !finding.isAddressed);
 }
 
+export function filterNonHitFindingsFromExport(findings: ExportableFinding[]): ExportableFinding[] {
+  return findings.filter((finding) => !finding.isFalsePositive);
+}
+
 export function filterAddressedFindings(findings: ExportableFinding[]): ExportableFinding[] {
   return findings.filter((finding) => !finding.isFalsePositive && !finding.isIgnored && finding.isAddressed === true);
 }
