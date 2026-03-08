@@ -1,6 +1,11 @@
 import { ApifyClient } from 'apify-client';
 import type { BrandProfile } from '@/lib/types';
-import { getDeepSearchGooglePageCount, getInitialGooglePageCount } from '@/lib/brands';
+import {
+  getDeepSearchGooglePageCount,
+  getInitialGitHubMaxResults,
+  getInitialGooglePageCount,
+  getInitialXMaxItems,
+} from '@/lib/brands';
 import { buildGoogleScannerQuery, sanitizeGoogleQueryForDisplay } from '@/lib/scan-sources';
 import type { ActorConfig } from './actors';
 
@@ -37,6 +42,34 @@ export function buildActorInput(
       input: { keywords: searchTerms },
       query,
       displayQuery: query,
+    };
+  }
+
+  if (actor.kind === 'x') {
+    const query = joinSearchTermsForDisplay(searchTerms);
+    return {
+      input: {
+        searchTerms,
+        maxItems: getInitialXMaxItems(brand.searchResultPages),
+        sort: 'Latest',
+        includeSearchTerms: true,
+      },
+      query,
+      displayQuery: query,
+    };
+  }
+
+  if (actor.kind === 'github') {
+    const displayQuery = joinSearchTermsForDisplay(searchTerms);
+    const query = buildGitHubRepoSearchQuery(searchTerms);
+    return {
+      input: {
+        query,
+        sortBy: 'best-match',
+        maxResults: getInitialGitHubMaxResults(brand.searchResultPages),
+      },
+      query,
+      displayQuery,
     };
   }
 
@@ -96,18 +129,28 @@ export async function startDeepSearchRun(
     throw new Error('Deep-search query must not be empty');
   }
 
-  const runInput = actor.kind === 'discord'
-    ? { keywords: normalizeSearchTerms([trimmedQuery]) }
-    : {
-        queries: buildGoogleScannerQuery(actor.source, trimmedQuery),
-        maxPagesPerQuery: getDeepSearchGooglePageCount(searchResultPages),
-      };
-  const executableQuery = actor.kind === 'discord'
-    ? trimmedQuery
-    : buildGoogleScannerQuery(actor.source, trimmedQuery);
-  const displayQuery = actor.kind === 'discord'
-    ? trimmedQuery
-    : sanitizeGoogleQueryForDisplay(executableQuery);
+  if (!actor.supportsDeepSearch) {
+    throw new Error(`Deep search is not supported for ${actor.displayName}`);
+  }
+
+  let runInput: Record<string, unknown>;
+  let executableQuery: string;
+  let displayQuery: string;
+
+  if (actor.kind === 'discord') {
+    runInput = { keywords: normalizeSearchTerms([trimmedQuery]) };
+    executableQuery = trimmedQuery;
+    displayQuery = trimmedQuery;
+  } else if (actor.kind === 'google') {
+    executableQuery = buildGoogleScannerQuery(actor.source, trimmedQuery);
+    runInput = {
+      queries: executableQuery,
+      maxPagesPerQuery: getDeepSearchGooglePageCount(searchResultPages),
+    };
+    displayQuery = sanitizeGoogleQueryForDisplay(executableQuery);
+  } else {
+    throw new Error(`Deep search is not implemented for ${actor.displayName}`);
+  }
 
   const run = await client.actor(actor.actorId).start(
     runInput,
@@ -202,4 +245,10 @@ function normalizeSearchTerms(values: string[]): string[] {
 
 function joinSearchTermsForDisplay(values: string[]): string {
   return values.join(' | ');
+}
+
+function buildGitHubRepoSearchQuery(values: string[]): string {
+  return values
+    .map((value) => `"${value.replace(/"/g, '\\"')}"`)
+    .join(' OR ');
 }

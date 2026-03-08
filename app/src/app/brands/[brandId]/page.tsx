@@ -23,7 +23,7 @@ import {
   formatScanScheduleFrequency,
   formatScheduledRunAt,
 } from '@/lib/scan-schedules';
-import { getFindingSourceLabel, SCAN_SOURCE_ORDER } from '@/lib/scan-sources';
+import { getFindingSourceLabel, SCAN_SOURCE_ORDER, supportsSourceDeepSearch } from '@/lib/scan-sources';
 import { cn, formatScanDate } from '@/lib/utils';
 import type { ActorRunInfo, BrandProfile, FindingCategory, FindingSource, FindingSummary, Scan, ScanSummary } from '@/lib/types';
 
@@ -1985,6 +1985,8 @@ export default function BrandDetailPage() {
       case 'fetching_dataset':
         if (source === 'google') return 'Fetching search results';
         if (source === 'discord') return 'Fetching Discord server results';
+        if (source === 'github') return 'Fetching GitHub repositories';
+        if (source === 'x') return 'Fetching X posts';
         return `Fetching ${sourceLabel} results`;
       case 'analysing':
         if (source === 'google') {
@@ -1992,6 +1994,12 @@ export default function BrandDetailPage() {
         }
         if (source === 'discord') {
           return withAnalysisCounts('Analysing Discord server results', 'Analysing Discord server results', activeRun);
+        }
+        if (source === 'github') {
+          return withAnalysisCounts('Analysing GitHub repositories', 'Analysing GitHub repositories', activeRun);
+        }
+        if (source === 'x') {
+          return withAnalysisCounts('Analysing X posts', 'Analysing X posts', activeRun);
         }
         return withAnalysisCounts(`Analysing ${sourceLabel} results`, `Analysing ${sourceLabel} results`, activeRun);
       default:
@@ -2043,8 +2051,9 @@ export default function BrandDetailPage() {
       runs.reduce((sum, run) => sum + getRunProgressFraction(run), 0) / runs.length;
     const activeRun = getActiveRunForSource(source);
     const identifiedDeepSearchCount = getIdentifiedDeepSearchCount(source);
+    const canSourceDeepSearch = source !== 'unknown' && isAiDeepSearchEnabled && supportsSourceDeepSearch(source);
 
-    if (isAiDeepSearchEnabled && identifiedDeepSearchCount === 0) {
+    if (canSourceDeepSearch && identifiedDeepSearchCount === 0) {
       const initialRun = runs.find((run) => (run.searchDepth ?? 0) === 0) ?? activeRun;
       const initialFraction = initialRun ? getRunProgressFraction(initialRun) : totalFraction;
       return Math.round(8 + 70 * initialFraction);

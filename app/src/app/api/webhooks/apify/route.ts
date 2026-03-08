@@ -7,34 +7,53 @@ import { chatCompletion } from '@/lib/analysis/openrouter';
 import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-hints';
 import {
   DISCORD_CLASSIFICATION_SYSTEM_PROMPT,
+  GITHUB_CLASSIFICATION_SYSTEM_PROMPT,
   GOOGLE_CLASSIFICATION_SYSTEM_PROMPT,
   SCAN_SUMMARY_SYSTEM_PROMPT,
+  X_CLASSIFICATION_SYSTEM_PROMPT,
   buildDiscordChunkAnalysisPrompt,
   buildDiscordFinalSelectionPrompt,
   buildDiscordFinalSelectionSystemPrompt,
+  buildGitHubChunkAnalysisPrompt,
   buildGoogleFinalSelectionSystemPrompt,
   buildGoogleFinalSelectionPrompt,
   buildGoogleChunkAnalysisPrompt,
   buildScanSummaryPrompt,
+  buildXChunkAnalysisPrompt,
   formatLlmPromptForDebug,
 } from '@/lib/analysis/prompts';
 import {
   parseDiscordChunkAnalysisOutput,
+  parseGitHubChunkAnalysisOutput,
   parseGoogleChunkAnalysisOutput,
+  parseXChunkAnalysisOutput,
   parseSuggestedSearchOutput,
   parseScanSummaryOutput,
   type DiscordChunkAnalysisItem,
   type DiscordRunContext,
   type DiscordServerCandidate,
   type DiscordStoredFindingRawData,
+  type GitHubChunkAnalysisItem,
+  type GitHubRepoCandidate,
+  type GitHubRunContext,
+  type GitHubStoredFindingRawData,
   type GoogleChunkAnalysisItem,
   type GoogleRunContext,
   type GoogleSearchCandidate,
   type GoogleSearchSighting,
   type GoogleStoredFindingRawData,
+  type XChunkAnalysisItem,
+  type XRunContext,
+  type XStoredFindingRawData,
+  type XTweetCandidate,
 } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo, GoogleScannerId } from '@/lib/types';
-import { normalizeAllowAiDeepSearches, normalizeMaxAiDeepSearches } from '@/lib/brands';
+import {
+  getInitialGitHubMaxResults,
+  getInitialXMaxItems,
+  normalizeAllowAiDeepSearches,
+  normalizeMaxAiDeepSearches,
+} from '@/lib/brands';
 import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
 import {
   buildGoogleScannerQuery,
@@ -53,11 +72,19 @@ const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
 const GOOGLE_ANALYSIS_CONCURRENCY = 3;
 const DISCORD_ANALYSIS_CHUNK_SIZE = 10;
 const DISCORD_ANALYSIS_CONCURRENCY = 3;
+const GITHUB_ANALYSIS_CHUNK_SIZE = 10;
+const GITHUB_ANALYSIS_CONCURRENCY = 3;
+const X_ANALYSIS_CHUNK_SIZE = 10;
+const X_ANALYSIS_CONCURRENCY = 3;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';
 const GOOGLE_RAW_DATA_VERSION = 2;
 const DISCORD_FINDING_ID_PREFIX = 'discord';
 const DISCORD_RAW_DATA_VERSION = 1;
+const GITHUB_FINDING_ID_PREFIX = 'github';
+const GITHUB_RAW_DATA_VERSION = 1;
+const X_FINDING_ID_PREFIX = 'x';
+const X_RAW_DATA_VERSION = 1;
 type ScanDocHandle = {
   id: string;
   ref: DocumentReference;
@@ -332,6 +359,20 @@ async function handleSucceededRun({
       currentScanId: scan.id ?? scanDoc.id,
     })
     : undefined;
+  const previousGitHubRepoFullNames = scannerConfig.kind === 'github'
+    ? await loadPreviousGitHubRepoFullNames({
+      brandId: scan.brandId,
+      userId: scan.userId,
+      currentScanId: scan.id ?? scanDoc.id,
+    })
+    : undefined;
+  const previousXTweetIds = scannerConfig.kind === 'x'
+    ? await loadPreviousXTweetIds({
+      brandId: scan.brandId,
+      userId: scan.userId,
+      currentScanId: scan.id ?? scanDoc.id,
+    })
+    : undefined;
   const existingTaxonomy = await loadBrandFindingTaxonomy({
     brandId: scan.brandId,
     userId: scan.userId,
@@ -353,11 +394,12 @@ async function handleSucceededRun({
     return;
   }
 
-  // Cap items to control AI analysis cost
-  const itemsToAnalyse = items.slice(0, MAX_ITEMS_PER_RUN);
-  if (items.length > MAX_ITEMS_PER_RUN) {
+  // Cap items to control AI analysis cost while still allowing source-specific limits.
+  const maxItemsToAnalyse = getMaxItemsToAnalyse(scannerConfig, brand);
+  const itemsToAnalyse = items.slice(0, maxItemsToAnalyse);
+  if (items.length > maxItemsToAnalyse) {
     console.warn(
-      `[webhook] Dataset ${datasetId} has ${items.length} items — truncating to ${MAX_ITEMS_PER_RUN}`,
+      `[webhook] Dataset ${datasetId} has ${items.length} items — truncating to ${maxItemsToAnalyse}`,
     );
   }
 
@@ -396,7 +438,43 @@ async function handleSucceededRun({
       existingTaxonomy,
       scannerConfig,
     })
-    : await analyseAndWriteDiscordBatch({
+    : scannerConfig.kind === 'discord'
+      ? await analyseAndWriteDiscordBatch({
+        scanDoc,
+        scan,
+        brand,
+        source,
+        actorId,
+        datasetId,
+        runId,
+        items: itemsToAnalyse,
+        searchDepth,
+        searchQuery,
+        displayQuery,
+        userPreferenceHints,
+        previousServerIds: previousDiscordServerIds,
+        existingTaxonomy,
+        scannerConfig,
+      })
+      : scannerConfig.kind === 'github'
+        ? await analyseAndWriteGitHubBatch({
+          scanDoc,
+          scan,
+          brand,
+          source,
+          actorId,
+          datasetId,
+          runId,
+          items: itemsToAnalyse,
+          searchDepth,
+          searchQuery,
+          displayQuery,
+          userPreferenceHints,
+          previousRepoFullNames: previousGitHubRepoFullNames,
+          existingTaxonomy,
+          scannerConfig,
+        })
+      : await analyseAndWriteXBatch({
       scanDoc,
       scan,
       brand,
@@ -409,7 +487,7 @@ async function handleSucceededRun({
       searchQuery,
       displayQuery,
       userPreferenceHints,
-      previousServerIds: previousDiscordServerIds,
+      previousTweetIds: previousXTweetIds,
       existingTaxonomy,
       scannerConfig,
     });
@@ -426,6 +504,7 @@ async function handleSucceededRun({
     suggestedSearches &&
     suggestedSearches.length > 0 &&
     searchDepth === 0 &&
+    scannerConfig.supportsDeepSearch &&
     normalizeAllowAiDeepSearches(brand.allowAiDeepSearches)
   ) {
     const reservedQueries = await reserveSuggestedSearches({
@@ -539,6 +618,70 @@ async function loadPreviousDiscordServerIds({
   }
 
   return serverIds;
+}
+
+async function loadPreviousGitHubRepoFullNames({
+  brandId,
+  userId,
+  currentScanId,
+}: {
+  brandId: string;
+  userId: string;
+  currentScanId: string;
+}): Promise<Set<string>> {
+  const previousFindingsSnap = await db
+    .collection('findings')
+    .where('brandId', '==', brandId)
+    .where('userId', '==', userId)
+    .select('scanId', 'rawData')
+    .get();
+
+  const repoFullNames = new Set<string>();
+  for (const doc of previousFindingsSnap.docs) {
+    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown> };
+    if (data.scanId === currentScanId) {
+      continue;
+    }
+
+    const fullName = readGitHubStoredFindingRawData(data.rawData)?.repo.fullName;
+    if (typeof fullName === 'string' && fullName.trim().length > 0) {
+      repoFullNames.add(fullName.trim().toLowerCase());
+    }
+  }
+
+  return repoFullNames;
+}
+
+async function loadPreviousXTweetIds({
+  brandId,
+  userId,
+  currentScanId,
+}: {
+  brandId: string;
+  userId: string;
+  currentScanId: string;
+}): Promise<Set<string>> {
+  const previousFindingsSnap = await db
+    .collection('findings')
+    .where('brandId', '==', brandId)
+    .where('userId', '==', userId)
+    .select('scanId', 'rawData')
+    .get();
+
+  const tweetIds = new Set<string>();
+  for (const doc of previousFindingsSnap.docs) {
+    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown> };
+    if (data.scanId === currentScanId) {
+      continue;
+    }
+
+    const tweetId = readXStoredFindingRawData(data.rawData)?.tweet.id;
+    if (typeof tweetId === 'string' && tweetId.trim().length > 0) {
+      tweetIds.add(tweetId.trim());
+    }
+  }
+
+  return tweetIds;
 }
 
 /**
@@ -867,6 +1010,294 @@ async function analyseAndWriteDiscordBatch({
   return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
 }
 
+async function analyseAndWriteXBatch({
+  scanDoc,
+  scan,
+  brand,
+  source,
+  scannerConfig,
+  actorId,
+  datasetId,
+  runId,
+  items,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  userPreferenceHints,
+  previousTweetIds,
+  existingTaxonomy,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  brand: BrandProfile;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  datasetId: string;
+  runId: string;
+  items: Record<string, unknown>[];
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  userPreferenceHints?: Scan['userPreferenceHints'];
+  previousTweetIds?: ReadonlySet<string>;
+  existingTaxonomy: { themes: string[] };
+}): Promise<{
+  findingCount: number;
+  suggestedSearches?: string[];
+  counts: { high: number; medium: number; low: number; nonHit: number };
+  skippedDuplicateCount: number;
+}> {
+  let findingCount = 0;
+  const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const normalizedRun = normalizeXRun({
+    searchQuery,
+    displayQuery,
+    items,
+  });
+  const candidatesToAnalyse = normalizedRun.candidates.filter(
+    (candidate) => !previousTweetIds?.has(candidate.tweetId),
+  );
+  const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
+
+  await scanDoc.ref.update({
+    [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
+    [`actorRuns.${runId}.analysedCount`]: 0,
+    [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
+  });
+
+  if (candidatesToAnalyse.length === 0) {
+    return { findingCount, counts, skippedDuplicateCount };
+  }
+
+  const outcomes = new Map<string, { candidate: XTweetCandidate; outcome: XFindingOutcome }>();
+  const chunks = chunkArray(candidatesToAnalyse, X_ANALYSIS_CHUNK_SIZE);
+  const chunkResults = await mapWithConcurrency(
+    chunks,
+    X_ANALYSIS_CONCURRENCY,
+    async (chunk, chunkIndex): Promise<XChunkAnalysisResult> => {
+      const prompt = buildXChunkAnalysisPrompt({
+        brandName: brand.name,
+        keywords: brand.keywords,
+        officialDomains: brand.officialDomains,
+        watchWords: brand.watchWords,
+        safeWords: brand.safeWords,
+        userPreferenceHints,
+        existingThemes: existingTaxonomy.themes,
+        source,
+        candidates: chunk,
+        runContext: normalizedRun.runContext,
+      });
+      const llmAnalysisPrompt = formatLlmPromptForDebug(X_CLASSIFICATION_SYSTEM_PROMPT, prompt);
+
+      try {
+        return await analyseXChunk({
+          candidates: chunk,
+          prompt,
+          llmAnalysisPrompt,
+        });
+      } catch (err) {
+        console.error(`[webhook] X chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
+
+        const fallbackOutcomes = new Map<string, { candidate: XTweetCandidate; outcome: XFindingOutcome }>();
+        for (const candidate of chunk) {
+          fallbackOutcomes.set(candidate.tweetId, {
+            candidate,
+            outcome: buildXFallbackOutcome(
+              'AI analysis failed for this chunk. Raw data is preserved for manual review.',
+              undefined,
+              llmAnalysisPrompt,
+            ),
+          });
+        }
+
+        return {
+          outcomes: fallbackOutcomes,
+        };
+      } finally {
+        await scanDoc.ref.update({
+          [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
+        });
+      }
+    },
+  );
+
+  for (const chunkResult of chunkResults) {
+    for (const [tweetId, value] of chunkResult.outcomes.entries()) {
+      outcomes.set(tweetId, value);
+    }
+  }
+
+  for (const { candidate, outcome } of outcomes.values()) {
+    const delta = await upsertXFinding({
+      scanDoc,
+      scan,
+      source,
+      actorId,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      candidate,
+      runContext: normalizedRun.runContext,
+      outcome,
+      scannerConfig,
+    });
+
+    findingCount += delta.findingCount;
+    counts.high += delta.counts.high;
+    counts.medium += delta.counts.medium;
+    counts.low += delta.counts.low;
+    counts.nonHit += delta.counts.nonHit;
+  }
+
+  return { findingCount, counts, skippedDuplicateCount };
+}
+
+async function analyseAndWriteGitHubBatch({
+  scanDoc,
+  scan,
+  brand,
+  source,
+  scannerConfig,
+  actorId,
+  datasetId,
+  runId,
+  items,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  userPreferenceHints,
+  previousRepoFullNames,
+  existingTaxonomy,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  brand: BrandProfile;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  datasetId: string;
+  runId: string;
+  items: Record<string, unknown>[];
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  userPreferenceHints?: Scan['userPreferenceHints'];
+  previousRepoFullNames?: ReadonlySet<string>;
+  existingTaxonomy: { themes: string[] };
+}): Promise<{
+  findingCount: number;
+  suggestedSearches?: string[];
+  counts: { high: number; medium: number; low: number; nonHit: number };
+  skippedDuplicateCount: number;
+}> {
+  let findingCount = 0;
+  const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const normalizedRun = normalizeGitHubRun({
+    searchQuery,
+    displayQuery,
+    items,
+  });
+  const candidatesToAnalyse = normalizedRun.candidates.filter(
+    (candidate) => !previousRepoFullNames?.has(candidate.fullName.toLowerCase()),
+  );
+  const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
+
+  await scanDoc.ref.update({
+    [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
+    [`actorRuns.${runId}.analysedCount`]: 0,
+    [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
+  });
+
+  if (candidatesToAnalyse.length === 0) {
+    return { findingCount, counts, skippedDuplicateCount };
+  }
+
+  const outcomes = new Map<string, { candidate: GitHubRepoCandidate; outcome: GitHubFindingOutcome }>();
+  const chunks = chunkArray(candidatesToAnalyse, GITHUB_ANALYSIS_CHUNK_SIZE);
+  const chunkResults = await mapWithConcurrency(
+    chunks,
+    GITHUB_ANALYSIS_CONCURRENCY,
+    async (chunk, chunkIndex): Promise<GitHubChunkAnalysisResult> => {
+      const prompt = buildGitHubChunkAnalysisPrompt({
+        brandName: brand.name,
+        keywords: brand.keywords,
+        officialDomains: brand.officialDomains,
+        watchWords: brand.watchWords,
+        safeWords: brand.safeWords,
+        userPreferenceHints,
+        existingThemes: existingTaxonomy.themes,
+        source,
+        candidates: chunk,
+        runContext: normalizedRun.runContext,
+      });
+      const llmAnalysisPrompt = formatLlmPromptForDebug(GITHUB_CLASSIFICATION_SYSTEM_PROMPT, prompt);
+
+      try {
+        return await analyseGitHubChunk({
+          candidates: chunk,
+          prompt,
+          llmAnalysisPrompt,
+        });
+      } catch (err) {
+        console.error(`[webhook] GitHub chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
+
+        const fallbackOutcomes = new Map<string, { candidate: GitHubRepoCandidate; outcome: GitHubFindingOutcome }>();
+        for (const candidate of chunk) {
+          fallbackOutcomes.set(candidate.fullName, {
+            candidate,
+            outcome: buildGitHubFallbackOutcome(
+              'AI analysis failed for this chunk. Raw data is preserved for manual review.',
+              undefined,
+              llmAnalysisPrompt,
+            ),
+          });
+        }
+
+        return {
+          outcomes: fallbackOutcomes,
+        };
+      } finally {
+        await scanDoc.ref.update({
+          [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
+        });
+      }
+    },
+  );
+
+  for (const chunkResult of chunkResults) {
+    for (const [fullName, value] of chunkResult.outcomes.entries()) {
+      outcomes.set(fullName, value);
+    }
+  }
+
+  for (const { candidate, outcome } of outcomes.values()) {
+    const delta = await upsertGitHubFinding({
+      scanDoc,
+      scan,
+      source,
+      actorId,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      candidate,
+      runContext: normalizedRun.runContext,
+      outcome,
+      scannerConfig,
+    });
+
+    findingCount += delta.findingCount;
+    counts.high += delta.counts.high;
+    counts.medium += delta.counts.medium;
+    counts.low += delta.counts.low;
+    counts.nonHit += delta.counts.nonHit;
+  }
+
+  return { findingCount, counts, skippedDuplicateCount };
+}
+
 type GoogleFindingOutcome = {
   severity: Finding['severity'];
   title: string;
@@ -895,6 +1326,36 @@ type DiscordFindingOutcome = {
 
 type DiscordChunkAnalysisResult = {
   outcomes: Map<string, { candidate: DiscordServerCandidate; outcome: DiscordFindingOutcome }>;
+};
+
+type GitHubFindingOutcome = {
+  severity: Finding['severity'];
+  title: string;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+  llmAnalysisPrompt?: string;
+  rawLlmResponse?: string;
+  classificationSource: 'llm' | 'fallback';
+};
+
+type GitHubChunkAnalysisResult = {
+  outcomes: Map<string, { candidate: GitHubRepoCandidate; outcome: GitHubFindingOutcome }>;
+};
+
+type XFindingOutcome = {
+  severity: Finding['severity'];
+  title: string;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+  llmAnalysisPrompt?: string;
+  rawLlmResponse?: string;
+  classificationSource: 'llm' | 'fallback';
+};
+
+type XChunkAnalysisResult = {
+  outcomes: Map<string, { candidate: XTweetCandidate; outcome: XFindingOutcome }>;
 };
 
 type FindingDelta = {
@@ -1129,6 +1590,156 @@ function normalizeDiscordServerRun({
   };
 }
 
+function normalizeXRun({
+  searchQuery,
+  displayQuery,
+  items,
+}: {
+  searchQuery?: string;
+  displayQuery?: string;
+  items: Record<string, unknown>[];
+}): { candidates: XTweetCandidate[]; runContext: XRunContext } {
+  const candidateMap = new Map<string, XTweetCandidate>();
+  const sourceQueries = new Set<string>();
+  const observedLanguages = new Set<string>();
+  const observedAuthors = new Set<string>();
+  const sampleTweetTexts = new Set<string>();
+  let nextResultId = 1;
+
+  for (const sourceQuery of readDelimitedQueries(displayQuery ?? searchQuery)) {
+    sourceQueries.add(sourceQuery);
+  }
+
+  for (const item of items) {
+    const tweetId = readXTweetId(item);
+    const url = readXUrl(item.url);
+    if (!tweetId || !url) continue;
+
+    const text = readOptionalTrimmedString(item.text) ?? readOptionalTrimmedString(item.fullText) ?? '';
+    if (!text) continue;
+
+    const author = readXAuthor(item.author);
+    const twitterUrl = readXUrl(item.twitterUrl);
+    const lang = readOptionalTrimmedString(item.lang);
+    const createdAt = readOptionalTrimmedString(item.createdAt);
+    const retweetCount = readOptionalFiniteNumber(item.retweetCount);
+    const replyCount = readOptionalFiniteNumber(item.replyCount);
+    const likeCount = readOptionalFiniteNumber(item.likeCount);
+    const quoteCount = readOptionalFiniteNumber(item.quoteCount);
+    const bookmarkCount = readOptionalFiniteNumber(item.bookmarkCount);
+    const quoteId = readOptionalTrimmedString(item.quoteId);
+    const isReply = typeof item.isReply === 'boolean' ? item.isReply : undefined;
+    const isRetweet = typeof item.isRetweet === 'boolean' ? item.isRetweet : undefined;
+    const isQuote = typeof item.isQuote === 'boolean' ? item.isQuote : undefined;
+
+    if (lang) observedLanguages.add(lang);
+    if (author.userName) observedAuthors.add(`@${author.userName}`);
+    else if (author.name) observedAuthors.add(author.name);
+    sampleTweetTexts.add(text.slice(0, 180));
+
+    if (candidateMap.has(tweetId)) {
+      continue;
+    }
+
+    candidateMap.set(tweetId, {
+      resultId: `x${nextResultId++}`,
+      tweetId,
+      url,
+      ...(twitterUrl ? { twitterUrl } : {}),
+      text,
+      ...(createdAt ? { createdAt } : {}),
+      ...(lang ? { lang } : {}),
+      ...(retweetCount !== undefined ? { retweetCount } : {}),
+      ...(replyCount !== undefined ? { replyCount } : {}),
+      ...(likeCount !== undefined ? { likeCount } : {}),
+      ...(quoteCount !== undefined ? { quoteCount } : {}),
+      ...(bookmarkCount !== undefined ? { bookmarkCount } : {}),
+      ...(isReply !== undefined ? { isReply } : {}),
+      ...(isRetweet !== undefined ? { isRetweet } : {}),
+      ...(isQuote !== undefined ? { isQuote } : {}),
+      ...(quoteId ? { quoteId } : {}),
+      author,
+    });
+  }
+
+  return {
+    candidates: Array.from(candidateMap.values()),
+    runContext: {
+      sourceQueries: uniqueStrings(Array.from(sourceQueries)),
+      observedLanguages: uniqueStrings(Array.from(observedLanguages)),
+      observedAuthors: uniqueStrings(Array.from(observedAuthors)),
+      sampleTweetTexts: uniqueStrings(Array.from(sampleTweetTexts)).slice(0, 12),
+    },
+  };
+}
+
+function normalizeGitHubRun({
+  searchQuery,
+  displayQuery,
+  items,
+}: {
+  searchQuery?: string;
+  displayQuery?: string;
+  items: Record<string, unknown>[];
+}): { candidates: GitHubRepoCandidate[]; runContext: GitHubRunContext } {
+  const candidateMap = new Map<string, GitHubRepoCandidate>();
+  const sourceQueries = new Set<string>();
+  const observedLanguages = new Set<string>();
+  const sampleRepoNames = new Set<string>();
+  const sampleOwners = new Set<string>();
+  let nextResultId = 1;
+
+  for (const sourceQuery of readDelimitedQueries(displayQuery ?? searchQuery)) {
+    sourceQueries.add(sourceQuery);
+  }
+
+  for (const item of items) {
+    const fullName = readGitHubRepoFullName(item);
+    if (!fullName) continue;
+
+    const url = buildGitHubRepoUrl(fullName);
+    const [owner, name] = splitGitHubFullName(fullName);
+    if (!owner || !name) continue;
+
+    const description = readOptionalTrimmedString(item.description);
+    const stars = readOptionalFiniteNumber(item.stars);
+    const forks = readOptionalFiniteNumber(item.forks);
+    const language = readOptionalTrimmedString(item.language);
+    const updatedAt = readOptionalTrimmedString(item.updatedAt);
+
+    if (language) observedLanguages.add(language);
+    sampleRepoNames.add(name);
+    sampleOwners.add(owner);
+
+    if (candidateMap.has(fullName)) {
+      continue;
+    }
+
+    candidateMap.set(fullName, {
+      resultId: `gh${nextResultId++}`,
+      fullName,
+      url,
+      name,
+      owner,
+      ...(description ? { description } : {}),
+      ...(stars !== undefined ? { stars } : {}),
+      ...(forks !== undefined ? { forks } : {}),
+      ...(language ? { language } : {}),
+      ...(updatedAt ? { updatedAt } : {}),
+    });
+  }
+
+  return {
+    candidates: Array.from(candidateMap.values()),
+    runContext: {
+      sourceQueries: uniqueStrings(Array.from(sourceQueries)),
+      observedLanguages: uniqueStrings(Array.from(observedLanguages)),
+      sampleRepoNames: uniqueStrings(Array.from(sampleRepoNames)).slice(0, 12),
+      sampleOwners: uniqueStrings(Array.from(sampleOwners)).slice(0, 12),
+    },
+  };
+}
+
 async function analyseGoogleChunk({
   candidates,
   prompt,
@@ -1198,6 +1809,84 @@ async function analyseDiscordChunk({
         ? buildDiscordFindingOutcome(item, raw, llmAnalysisPrompt)
         : buildDiscordFallbackOutcome(
             'AI analysis returned no assessment for this server. Raw data is preserved for manual review.',
+            raw,
+            llmAnalysisPrompt,
+          ),
+    });
+  }
+
+  return { outcomes };
+}
+
+async function analyseXChunk({
+  candidates,
+  prompt,
+  llmAnalysisPrompt,
+}: {
+  candidates: XTweetCandidate[];
+  prompt: string;
+  llmAnalysisPrompt: string;
+}): Promise<XChunkAnalysisResult> {
+  const raw = await chatCompletion([
+    { role: 'system', content: X_CLASSIFICATION_SYSTEM_PROMPT },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseXChunkAnalysisOutput(raw, new Set(candidates.map((candidate) => candidate.resultId)));
+  if (!parsed) {
+    throw new Error(`Failed to parse X chunk analysis output: ${raw.slice(0, 200)}`);
+  }
+
+  const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  const outcomes = new Map<string, { candidate: XTweetCandidate; outcome: XFindingOutcome }>();
+
+  for (const candidate of candidates) {
+    const item = byResultId.get(candidate.resultId);
+    outcomes.set(candidate.tweetId, {
+      candidate,
+      outcome: item
+        ? buildXFindingOutcome(item, raw, llmAnalysisPrompt)
+        : buildXFallbackOutcome(
+            'AI analysis returned no assessment for this post. Raw data is preserved for manual review.',
+            raw,
+            llmAnalysisPrompt,
+          ),
+    });
+  }
+
+  return { outcomes };
+}
+
+async function analyseGitHubChunk({
+  candidates,
+  prompt,
+  llmAnalysisPrompt,
+}: {
+  candidates: GitHubRepoCandidate[];
+  prompt: string;
+  llmAnalysisPrompt: string;
+}): Promise<GitHubChunkAnalysisResult> {
+  const raw = await chatCompletion([
+    { role: 'system', content: GITHUB_CLASSIFICATION_SYSTEM_PROMPT },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseGitHubChunkAnalysisOutput(raw, new Set(candidates.map((candidate) => candidate.resultId)));
+  if (!parsed) {
+    throw new Error(`Failed to parse GitHub chunk analysis output: ${raw.slice(0, 200)}`);
+  }
+
+  const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  const outcomes = new Map<string, { candidate: GitHubRepoCandidate; outcome: GitHubFindingOutcome }>();
+
+  for (const candidate of candidates) {
+    const item = byResultId.get(candidate.resultId);
+    outcomes.set(candidate.fullName, {
+      candidate,
+      outcome: item
+        ? buildGitHubFindingOutcome(item, raw, llmAnalysisPrompt)
+        : buildGitHubFallbackOutcome(
+            'AI analysis returned no assessment for this repository. Raw data is preserved for manual review.',
             raw,
             llmAnalysisPrompt,
           ),
@@ -1614,6 +2303,258 @@ async function upsertDiscordFinding({
   });
 }
 
+async function upsertXFinding({
+  scanDoc,
+  scan,
+  source,
+  scannerConfig,
+  actorId,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  candidate,
+  runContext,
+  outcome,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  candidate: XTweetCandidate;
+  runContext: XRunContext;
+  outcome: XFindingOutcome;
+}): Promise<FindingDelta> {
+  const scanId = scan.id ?? scanDoc.id;
+  const findingRef = db.collection('findings').doc(buildXFindingId(scanId, candidate.tweetId));
+
+  return db.runTransaction(async (tx) => {
+    const existingSnap = await tx.get(findingRef);
+    const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
+    const preferredOutcome = choosePreferredXOutcome(existing, outcome);
+    const mergedRawData = buildXStoredFindingRawData({
+      existingRawData: existing?.rawData,
+      candidate,
+      runContext,
+      source,
+      scannerConfig,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      classificationSource: preferredOutcome.classificationSource,
+    });
+    const preferredSource = choosePreferredFindingSource(existing?.source, source);
+
+    const previousState = existing ? getFindingCountState(existing) : emptyFindingCountState();
+    const nextState = getOutcomeCountState(preferredOutcome);
+
+    if (!existing) {
+      const finding: Omit<Finding, 'id'> = {
+        scanId,
+        brandId: scan.brandId,
+        userId: scan.userId,
+        source: preferredSource,
+        actorId,
+        severity: preferredOutcome.severity,
+        title: preferredOutcome.title,
+        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        description: preferredOutcome.analysis,
+        llmAnalysis: preferredOutcome.analysis,
+        url: candidate.url,
+        rawData: mergedRawData,
+        isFalsePositive: preferredOutcome.isFalsePositive,
+        ...(preferredOutcome.isFalsePositive && {
+          isIgnored: true,
+          ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+        }),
+        ...(typeof preferredOutcome.llmAnalysisPrompt === 'string' && {
+          llmAnalysisPrompt: preferredOutcome.llmAnalysisPrompt,
+        }),
+        ...(typeof preferredOutcome.rawLlmResponse === 'string' && {
+          rawLlmResponse: preferredOutcome.rawLlmResponse,
+        }),
+        createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+      };
+      tx.set(findingRef, finding);
+      return diffFindingStates(previousState, nextState);
+    }
+
+    const updates: Record<string, unknown> = {
+      source: preferredSource,
+      severity: preferredOutcome.severity,
+      title: preferredOutcome.title,
+      platform: FieldValue.delete(),
+      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      description: preferredOutcome.analysis,
+      llmAnalysis: preferredOutcome.analysis,
+      url: candidate.url,
+      rawData: mergedRawData,
+      isFalsePositive: preferredOutcome.isFalsePositive,
+    };
+
+    const llmAnalysisPrompt = preferredOutcome.llmAnalysisPrompt ?? existing.llmAnalysisPrompt;
+    if (typeof llmAnalysisPrompt === 'string') {
+      updates.llmAnalysisPrompt = llmAnalysisPrompt;
+    }
+
+    const rawLlmResponse = preferredOutcome.rawLlmResponse ?? existing.rawLlmResponse;
+    if (typeof rawLlmResponse === 'string') {
+      updates.rawLlmResponse = rawLlmResponse;
+    }
+
+    if (preferredOutcome.isFalsePositive) {
+      updates.isIgnored = true;
+      if (existing.isIgnored !== true) {
+        updates.ignoredAt = FieldValue.serverTimestamp();
+      }
+      updates.isAddressed = false;
+      if (existing.addressedAt) {
+        updates.addressedAt = FieldValue.delete();
+      }
+    } else {
+      updates.isIgnored = false;
+      if (existing.ignoredAt) {
+        updates.ignoredAt = FieldValue.delete();
+      }
+    }
+
+    tx.update(findingRef, updates);
+    return diffFindingStates(previousState, nextState);
+  });
+}
+
+async function upsertGitHubFinding({
+  scanDoc,
+  scan,
+  source,
+  scannerConfig,
+  actorId,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  candidate,
+  runContext,
+  outcome,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  candidate: GitHubRepoCandidate;
+  runContext: GitHubRunContext;
+  outcome: GitHubFindingOutcome;
+}): Promise<FindingDelta> {
+  const scanId = scan.id ?? scanDoc.id;
+  const findingRef = db.collection('findings').doc(buildGitHubFindingId(scanId, candidate.fullName));
+
+  return db.runTransaction(async (tx) => {
+    const existingSnap = await tx.get(findingRef);
+    const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
+    const preferredOutcome = choosePreferredGitHubOutcome(existing, outcome);
+    const mergedRawData = buildGitHubStoredFindingRawData({
+      existingRawData: existing?.rawData,
+      candidate,
+      runContext,
+      source,
+      scannerConfig,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      classificationSource: preferredOutcome.classificationSource,
+    });
+    const preferredSource = choosePreferredFindingSource(existing?.source, source);
+
+    const previousState = existing ? getFindingCountState(existing) : emptyFindingCountState();
+    const nextState = getOutcomeCountState(preferredOutcome);
+
+    if (!existing) {
+      const finding: Omit<Finding, 'id'> = {
+        scanId,
+        brandId: scan.brandId,
+        userId: scan.userId,
+        source: preferredSource,
+        actorId,
+        severity: preferredOutcome.severity,
+        title: preferredOutcome.title,
+        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        description: preferredOutcome.analysis,
+        llmAnalysis: preferredOutcome.analysis,
+        url: candidate.url,
+        rawData: mergedRawData,
+        isFalsePositive: preferredOutcome.isFalsePositive,
+        ...(preferredOutcome.isFalsePositive && {
+          isIgnored: true,
+          ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+        }),
+        ...(typeof preferredOutcome.llmAnalysisPrompt === 'string' && {
+          llmAnalysisPrompt: preferredOutcome.llmAnalysisPrompt,
+        }),
+        ...(typeof preferredOutcome.rawLlmResponse === 'string' && {
+          rawLlmResponse: preferredOutcome.rawLlmResponse,
+        }),
+        createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+      };
+      tx.set(findingRef, finding);
+      return diffFindingStates(previousState, nextState);
+    }
+
+    const updates: Record<string, unknown> = {
+      source: preferredSource,
+      severity: preferredOutcome.severity,
+      title: preferredOutcome.title,
+      platform: FieldValue.delete(),
+      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      description: preferredOutcome.analysis,
+      llmAnalysis: preferredOutcome.analysis,
+      url: candidate.url,
+      rawData: mergedRawData,
+      isFalsePositive: preferredOutcome.isFalsePositive,
+    };
+
+    const llmAnalysisPrompt = preferredOutcome.llmAnalysisPrompt ?? existing.llmAnalysisPrompt;
+    if (typeof llmAnalysisPrompt === 'string') {
+      updates.llmAnalysisPrompt = llmAnalysisPrompt;
+    }
+
+    const rawLlmResponse = preferredOutcome.rawLlmResponse ?? existing.rawLlmResponse;
+    if (typeof rawLlmResponse === 'string') {
+      updates.rawLlmResponse = rawLlmResponse;
+    }
+
+    if (preferredOutcome.isFalsePositive) {
+      updates.isIgnored = true;
+      if (existing.isIgnored !== true) {
+        updates.ignoredAt = FieldValue.serverTimestamp();
+      }
+      updates.isAddressed = false;
+      if (existing.addressedAt) {
+        updates.addressedAt = FieldValue.delete();
+      }
+    } else {
+      updates.isIgnored = false;
+      if (existing.ignoredAt) {
+        updates.ignoredAt = FieldValue.delete();
+      }
+    }
+
+    tx.update(findingRef, updates);
+    return diffFindingStates(previousState, nextState);
+  });
+}
+
 async function reserveSuggestedSearches({
   scanDoc,
   runId,
@@ -1790,6 +2731,40 @@ function buildDiscordFindingOutcome(
   };
 }
 
+function buildXFindingOutcome(
+  item: XChunkAnalysisItem,
+  rawLlmResponse: string,
+  llmAnalysisPrompt: string,
+): XFindingOutcome {
+  return {
+    severity: item.severity,
+    title: item.title,
+    theme: item.theme,
+    analysis: item.analysis,
+    isFalsePositive: item.isFalsePositive,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'llm',
+  };
+}
+
+function buildGitHubFindingOutcome(
+  item: GitHubChunkAnalysisItem,
+  rawLlmResponse: string,
+  llmAnalysisPrompt: string,
+): GitHubFindingOutcome {
+  return {
+    severity: item.severity,
+    title: item.title,
+    theme: item.theme,
+    analysis: item.analysis,
+    isFalsePositive: item.isFalsePositive,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'llm',
+  };
+}
+
 function buildGoogleFallbackOutcome(
   message: string,
   rawLlmResponse?: string,
@@ -1814,6 +2789,38 @@ function buildDiscordFallbackOutcome(
   return {
     severity: 'medium',
     title: 'Unanalysed server - review manually',
+    analysis: message,
+    isFalsePositive: false,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'fallback',
+  };
+}
+
+function buildXFallbackOutcome(
+  message: string,
+  rawLlmResponse?: string,
+  llmAnalysisPrompt?: string,
+): XFindingOutcome {
+  return {
+    severity: 'medium',
+    title: 'Unanalysed post - review manually',
+    analysis: message,
+    isFalsePositive: false,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'fallback',
+  };
+}
+
+function buildGitHubFallbackOutcome(
+  message: string,
+  rawLlmResponse?: string,
+  llmAnalysisPrompt?: string,
+): GitHubFindingOutcome {
+  return {
+    severity: 'medium',
+    title: 'Unanalysed repo - review manually',
     analysis: message,
     isFalsePositive: false,
     llmAnalysisPrompt,
@@ -2062,6 +3069,253 @@ function readDiscordStoredFindingRawData(rawData?: Record<string, unknown>): Dis
   };
 }
 
+function buildXStoredFindingRawData({
+  existingRawData,
+  candidate,
+  runContext,
+  source,
+  scannerConfig,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  classificationSource,
+}: {
+  existingRawData?: Record<string, unknown>;
+  candidate: XTweetCandidate;
+  runContext: XRunContext;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  classificationSource: 'llm' | 'fallback';
+}): XStoredFindingRawData {
+  const existing = readXStoredFindingRawData(existingRawData);
+  return {
+    kind: 'x-normalized',
+    version: X_RAW_DATA_VERSION,
+    tweet: {
+      id: candidate.tweetId,
+      url: candidate.url,
+      ...(candidate.twitterUrl ? { twitterUrl: candidate.twitterUrl } : {}),
+      text: candidate.text,
+      ...(candidate.createdAt ? { createdAt: candidate.createdAt } : {}),
+      ...(candidate.lang ? { lang: candidate.lang } : {}),
+      ...(candidate.retweetCount !== undefined ? { retweetCount: candidate.retweetCount } : {}),
+      ...(candidate.replyCount !== undefined ? { replyCount: candidate.replyCount } : {}),
+      ...(candidate.likeCount !== undefined ? { likeCount: candidate.likeCount } : {}),
+      ...(candidate.quoteCount !== undefined ? { quoteCount: candidate.quoteCount } : {}),
+      ...(candidate.bookmarkCount !== undefined ? { bookmarkCount: candidate.bookmarkCount } : {}),
+      ...(candidate.isReply !== undefined ? { isReply: candidate.isReply } : {}),
+      ...(candidate.isRetweet !== undefined ? { isRetweet: candidate.isRetweet } : {}),
+      ...(candidate.isQuote !== undefined ? { isQuote: candidate.isQuote } : {}),
+      ...(candidate.quoteId ? { quoteId: candidate.quoteId } : {}),
+      author: {
+        ...(candidate.author.id ? { id: candidate.author.id } : {}),
+        ...(candidate.author.userName ? { userName: candidate.author.userName } : {}),
+        ...(candidate.author.name ? { name: candidate.author.name } : {}),
+        ...(candidate.author.url ? { url: candidate.author.url } : {}),
+        ...(candidate.author.twitterUrl ? { twitterUrl: candidate.author.twitterUrl } : {}),
+        ...(candidate.author.isVerified !== undefined ? { isVerified: candidate.author.isVerified } : {}),
+        ...(candidate.author.isBlueVerified !== undefined ? { isBlueVerified: candidate.author.isBlueVerified } : {}),
+        ...(candidate.author.verifiedType ? { verifiedType: candidate.author.verifiedType } : {}),
+        ...(candidate.author.followers !== undefined ? { followers: candidate.author.followers } : {}),
+        ...(candidate.author.following !== undefined ? { following: candidate.author.following } : {}),
+      },
+    },
+    context: {
+      sourceQueries: uniqueStrings([...(existing?.context.sourceQueries ?? []), ...runContext.sourceQueries]),
+      observedLanguages: uniqueStrings([...(existing?.context.observedLanguages ?? []), ...runContext.observedLanguages]),
+      observedAuthors: uniqueStrings([...(existing?.context.observedAuthors ?? []), ...runContext.observedAuthors]),
+      sampleTweetTexts: uniqueStrings([...(existing?.context.sampleTweetTexts ?? []), ...runContext.sampleTweetTexts]).slice(0, 12),
+    },
+    analysis: {
+      source: classificationSource,
+      runId,
+      findingSource: source,
+      scannerId: scannerConfig.id,
+      searchDepth,
+      ...(searchQuery ? { searchQuery } : {}),
+      ...(displayQuery ? { displayQuery } : {}),
+    },
+  };
+}
+
+function readXStoredFindingRawData(rawData?: Record<string, unknown>): XStoredFindingRawData | null {
+  if (!rawData || rawData.kind !== 'x-normalized' || rawData.version !== X_RAW_DATA_VERSION) {
+    return null;
+  }
+
+  const tweet = typeof rawData.tweet === 'object' && rawData.tweet !== null ? rawData.tweet as Record<string, unknown> : {};
+  const author = typeof tweet.author === 'object' && tweet.author !== null ? tweet.author as Record<string, unknown> : {};
+  const context = typeof rawData.context === 'object' && rawData.context !== null ? rawData.context as Record<string, unknown> : {};
+  const analysis = typeof rawData.analysis === 'object' && rawData.analysis !== null ? rawData.analysis as Record<string, unknown> : {};
+
+  return {
+    kind: 'x-normalized',
+    version: X_RAW_DATA_VERSION,
+    tweet: {
+      id: typeof tweet.id === 'string' ? tweet.id : '',
+      url: typeof tweet.url === 'string' ? tweet.url : '',
+      twitterUrl: typeof tweet.twitterUrl === 'string' ? tweet.twitterUrl : undefined,
+      text: typeof tweet.text === 'string' ? tweet.text : '',
+      createdAt: typeof tweet.createdAt === 'string' ? tweet.createdAt : undefined,
+      lang: typeof tweet.lang === 'string' ? tweet.lang : undefined,
+      retweetCount: typeof tweet.retweetCount === 'number' ? tweet.retweetCount : undefined,
+      replyCount: typeof tweet.replyCount === 'number' ? tweet.replyCount : undefined,
+      likeCount: typeof tweet.likeCount === 'number' ? tweet.likeCount : undefined,
+      quoteCount: typeof tweet.quoteCount === 'number' ? tweet.quoteCount : undefined,
+      bookmarkCount: typeof tweet.bookmarkCount === 'number' ? tweet.bookmarkCount : undefined,
+      isReply: typeof tweet.isReply === 'boolean' ? tweet.isReply : undefined,
+      isRetweet: typeof tweet.isRetweet === 'boolean' ? tweet.isRetweet : undefined,
+      isQuote: typeof tweet.isQuote === 'boolean' ? tweet.isQuote : undefined,
+      quoteId: typeof tweet.quoteId === 'string' ? tweet.quoteId : undefined,
+      author: {
+        id: typeof author.id === 'string' ? author.id : undefined,
+        userName: typeof author.userName === 'string' ? author.userName : undefined,
+        name: typeof author.name === 'string' ? author.name : undefined,
+        url: typeof author.url === 'string' ? author.url : undefined,
+        twitterUrl: typeof author.twitterUrl === 'string' ? author.twitterUrl : undefined,
+        isVerified: typeof author.isVerified === 'boolean' ? author.isVerified : undefined,
+        isBlueVerified: typeof author.isBlueVerified === 'boolean' ? author.isBlueVerified : undefined,
+        verifiedType: typeof author.verifiedType === 'string' ? author.verifiedType : undefined,
+        followers: typeof author.followers === 'number' ? author.followers : undefined,
+        following: typeof author.following === 'number' ? author.following : undefined,
+      },
+    },
+    context: {
+      sourceQueries: Array.isArray(context.sourceQueries)
+        ? context.sourceQueries.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedLanguages: Array.isArray(context.observedLanguages)
+        ? context.observedLanguages.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedAuthors: Array.isArray(context.observedAuthors)
+        ? context.observedAuthors.filter((value): value is string => typeof value === 'string')
+        : [],
+      sampleTweetTexts: Array.isArray(context.sampleTweetTexts)
+        ? context.sampleTweetTexts.filter((value): value is string => typeof value === 'string')
+        : [],
+    },
+    analysis: {
+      source: analysis.source === 'fallback' ? 'fallback' : 'llm',
+      runId: typeof analysis.runId === 'string' ? analysis.runId : '',
+      findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'x',
+      scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'x-search',
+      searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
+      searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
+      displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
+    },
+  };
+}
+
+function buildGitHubStoredFindingRawData({
+  existingRawData,
+  candidate,
+  runContext,
+  source,
+  scannerConfig,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  classificationSource,
+}: {
+  existingRawData?: Record<string, unknown>;
+  candidate: GitHubRepoCandidate;
+  runContext: GitHubRunContext;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  classificationSource: 'llm' | 'fallback';
+}): GitHubStoredFindingRawData {
+  const existing = readGitHubStoredFindingRawData(existingRawData);
+  return {
+    kind: 'github-normalized',
+    version: GITHUB_RAW_DATA_VERSION,
+    repo: {
+      fullName: candidate.fullName,
+      url: candidate.url,
+      name: candidate.name,
+      owner: candidate.owner,
+      ...(candidate.description ? { description: candidate.description } : {}),
+      ...(candidate.stars !== undefined ? { stars: candidate.stars } : {}),
+      ...(candidate.forks !== undefined ? { forks: candidate.forks } : {}),
+      ...(candidate.language ? { language: candidate.language } : {}),
+      ...(candidate.updatedAt ? { updatedAt: candidate.updatedAt } : {}),
+    },
+    context: {
+      sourceQueries: uniqueStrings([...(existing?.context.sourceQueries ?? []), ...runContext.sourceQueries]),
+      observedLanguages: uniqueStrings([...(existing?.context.observedLanguages ?? []), ...runContext.observedLanguages]),
+      sampleRepoNames: uniqueStrings([...(existing?.context.sampleRepoNames ?? []), ...runContext.sampleRepoNames]).slice(0, 12),
+      sampleOwners: uniqueStrings([...(existing?.context.sampleOwners ?? []), ...runContext.sampleOwners]).slice(0, 12),
+    },
+    analysis: {
+      source: classificationSource,
+      runId,
+      findingSource: source,
+      scannerId: scannerConfig.id,
+      searchDepth,
+      ...(searchQuery ? { searchQuery } : {}),
+      ...(displayQuery ? { displayQuery } : {}),
+    },
+  };
+}
+
+function readGitHubStoredFindingRawData(rawData?: Record<string, unknown>): GitHubStoredFindingRawData | null {
+  if (!rawData || rawData.kind !== 'github-normalized' || rawData.version !== GITHUB_RAW_DATA_VERSION) {
+    return null;
+  }
+
+  const repo = typeof rawData.repo === 'object' && rawData.repo !== null ? rawData.repo as Record<string, unknown> : {};
+  const context = typeof rawData.context === 'object' && rawData.context !== null ? rawData.context as Record<string, unknown> : {};
+  const analysis = typeof rawData.analysis === 'object' && rawData.analysis !== null ? rawData.analysis as Record<string, unknown> : {};
+
+  return {
+    kind: 'github-normalized',
+    version: GITHUB_RAW_DATA_VERSION,
+    repo: {
+      fullName: typeof repo.fullName === 'string' ? repo.fullName : '',
+      url: typeof repo.url === 'string' ? repo.url : '',
+      name: typeof repo.name === 'string' ? repo.name : '',
+      owner: typeof repo.owner === 'string' ? repo.owner : '',
+      description: typeof repo.description === 'string' ? repo.description : undefined,
+      stars: typeof repo.stars === 'number' ? repo.stars : undefined,
+      forks: typeof repo.forks === 'number' ? repo.forks : undefined,
+      language: typeof repo.language === 'string' ? repo.language : undefined,
+      updatedAt: typeof repo.updatedAt === 'string' ? repo.updatedAt : undefined,
+    },
+    context: {
+      sourceQueries: Array.isArray(context.sourceQueries)
+        ? context.sourceQueries.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedLanguages: Array.isArray(context.observedLanguages)
+        ? context.observedLanguages.filter((value): value is string => typeof value === 'string')
+        : [],
+      sampleRepoNames: Array.isArray(context.sampleRepoNames)
+        ? context.sampleRepoNames.filter((value): value is string => typeof value === 'string')
+        : [],
+      sampleOwners: Array.isArray(context.sampleOwners)
+        ? context.sampleOwners.filter((value): value is string => typeof value === 'string')
+        : [],
+    },
+    analysis: {
+      source: analysis.source === 'fallback' ? 'fallback' : 'llm',
+      runId: typeof analysis.runId === 'string' ? analysis.runId : '',
+      findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'github',
+      scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'github-repos',
+      searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
+      searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
+      displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
+    },
+  };
+}
+
 function normalizeGoogleSearchSighting(value: unknown): GoogleSearchSighting | null {
   if (typeof value !== 'object' || value === null) return null;
   const sighting = value as Record<string, unknown>;
@@ -2106,6 +3360,8 @@ function isKnownFindingSource(value: unknown): value is Finding['source'] {
     || value === 'facebook'
     || value === 'instagram'
     || value === 'discord'
+    || value === 'github'
+    || value === 'x'
     || value === 'unknown'
   );
 }
@@ -2119,6 +3375,8 @@ function isKnownScannerId(value: unknown): value is ActorRunInfo['scannerId'] {
     || value === 'google-facebook'
     || value === 'google-instagram'
     || value === 'discord-servers'
+    || value === 'github-repos'
+    || value === 'x-search'
   );
 }
 
@@ -2146,6 +3404,8 @@ function resolveScannerConfig(actorRunInfo?: Partial<ActorRunInfo>): ScannerConf
     || actorRunInfo?.source === 'instagram'
     || actorRunInfo?.source === 'google'
     || actorRunInfo?.source === 'discord'
+    || actorRunInfo?.source === 'github'
+    || actorRunInfo?.source === 'x'
   ) {
     return getScannerConfigBySource(actorRunInfo.source);
   }
@@ -2165,6 +3425,8 @@ function choosePreferredFindingSource(
       || source === 'facebook'
       || source === 'instagram'
       || source === 'discord'
+      || source === 'github'
+      || source === 'x'
     ) return 3;
     if (source === 'google') return 2;
     if (source === 'unknown') return 1;
@@ -2183,6 +3445,18 @@ function buildExecutableSearchQuery(
   return scannerConfig.kind === 'google'
     ? buildGoogleScannerQuery(scannerConfig.source, trimmedQuery)
     : trimmedQuery;
+}
+
+function getMaxItemsToAnalyse(scannerConfig: ScannerConfig, brand: BrandProfile): number {
+  if (scannerConfig.kind === 'x') {
+    return getInitialXMaxItems(brand.searchResultPages);
+  }
+
+  if (scannerConfig.kind === 'github') {
+    return getInitialGitHubMaxResults(brand.searchResultPages);
+  }
+
+  return MAX_ITEMS_PER_RUN;
 }
 
 function choosePreferredGoogleOutcome(existing: Finding | null, next: GoogleFindingOutcome): GoogleFindingOutcome {
@@ -2221,6 +3495,68 @@ function choosePreferredDiscordOutcome(existing: Finding | null, next: DiscordFi
 
   const existingSource = readDiscordStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
   const existingOutcome: DiscordFindingOutcome = {
+    severity: existing.severity,
+    title: existing.title,
+    theme: existing.theme,
+    analysis: existing.llmAnalysis,
+    isFalsePositive: existing.isFalsePositive === true,
+    llmAnalysisPrompt: existing.llmAnalysisPrompt,
+    rawLlmResponse: existing.rawLlmResponse,
+    classificationSource: existingSource,
+  };
+
+  if (existingOutcome.classificationSource !== next.classificationSource) {
+    return next.classificationSource === 'llm' ? next : existingOutcome;
+  }
+  if (existingOutcome.isFalsePositive !== next.isFalsePositive) {
+    return existingOutcome.isFalsePositive ? next : existingOutcome;
+  }
+
+  const existingRank = getSeverityRank(existingOutcome.severity);
+  const nextRank = getSeverityRank(next.severity);
+  if (nextRank !== existingRank) {
+    return nextRank > existingRank ? next : existingOutcome;
+  }
+
+  return next;
+}
+
+function choosePreferredXOutcome(existing: Finding | null, next: XFindingOutcome): XFindingOutcome {
+  if (!existing) return next;
+
+  const existingSource = readXStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
+  const existingOutcome: XFindingOutcome = {
+    severity: existing.severity,
+    title: existing.title,
+    theme: existing.theme,
+    analysis: existing.llmAnalysis,
+    isFalsePositive: existing.isFalsePositive === true,
+    llmAnalysisPrompt: existing.llmAnalysisPrompt,
+    rawLlmResponse: existing.rawLlmResponse,
+    classificationSource: existingSource,
+  };
+
+  if (existingOutcome.classificationSource !== next.classificationSource) {
+    return next.classificationSource === 'llm' ? next : existingOutcome;
+  }
+  if (existingOutcome.isFalsePositive !== next.isFalsePositive) {
+    return existingOutcome.isFalsePositive ? next : existingOutcome;
+  }
+
+  const existingRank = getSeverityRank(existingOutcome.severity);
+  const nextRank = getSeverityRank(next.severity);
+  if (nextRank !== existingRank) {
+    return nextRank > existingRank ? next : existingOutcome;
+  }
+
+  return next;
+}
+
+function choosePreferredGitHubOutcome(existing: Finding | null, next: GitHubFindingOutcome): GitHubFindingOutcome {
+  if (!existing) return next;
+
+  const existingSource = readGitHubStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
+  const existingOutcome: GitHubFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
     theme: existing.theme,
@@ -2542,6 +3878,14 @@ function buildDiscordFindingId(scanId: string, serverId: string): string {
   return `${DISCORD_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${serverId}`).digest('hex')}`;
 }
 
+function buildXFindingId(scanId: string, tweetId: string): string {
+  return `${X_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${tweetId}`).digest('hex')}`;
+}
+
+function buildGitHubFindingId(scanId: string, fullName: string): string {
+  return `${GITHUB_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${fullName.toLowerCase()}`).digest('hex')}`;
+}
+
 function normalizeUrlForFinding(url: string): string | null {
   if (!url) return null;
 
@@ -2611,7 +3955,7 @@ function readDiscordServerId(item: Record<string, unknown>): string | null {
   return null;
 }
 
-function readDiscordSourceQueries(value?: string): string[] {
+function readDelimitedQueries(value?: string): string[] {
   if (!value) return [];
   return uniqueStrings(
     value
@@ -2619,6 +3963,10 @@ function readDiscordSourceQueries(value?: string): string[] {
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0),
   );
+}
+
+function readDiscordSourceQueries(value?: string): string[] {
+  return readDelimitedQueries(value);
 }
 
 function readDiscordServerName(item: Record<string, unknown>): string | undefined {
@@ -2658,6 +4006,65 @@ function readDiscordStringArray(value: unknown): string[] {
       .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       .map((entry) => entry.trim()),
   );
+}
+
+function readGitHubRepoFullName(item: Record<string, unknown>): string | null {
+  const value = readOptionalTrimmedString(item.fullName) ?? readOptionalTrimmedString(item.full_name);
+  if (!value || !value.includes('/')) {
+    return null;
+  }
+  const [owner, repo] = splitGitHubFullName(value);
+  if (!owner || !repo) {
+    return null;
+  }
+  return `${owner}/${repo}`;
+}
+
+function buildGitHubRepoUrl(fullName: string): string {
+  return `https://github.com/${fullName}`;
+}
+
+function splitGitHubFullName(fullName: string): [string, string] {
+  const [owner, ...rest] = fullName.split('/');
+  const repo = rest.join('/').trim();
+  return [owner?.trim() ?? '', repo];
+}
+
+function readXTweetId(item: Record<string, unknown>): string | null {
+  const candidateIds = [item.id];
+  for (const value of candidateIds) {
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function readXUrl(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    return undefined;
+  }
+  const normalized = normalizeUrlForFinding(value.trim());
+  return normalized ?? undefined;
+}
+
+function readXAuthor(value: unknown): XTweetCandidate['author'] {
+  if (typeof value !== 'object' || value === null) {
+    return {};
+  }
+
+  const author = value as Record<string, unknown>;
+  return {
+    ...(typeof author.id === 'string' && author.id.trim().length > 0 ? { id: author.id.trim() } : {}),
+    ...(typeof author.userName === 'string' && author.userName.trim().length > 0 ? { userName: author.userName.trim() } : {}),
+    ...(typeof author.name === 'string' && author.name.trim().length > 0 ? { name: author.name.trim() } : {}),
+    ...(readXUrl(author.url) ? { url: readXUrl(author.url)! } : {}),
+    ...(readXUrl(author.twitterUrl) ? { twitterUrl: readXUrl(author.twitterUrl)! } : {}),
+    ...(typeof author.isVerified === 'boolean' ? { isVerified: author.isVerified } : {}),
+    ...(typeof author.isBlueVerified === 'boolean' ? { isBlueVerified: author.isBlueVerified } : {}),
+    ...(typeof author.verifiedType === 'string' && author.verifiedType.trim().length > 0 ? { verifiedType: author.verifiedType.trim() } : {}),
+    ...(readOptionalFiniteNumber(author.followers) !== undefined ? { followers: readOptionalFiniteNumber(author.followers) } : {}),
+    ...(readOptionalFiniteNumber(author.following) !== undefined ? { following: readOptionalFiniteNumber(author.following) } : {}),
+  };
 }
 
 function readOptionalTrimmedString(value: unknown): string | undefined {

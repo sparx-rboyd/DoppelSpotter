@@ -13,6 +13,7 @@ interface BaseScannerConfig {
   actorId: string;
   displayName: string;
   shortLabel: string;
+  supportsDeepSearch: boolean;
 }
 
 export interface GoogleScannerConfig extends BaseScannerConfig {
@@ -28,10 +29,28 @@ export interface DiscordScannerConfig extends BaseScannerConfig {
   kind: 'discord';
 }
 
-export type ScannerConfig = GoogleScannerConfig | DiscordScannerConfig;
+export interface GitHubScannerConfig extends BaseScannerConfig {
+  id: 'github-repos';
+  source: 'github';
+  kind: 'github';
+}
+
+export interface XScannerConfig extends BaseScannerConfig {
+  id: 'x-search';
+  source: 'x';
+  kind: 'x';
+}
+
+export type ScannerConfig =
+  | GoogleScannerConfig
+  | DiscordScannerConfig
+  | GitHubScannerConfig
+  | XScannerConfig;
 
 export const GOOGLE_SEARCH_ACTOR_ID = 'apify/google-search-scraper';
 export const DISCORD_SERVER_SCRAPER_ACTOR_ID = 'louisdeconinck/discord-server-scraper';
+export const GITHUB_REPO_SEARCH_ACTOR_ID = 'ryanclinton/github-repo-search';
+export const X_TWEET_SCRAPER_ACTOR_ID = 'apidojo/tweet-scraper';
 
 export const SCAN_SOURCE_ORDER: ScanFindingSource[] = [
   'google',
@@ -41,6 +60,8 @@ export const SCAN_SOURCE_ORDER: ScanFindingSource[] = [
   'facebook',
   'instagram',
   'discord',
+  'github',
+  'x',
 ];
 
 export const GOOGLE_SCAN_SOURCE_ORDER: GoogleFindingSource[] = [
@@ -60,6 +81,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     kind: 'google',
     displayName: 'Web search',
     shortLabel: 'Web',
+    supportsDeepSearch: true,
   },
   'google-reddit': {
     id: 'google-reddit',
@@ -69,6 +91,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     displayName: 'Reddit',
     shortLabel: 'Reddit',
     siteHost: 'reddit.com',
+    supportsDeepSearch: true,
   },
   'google-tiktok': {
     id: 'google-tiktok',
@@ -78,6 +101,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     displayName: 'TikTok',
     shortLabel: 'TikTok',
     siteHost: 'tiktok.com',
+    supportsDeepSearch: true,
   },
   'google-youtube': {
     id: 'google-youtube',
@@ -87,6 +111,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     displayName: 'YouTube',
     shortLabel: 'YouTube',
     siteHost: 'youtube.com',
+    supportsDeepSearch: true,
   },
   'google-facebook': {
     id: 'google-facebook',
@@ -96,6 +121,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     displayName: 'Facebook',
     shortLabel: 'Facebook',
     siteHost: 'facebook.com',
+    supportsDeepSearch: true,
   },
   'google-instagram': {
     id: 'google-instagram',
@@ -105,6 +131,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     displayName: 'Instagram',
     shortLabel: 'Instagram',
     siteHost: 'instagram.com',
+    supportsDeepSearch: true,
   },
   'discord-servers': {
     id: 'discord-servers',
@@ -113,6 +140,25 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     kind: 'discord',
     displayName: 'Discord servers',
     shortLabel: 'Discord',
+    supportsDeepSearch: true,
+  },
+  'github-repos': {
+    id: 'github-repos',
+    source: 'github',
+    actorId: GITHUB_REPO_SEARCH_ACTOR_ID,
+    kind: 'github',
+    displayName: 'GitHub repos',
+    shortLabel: 'GitHub',
+    supportsDeepSearch: false,
+  },
+  'x-search': {
+    id: 'x-search',
+    source: 'x',
+    actorId: X_TWEET_SCRAPER_ACTOR_ID,
+    kind: 'x',
+    displayName: 'X',
+    shortLabel: 'X',
+    supportsDeepSearch: false,
   },
 };
 
@@ -124,10 +170,20 @@ const SCANNER_ID_BY_SOURCE: Record<ScanFindingSource, ScannerId> = {
   facebook: 'google-facebook',
   instagram: 'google-instagram',
   discord: 'discord-servers',
+  github: 'github-repos',
+  x: 'x-search',
 };
 
 export function isGoogleScannerConfig(config: ScannerConfig): config is GoogleScannerConfig {
   return config.kind === 'google';
+}
+
+export function supportsScannerDeepSearch(config: ScannerConfig): boolean {
+  return config.supportsDeepSearch;
+}
+
+export function supportsSourceDeepSearch(source: ScanFindingSource): boolean {
+  return getScannerConfigBySource(source).supportsDeepSearch;
 }
 
 export function hasEnabledBrandScanSource(scanSources: BrandScanSources | undefined): boolean {

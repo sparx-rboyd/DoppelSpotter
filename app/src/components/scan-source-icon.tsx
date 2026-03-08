@@ -53,5 +53,13 @@ export function ScanSourceIcon({ source, className }: ScanSourceIconProps) {
     return <MaskedSvgIcon src="/discord.svg" className={cn('h-[18px] w-[18px]', className)} />;
   }
 
+  if (source === 'github') {
+    return <MaskedSvgIcon src="/github.svg" className={cn('h-[18px] w-[18px]', className)} />;
+  }
+
+  if (source === 'x') {
+    return <MaskedSvgIcon src="/x.svg" className={cn('h-[18px] w-[18px]', className)} />;
+  }
+
   return <Globe className={cn('h-[18px] w-[18px]', className)} aria-hidden="true" />;
 }

@@ -15,6 +15,8 @@ export const DEFAULT_BRAND_SCAN_SOURCES: BrandScanSources = {
   facebook: false,
   instagram: false,
   discord: false,
+  github: false,
+  x: false,
 };
 
 export function isValidSearchResultPages(value: unknown): value is number {
@@ -47,6 +49,14 @@ export function getInitialGooglePageCount(searchResultPages?: unknown): number {
   return normalizeSearchResultPages(searchResultPages);
 }
 
+export function getInitialXMaxItems(searchResultPages?: unknown): number {
+  return normalizeSearchResultPages(searchResultPages) * 50;
+}
+
+export function getInitialGitHubMaxResults(searchResultPages?: unknown): number {
+  return normalizeSearchResultPages(searchResultPages) * 50;
+}
+
 export function getDeepSearchGooglePageCount(searchResultPages?: unknown): number {
   return normalizeSearchResultPages(searchResultPages);
 }
@@ -72,7 +82,9 @@ export function isValidBrandScanSources(value: unknown): value is BrandScanSourc
     typeof scanSources.youtube === 'boolean' &&
     typeof scanSources.facebook === 'boolean' &&
     typeof scanSources.instagram === 'boolean' &&
-    typeof scanSources.discord === 'boolean'
+    typeof scanSources.discord === 'boolean' &&
+    typeof scanSources.github === 'boolean' &&
+    typeof scanSources.x === 'boolean'
   );
 }
 
@@ -90,6 +102,8 @@ export function normalizeBrandScanSources(value: unknown): BrandScanSources {
     facebook: typeof scanSources.facebook === 'boolean' ? scanSources.facebook : DEFAULT_BRAND_SCAN_SOURCES.facebook,
     instagram: typeof scanSources.instagram === 'boolean' ? scanSources.instagram : DEFAULT_BRAND_SCAN_SOURCES.instagram,
     discord: typeof scanSources.discord === 'boolean' ? scanSources.discord : DEFAULT_BRAND_SCAN_SOURCES.discord,
+    github: typeof scanSources.github === 'boolean' ? scanSources.github : DEFAULT_BRAND_SCAN_SOURCES.github,
+    x: typeof scanSources.x === 'boolean' ? scanSources.x : DEFAULT_BRAND_SCAN_SOURCES.x,
   };
 }
 
@@ -103,5 +117,7 @@ export function hasEnabledBrandScanSource(value: unknown): boolean {
     || scanSources.facebook
     || scanSources.instagram
     || scanSources.discord
+    || scanSources.github
+    || scanSources.x
   );
 }

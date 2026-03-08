@@ -57,6 +57,8 @@ export interface BrandScanSources {
   facebook: boolean;
   instagram: boolean;
   discord: boolean;
+  github: boolean;
+  x: boolean;
 }
 
 // ─── Brand Profile ─────────────────────────────────────────────────────────
@@ -156,6 +158,8 @@ export type FindingSource =
   | 'facebook'
   | 'instagram'
   | 'discord'
+  | 'github'
+  | 'x'
   | 'unknown';
 
 export interface FindingSummary {
@@ -221,7 +225,9 @@ export type ScannerId =
   | 'google-youtube'
   | 'google-facebook'
   | 'google-instagram'
-  | 'discord-servers';
+  | 'discord-servers'
+  | 'github-repos'
+  | 'x-search';
 
 export type GoogleScannerId = Extract<
   ScannerId,
@@ -273,7 +279,7 @@ export interface ActorRunInfo {
   searchQuery?: string;
   /** The user-visible query text with internal site operators removed. */
   displayQuery?: string;
-  /** Set once a depth-0 Google run has reserved its deep-search suggestions. */
+  /** Set once a depth-0 deep-search-capable run has reserved its follow-up suggestions. */
   deepSearchSuggestionsProcessed?: boolean;
   /** The follow-up queries reserved for this run, if any. */
   suggestedSearches?: string[];

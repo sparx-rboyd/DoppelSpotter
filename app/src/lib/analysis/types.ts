@@ -196,6 +196,190 @@ export interface DiscordStoredFindingRawData extends Record<string, unknown> {
   };
 }
 
+/**
+ * One GitHub repository candidate returned by the GitHub repo search actor.
+ */
+export interface GitHubRepoCandidate {
+  resultId: string;
+  fullName: string;
+  url: string;
+  name: string;
+  owner: string;
+  description?: string;
+  stars?: number;
+  forks?: number;
+  language?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Run-level GitHub context shared across chunked analysis calls.
+ */
+export interface GitHubRunContext {
+  sourceQueries: string[];
+  observedLanguages: string[];
+  sampleRepoNames: string[];
+  sampleOwners: string[];
+}
+
+/**
+ * One assessed GitHub repository returned by chunked AI analysis.
+ */
+export interface GitHubChunkAnalysisItem {
+  resultId: string;
+  title: string;
+  severity: Severity;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+}
+
+/**
+ * The structured JSON output expected from chunked GitHub analysis.
+ */
+export interface GitHubChunkAnalysisOutput {
+  items: GitHubChunkAnalysisItem[];
+}
+
+/**
+ * Compact stored debug payload for GitHub findings.
+ */
+export interface GitHubStoredFindingRawData extends Record<string, unknown> {
+  kind: 'github-normalized';
+  version: 1;
+  repo: {
+    fullName: string;
+    url: string;
+    name: string;
+    owner: string;
+    description?: string;
+    stars?: number;
+    forks?: number;
+    language?: string;
+    updatedAt?: string;
+  };
+  context: GitHubRunContext;
+  analysis: {
+    source: 'llm' | 'fallback';
+    runId: string;
+    findingSource: FindingSource;
+    scannerId: ScannerId;
+    searchDepth: number;
+    searchQuery?: string;
+    displayQuery?: string;
+  };
+}
+
+/**
+ * One tweet/post candidate returned by the X tweet scraper.
+ */
+export interface XTweetCandidate {
+  resultId: string;
+  tweetId: string;
+  url: string;
+  twitterUrl?: string;
+  text: string;
+  createdAt?: string;
+  lang?: string;
+  retweetCount?: number;
+  replyCount?: number;
+  likeCount?: number;
+  quoteCount?: number;
+  bookmarkCount?: number;
+  isReply?: boolean;
+  isRetweet?: boolean;
+  isQuote?: boolean;
+  quoteId?: string;
+  author: {
+    id?: string;
+    userName?: string;
+    name?: string;
+    url?: string;
+    twitterUrl?: string;
+    isVerified?: boolean;
+    isBlueVerified?: boolean;
+    verifiedType?: string;
+    followers?: number;
+    following?: number;
+  };
+}
+
+/**
+ * Run-level X context shared across chunked analysis calls.
+ */
+export interface XRunContext {
+  sourceQueries: string[];
+  observedLanguages: string[];
+  observedAuthors: string[];
+  sampleTweetTexts: string[];
+}
+
+/**
+ * One assessed X tweet returned by chunked AI analysis.
+ */
+export interface XChunkAnalysisItem {
+  resultId: string;
+  title: string;
+  severity: Severity;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+}
+
+/**
+ * The structured JSON output expected from chunked X analysis.
+ */
+export interface XChunkAnalysisOutput {
+  items: XChunkAnalysisItem[];
+}
+
+/**
+ * Compact stored debug payload for X findings.
+ */
+export interface XStoredFindingRawData extends Record<string, unknown> {
+  kind: 'x-normalized';
+  version: 1;
+  tweet: {
+    id: string;
+    url: string;
+    twitterUrl?: string;
+    text: string;
+    createdAt?: string;
+    lang?: string;
+    retweetCount?: number;
+    replyCount?: number;
+    likeCount?: number;
+    quoteCount?: number;
+    bookmarkCount?: number;
+    isReply?: boolean;
+    isRetweet?: boolean;
+    isQuote?: boolean;
+    quoteId?: string;
+    author: {
+      id?: string;
+      userName?: string;
+      name?: string;
+      url?: string;
+      twitterUrl?: string;
+      isVerified?: boolean;
+      isBlueVerified?: boolean;
+      verifiedType?: string;
+      followers?: number;
+      following?: number;
+    };
+  };
+  context: XRunContext;
+  analysis: {
+    source: 'llm' | 'fallback';
+    runId: string;
+    findingSource: FindingSource;
+    scannerId: ScannerId;
+    searchDepth: number;
+    searchQuery?: string;
+    displayQuery?: string;
+  };
+}
+
 /** Maximum follow-up deep-search queries AI analysis may request per Google batch run */
 export const MAX_SUGGESTED_SEARCHES = 5;
 
@@ -220,6 +404,28 @@ export function parseDiscordChunkAnalysisOutput(
   raw: string,
   validResultIds: Set<string>,
 ): DiscordChunkAnalysisOutput | null {
+  const items = parseChunkAnalysisItems(raw, validResultIds);
+  return items ? { items } : null;
+}
+
+/**
+ * Parse and validate the raw JSON string returned by chunked GitHub analysis.
+ */
+export function parseGitHubChunkAnalysisOutput(
+  raw: string,
+  validResultIds: Set<string>,
+): GitHubChunkAnalysisOutput | null {
+  const items = parseChunkAnalysisItems(raw, validResultIds);
+  return items ? { items } : null;
+}
+
+/**
+ * Parse and validate the raw JSON string returned by chunked X analysis.
+ */
+export function parseXChunkAnalysisOutput(
+  raw: string,
+  validResultIds: Set<string>,
+): XChunkAnalysisOutput | null {
   const items = parseChunkAnalysisItems(raw, validResultIds);
   return items ? { items } : null;
 }

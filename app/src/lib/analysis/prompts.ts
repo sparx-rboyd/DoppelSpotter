@@ -9,8 +9,12 @@ import {
 import type {
   DiscordRunContext,
   DiscordServerCandidate,
+  GitHubRepoCandidate,
+  GitHubRunContext,
   GoogleRunContext,
   GoogleSearchCandidate,
+  XRunContext,
+  XTweetCandidate,
 } from './types';
 
 /**
@@ -115,6 +119,106 @@ Treat servers with less caution when ...
 - The server clearly does not claim to represent the brand nor entice users into harmful activity
 
 Set isFalsePositive: true if the server is clearly legitimate use of the brand name, such as an official community, an obviously benign discussion group, or a community with no sign of deception.`;
+
+/**
+ * System prompt for chunked GitHub repository classification.
+ */
+export const GITHUB_CLASSIFICATION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive a compact list of public GitHub repository candidates for a brand, plus supporting context such as the search terms used, observed languages, repository owners, and sample repository names.
+
+Your task is to assess ONLY the provided GitHub repositories for potential brand infringement, scam tooling, cheating/bypass tooling, fake official tooling, impersonation, or other suspicious brand misuse.
+Do not invent extra repositories. Do not assess code, issues, pull requests, or discussions that are not evidenced by the provided repository metadata.
+Use British English spelling and phrasing in all human-readable output fields.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "items": [
+    {
+      "resultId": "the exact resultId from the input candidate",
+      "title": "Short, descriptive title of the finding (max 10 words)",
+      "severity": "high" | "medium" | "low",
+      "theme": "Short theme label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
+      "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
+      "isFalsePositive": boolean
+    }
+  ]
+}
+
+Rules for "items":
+- Include exactly one item for every input repository candidate and reuse the exact same resultId.
+- Assess only the provided repositories. Do not add extra items and do not omit any candidate.
+- Each item must have all six fields: resultId, title, severity, theme, analysis, isFalsePositive.
+- Each individual analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
+- This applies to both the title and the analysis text.
+- Always return a concise "theme" label. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case.
+- If the user prompt includes existing theme labels that fit, reuse one of them exactly.
+- If none fit well, create a new short label rather than forcing a poor match.
+- Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
+- Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
+- If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current repository metadata.
+
+Severity guidelines:
+- "high": Clear fake official tooling, phishing/scam tooling, cheat/bypass tooling, or direct brand misuse posing immediate risk
+- "medium": Suspicious branding, risky unofficial tooling, misleading integrations, or repositories that warrant investigation but may have a legitimate explanation
+- "low": Likely benign integrations, wrappers, examples, or discussion-related repositories worth logging, but with limited evidence of harmful intent
+
+Counter signals:
+Treat repositories with less caution when ...
+- The repository is clearly a legitimate integration, wrapper, demo, or ecosystem tool with no deceptive intent
+- The brand term is used in an unrelated technical or academic context that would not realistically infringe the brand
+
+Set isFalsePositive: true if the repository is clearly legitimate use of the brand name, such as a benign integration, academic project, ordinary discussion repo, or otherwise non-deceptive ecosystem tooling.`;
+
+/**
+ * System prompt for chunked X tweet classification.
+ */
+export const X_CLASSIFICATION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive a compact list of public X posts for a brand, plus supporting context such as the search terms used, observed languages, and author handles.
+
+Your task is to assess ONLY the provided posts for potential brand infringement, scam promotion, impersonation, suspicious support activity, misleading announcements, or other harmful brand misuse.
+Do not invent extra posts. Do not assess anything that is not evidenced by the provided post text and metadata.
+Use British English spelling and phrasing in all human-readable output fields.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "items": [
+    {
+      "resultId": "the exact resultId from the input candidate",
+      "title": "Short, descriptive title of the finding (max 10 words)",
+      "severity": "high" | "medium" | "low",
+      "theme": "Short theme label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
+      "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
+      "isFalsePositive": boolean
+    }
+  ]
+}
+
+Rules for "items":
+- Include exactly one item for every input post and reuse the exact same resultId.
+- Assess only the provided posts. Do not add extra items and do not omit any candidate.
+- Each item must have all six fields: resultId, title, severity, theme, analysis, isFalsePositive.
+- Each individual analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
+- This applies to both the title and the analysis text.
+- Always return a concise "theme" label. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case.
+- If the user prompt includes existing theme labels that fit, reuse one of them exactly.
+- If none fit well, create a new short label rather than forcing a poor match.
+- Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
+- Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
+- If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current post.
+
+Severity guidelines:
+- "high": Clear impersonation, phishing, fraudulent giveaway, fake support, scam promotion, or direct brand misuse posing immediate risk
+- "medium": Suspicious claims, misleading promotions, risky associations, or posts that warrant investigation but may have a legitimate explanation
+- "low": Likely benign discussion, commentary, or mention worth logging, but with limited evidence of harmful intent
+
+Counter signals:
+Treat posts with less caution when ...
+- The post is clearly news, commentary, parody, or ordinary discussion without deceptive intent
+- The brand terms are used in an unrelated context that would not realistically infringe the brand
+
+Set isFalsePositive: true if the post is clearly legitimate use of the brand name, such as ordinary commentary, genuine news sharing, or clearly benign discussion with no sign of deception.`;
 
 /**
  * System prompt for the final per-scan summary.
@@ -369,6 +473,148 @@ Use British English in any human-readable text you generate.
 Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
 
 Discord server candidates (${compactCandidates.length}):
+${JSON.stringify(compactCandidates, null, 2)}`;
+}
+
+export function buildGitHubChunkAnalysisPrompt(params: {
+  brandName: string;
+  keywords: string[];
+  officialDomains: string[];
+  watchWords?: string[];
+  safeWords?: string[];
+  userPreferenceHints?: UserPreferenceHints;
+  existingThemes?: string[];
+  source: FindingSource;
+  candidates: GitHubRepoCandidate[];
+  runContext: GitHubRunContext;
+}): string {
+  const {
+    brandName,
+    keywords,
+    officialDomains,
+    watchWords,
+    safeWords,
+    userPreferenceHints,
+    existingThemes,
+    source,
+    candidates,
+    runContext,
+  } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that repository): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with — if present in a repository, treat it with reduced caution in the individual "analysis" field unless there are strong warning signs elsewhere): ${safeWords.join(', ')}`
+    : null;
+
+  const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
+  const existingThemesLine = `Existing theme labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingThemes && existingThemes.length > 0 ? existingThemes.join(', ') : 'none'}`;
+  const compactCandidates = candidates.map((candidate) => ({
+    resultId: candidate.resultId,
+    fullName: candidate.fullName,
+    url: candidate.url,
+    name: candidate.name,
+    owner: candidate.owner,
+    description: candidate.description,
+    stars: candidate.stars,
+    forks: candidate.forks,
+    language: candidate.language,
+    updatedAt: candidate.updatedAt,
+  }));
+
+  return `Brand being protected: "${brandName}"
+Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
+Monitoring surface: GitHub repos
+
+Supporting GitHub context:
+- Search terms used: ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.join(' | ') : 'none'}
+- Observed languages: ${runContext.observedLanguages.length > 0 ? runContext.observedLanguages.join(' | ') : 'none'}
+- Sample repository names: ${runContext.sampleRepoNames.length > 0 ? runContext.sampleRepoNames.join(' | ') : 'none'}
+- Sample owners: ${runContext.sampleOwners.length > 0 ? runContext.sampleOwners.join(' | ') : 'none'}
+
+Assess every repository candidate below and return one item in the "items" array per resultId.
+Use British English in any human-readable text you generate.
+Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
+
+GitHub repositories (${compactCandidates.length}):
+${JSON.stringify(compactCandidates, null, 2)}`;
+}
+
+export function buildXChunkAnalysisPrompt(params: {
+  brandName: string;
+  keywords: string[];
+  officialDomains: string[];
+  watchWords?: string[];
+  safeWords?: string[];
+  userPreferenceHints?: UserPreferenceHints;
+  existingThemes?: string[];
+  source: FindingSource;
+  candidates: XTweetCandidate[];
+  runContext: XRunContext;
+}): string {
+  const {
+    brandName,
+    keywords,
+    officialDomains,
+    watchWords,
+    safeWords,
+    userPreferenceHints,
+    existingThemes,
+    source,
+    candidates,
+    runContext,
+  } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that post): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with — if present in a post, treat it with reduced caution in the individual "analysis" field unless there are strong warning signs elsewhere): ${safeWords.join(', ')}`
+    : null;
+
+  const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
+  const existingThemesLine = `Existing theme labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingThemes && existingThemes.length > 0 ? existingThemes.join(', ') : 'none'}`;
+  const compactCandidates = candidates.map((candidate) => ({
+    resultId: candidate.resultId,
+    tweetId: candidate.tweetId,
+    url: candidate.url,
+    twitterUrl: candidate.twitterUrl,
+    text: candidate.text,
+    createdAt: candidate.createdAt,
+    lang: candidate.lang,
+    retweetCount: candidate.retweetCount,
+    replyCount: candidate.replyCount,
+    likeCount: candidate.likeCount,
+    quoteCount: candidate.quoteCount,
+    bookmarkCount: candidate.bookmarkCount,
+    isReply: candidate.isReply,
+    isRetweet: candidate.isRetweet,
+    isQuote: candidate.isQuote,
+    quoteId: candidate.quoteId,
+    author: candidate.author,
+  }));
+
+  return `Brand being protected: "${brandName}"
+Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
+Monitoring surface: X
+
+Supporting X context:
+- Search terms used: ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.join(' | ') : 'none'}
+- Observed languages: ${runContext.observedLanguages.length > 0 ? runContext.observedLanguages.join(' | ') : 'none'}
+- Observed authors: ${runContext.observedAuthors.length > 0 ? runContext.observedAuthors.join(' | ') : 'none'}
+
+Assess every post below and return one item in the "items" array per resultId.
+Use British English in any human-readable text you generate.
+Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
+
+X posts (${compactCandidates.length}):
 ${JSON.stringify(compactCandidates, null, 2)}`;
 }
 

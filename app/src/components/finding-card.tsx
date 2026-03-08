@@ -121,6 +121,16 @@ const sourceConfig: Record<
     textClass: 'text-brand-600',
     label: getFindingSourceLabel('discord'),
   },
+  github: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('github'),
+  },
+  x: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('x'),
+  },
   unknown: {
     bgClass: 'bg-gray-50',
     textClass: 'text-gray-500',
