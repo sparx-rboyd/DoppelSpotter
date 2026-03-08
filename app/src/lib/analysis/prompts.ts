@@ -37,10 +37,12 @@ Rules for "items":
 - Each indiviudal analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
  - This applies to both the title and the analysis text
 - Always return concise "platform" and "theme" labels. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case. 
-- Only create new platform labels for prominent, very-widely-used platforms (e.g. TikTok, Reddit, GitHub, X, Facebook etc.). Niche or lesser-known platforms should always be labelled 'Other'.
-- Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
 - If the user prompt includes existing platform/theme labels that fit, reuse one of them exactly.
 - If none fit well, create a new short label rather than forcing a poor match.
+- You MUST only create new platform labels for prominent, very-widely-used platforms (e.g. TikTok, Reddit, GitHub, X, Facebook etc.). Niche or lesser-known platforms MUST always be labelled 'Other'.
+- Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
+- You MUST not create very niche theme labels that few results would likely be linked with over time. 
+- Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current result.
 
 Severity guidelines:
