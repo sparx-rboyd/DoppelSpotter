@@ -1970,6 +1970,13 @@ export default function BrandDetailPage() {
     if (activeScan?.status === 'completed') {
       return 'Finalising results';
     }
+    const sourceState = getProgressSourceState(source);
+    if (sourceState === 'complete') {
+      return 'Scan complete';
+    }
+    if (sourceState === 'failed') {
+      return source === 'google' ? 'Web search failed' : `${getFindingSourceLabel(source)} scan failed`;
+    }
     const activeRun = getActiveRunForSource(source);
     if (!activeRun) return 'Starting scan';
 
@@ -2033,6 +2040,8 @@ export default function BrandDetailPage() {
     if (!activeScan) return 8;
     const runs = getRunsForSource(source);
     if (runs.length === 0) return 0;
+    const sourceState = getProgressSourceState(source);
+    if (sourceState === 'complete' || sourceState === 'failed') return 100;
     if (activeScan.status === 'summarising' || activeScan.status === 'completed') return 100;
 
     const totalFraction =
@@ -2127,18 +2136,28 @@ export default function BrandDetailPage() {
     ? selectedScanProgressSource
     : progressSourcesWithFallback[0];
   const activeProgressPct = displayedScanProgressPctBySource[activeProgressSource] ?? rawScanProgressPctBySource[activeProgressSource] ?? 0;
+  const activeProgressSourceState = getProgressSourceState(activeProgressSource);
 
   function getDisplayedProgressPctForSource(source: FindingSource): number {
     return displayedScanProgressPctBySource[source] ?? rawScanProgressPctBySource[source] ?? 0;
   }
 
-  function getProgressSourceState(source: FindingSource): 'not_started' | 'in_progress' | 'complete' {
+  function getProgressSourceState(source: FindingSource): 'not_started' | 'in_progress' | 'complete' | 'failed' {
     const runs = getRunsForSource(source);
     if (runs.length === 0) {
       return 'not_started';
     }
     if (activeScan?.status === 'summarising' || activeScan?.status === 'completed') {
       return 'complete';
+    }
+    if (getInFlightRunsForSource(source).length > 0) {
+      return 'in_progress';
+    }
+    if (runs.some((run) => run.status === 'succeeded')) {
+      return 'complete';
+    }
+    if (runs.every((run) => run.status === 'failed')) {
+      return 'failed';
     }
     return 'in_progress';
   }
@@ -2156,6 +2175,13 @@ export default function BrandDetailPage() {
       return {
         wrapper: cn('border-emerald-200 bg-emerald-50 text-emerald-700', baseWrapper),
         icon: 'text-emerald-600',
+      };
+    }
+
+    if (status === 'failed') {
+      return {
+        wrapper: cn('border-red-200 bg-red-50 text-red-700', baseWrapper),
+        icon: 'text-red-600',
       };
     }
 
@@ -2755,17 +2781,51 @@ export default function BrandDetailPage() {
                                           })}
                                         </div>
                                         <div className="flex flex-wrap items-center gap-2.5">
-                                          <span className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-2 py-0.5 text-xs font-medium text-brand-700">
+                                          <span
+                                            className={cn(
+                                              'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium',
+                                              activeProgressSourceState === 'complete'
+                                                ? 'bg-emerald-100 text-emerald-700'
+                                                : activeProgressSourceState === 'failed'
+                                                  ? 'bg-red-100 text-red-700'
+                                                  : 'bg-brand-100 text-brand-700',
+                                            )}
+                                          >
                                             <ScanSourceIcon source={activeProgressSource} className="h-3.5 w-3.5" />
                                             {getFindingSourceLabel(activeProgressSource)}
                                           </span>
-                                          <span className="text-sm font-medium text-brand-700">
+                                          <span
+                                            className={cn(
+                                              'text-sm font-medium',
+                                              activeProgressSourceState === 'complete'
+                                                ? 'text-emerald-700'
+                                                : activeProgressSourceState === 'failed'
+                                                  ? 'text-red-700'
+                                                  : 'text-brand-700',
+                                            )}
+                                          >
                                             {cancelling ? 'Cancelling scan' : getScanStatusLabel(activeProgressSource)}
                                           </span>
                                         </div>
-                                        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-brand-100">
+                                        <div
+                                          className={cn(
+                                            'mt-3 h-1.5 overflow-hidden rounded-full',
+                                            activeProgressSourceState === 'complete'
+                                              ? 'bg-emerald-100'
+                                              : activeProgressSourceState === 'failed'
+                                                ? 'bg-red-100'
+                                                : 'bg-brand-100',
+                                          )}
+                                        >
                                           <div
-                                            className="h-full rounded-full bg-brand-600 transition-all duration-500"
+                                            className={cn(
+                                              'h-full rounded-full transition-all duration-500',
+                                              activeProgressSourceState === 'complete'
+                                                ? 'bg-emerald-600'
+                                                : activeProgressSourceState === 'failed'
+                                                  ? 'bg-red-600'
+                                                  : 'bg-brand-600',
+                                            )}
                                             style={{ width: `${activeProgressPct}%` }}
                                           />
                                         </div>
@@ -2794,7 +2854,7 @@ export default function BrandDetailPage() {
                                     <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
                                       <Loader2 className="w-4 h-4 animate-spin" />
                                       <span className="text-sm">
-                                        {isAnyFindingFilterActive ? `No live findings match the current ${activeFindingsFilterLabel} yet.` : 'Waiting for first results…'}
+                                        {isAnyFindingFilterActive ? `No findings match the current ${activeFindingsFilterLabel} yet…` : 'Waiting for first results…'}
                                       </span>
                                     </div>
                                   ) : (
@@ -2804,7 +2864,7 @@ export default function BrandDetailPage() {
                                           <div className="flex flex-col items-center justify-center gap-2 py-6">
                                             <Shield className="w-5 h-5 text-brand-300" />
                                             <p className="text-sm text-gray-400">
-                                              No live findings detected yet.
+                                              Only non-hits detected so far ...
                                             </p>
                                           </div>
                                         )
