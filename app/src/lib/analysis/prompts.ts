@@ -41,7 +41,7 @@ Rules for "items":
 - Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
 - If the user prompt includes existing platform/theme labels that fit, reuse one of them exactly.
 - If none fit well, create a new short label rather than forcing a poor match.
-- If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override exact URL-match instructions, official domains, watch words, safe words, or clear evidence in the current result.
+- If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current result.
 
 Severity guidelines:
 - "high": Clear impersonation, phishing, counterfeit, or direct brand misuse posing immediate risk to customers or the brand
@@ -141,7 +141,6 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   officialDomains: string[];
   watchWords?: string[];
   safeWords?: string[];
-  acknowledgedUrls?: string[];
   userPreferenceHints?: UserPreferenceHints;
   existingPlatforms?: string[];
   existingThemes?: string[];
@@ -155,7 +154,6 @@ export function buildGoogleChunkAnalysisPrompt(params: {
     officialDomains,
     watchWords,
     safeWords,
-    acknowledgedUrls,
     userPreferenceHints,
     existingPlatforms,
     existingThemes,
@@ -170,10 +168,6 @@ export function buildGoogleChunkAnalysisPrompt(params: {
 
   const safeWordsLine = safeWords && safeWords.length > 0
     ? `Safe words (terms the brand owner is comfortable being associated with — if present in a result, treat it with reduced caution in the individual "analysis" field unless there are strong warning signs in other areas): ${safeWords.join(', ')}`
-    : null;
-
-  const acknowledgedUrlsLine = acknowledgedUrls && acknowledgedUrls.length > 0
-    ? `Previously reviewed URLs (the user has already either dismissed or addressed these — set isFalsePositive: true for any result whose URL exactly matches one of these):\n${acknowledgedUrls.map((u) => `  - ${u}`).join('\n')}`
     : null;
 
   const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
@@ -195,7 +189,7 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
-${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${acknowledgedUrlsLine ? `${acknowledgedUrlsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingPlatformsLine}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingPlatformsLine}
 ${existingThemesLine}
 Monitoring surface: ${source}
 
@@ -309,7 +303,7 @@ function buildUserPreferenceHintsSection(
     return null;
   }
 
-  return `Historical user-review tendencies (soft hints only — use these as gentle guidance, not hard include/exclude rules, and do not override exact URL matches or clear evidence):\n${lines.map((line) => `  - ${line}`).join('\n')}`;
+  return `Historical user-review tendencies (soft hints only — use these as gentle guidance, not hard include/exclude rules, and do not override clear evidence):\n${lines.map((line) => `  - ${line}`).join('\n')}`;
 }
 
 function uniqueStrings(values: string[]): string[] {

@@ -292,30 +292,6 @@ async function handleSucceededRun({
   const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
   const shouldSkipPreviouslySeenUrls = source === 'google' || actorId === 'apify/google-search-scraper';
   const userPreferenceHints = scan.userPreferenceHints;
-
-  // Fetch all URLs that the user has previously dismissed or addressed for this
-  // brand so AI analysis can avoid re-reporting them in later scans.
-  const [ignoredSnap, addressedSnap] = await Promise.all([
-    db
-      .collection('findings')
-      .where('brandId', '==', scan.brandId)
-      .where('userId', '==', scan.userId)
-      .where('isIgnored', '==', true)
-      .select('url')
-      .get(),
-    db
-      .collection('findings')
-      .where('brandId', '==', scan.brandId)
-      .where('userId', '==', scan.userId)
-      .where('isAddressed', '==', true)
-      .select('url')
-      .get(),
-  ]);
-  const acknowledgedUrls = Array.from(new Set(
-    [...ignoredSnap.docs, ...addressedSnap.docs]
-      .map((d) => (d.data() as { url?: string }).url)
-      .filter((u): u is string => typeof u === 'string' && u.length > 0),
-  ));
   const previousFindingUrls = shouldSkipPreviouslySeenUrls
     ? await loadPreviousFindingUrls({
       brandId: scan.brandId,
@@ -376,7 +352,6 @@ async function handleSucceededRun({
     items: itemsToAnalyse,
     searchDepth,
     searchQuery,
-    acknowledgedUrls,
     userPreferenceHints,
     previousFindingUrls,
     existingTaxonomy,
@@ -493,7 +468,6 @@ async function analyseAndWriteBatch({
   items,
   searchDepth,
   searchQuery,
-  acknowledgedUrls,
   userPreferenceHints,
   previousFindingUrls,
   existingTaxonomy,
@@ -508,7 +482,6 @@ async function analyseAndWriteBatch({
   items: Record<string, unknown>[];
   searchDepth: number;
   searchQuery?: string;
-  acknowledgedUrls?: string[];
   userPreferenceHints?: Scan['userPreferenceHints'];
   previousFindingUrls?: ReadonlySet<string>;
   existingTaxonomy: { platforms: string[]; themes: string[] };
@@ -557,7 +530,6 @@ async function analyseAndWriteBatch({
         officialDomains: brand.officialDomains,
         watchWords: brand.watchWords,
         safeWords: brand.safeWords,
-        acknowledgedUrls,
         userPreferenceHints,
         existingPlatforms: existingTaxonomy.platforms,
         existingThemes: existingTaxonomy.themes,

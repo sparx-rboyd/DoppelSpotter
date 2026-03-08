@@ -159,8 +159,8 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
 └─ each LLM-classified finding may also store a short primary `platform` and `theme` label (prefer 1 word, hard max 3 words); legacy findings may not have these fields
  └─ isFalsePositive: true findings are stored but excluded from default API responses
- └─ URLs that the user previously ignored or marked as addressed are passed back into AI classification prompts so repeat matches can be auto-suppressed in future scans
- └─ a separate scan-level `userPreferenceHints` summary is also passed into classification prompts as soft guidance only; it is derived from explicit user ignore / reclassification signals and must not override exact URL-match suppression or clear evidence
+ └─ normalized Google URLs that already appeared in previous scans for the same brand are filtered out before AI analysis, so historical repeats never reach the classifier
+ └─ a separate scan-level `userPreferenceHints` summary is still passed into classification prompts as soft guidance only; it is derived from explicit user ignore / reclassification signals and must not override clear evidence
  └─ (batch mode, depth 0 only) if ranked chunk/fallback suggestions are present and the brand allows deep search → triggers deep-search runs
       └─ suggestions are reserved on the originating run so duplicate callbacks do not fan out extra searches
       └─ each deep-search run is registered on the scan document (actorRunIds, actorRuns)
@@ -190,7 +190,8 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **Scan-level summary:** after all actor runs finish, the webhook runs one final LLM pass over the scan's actionable findings and stores a concise `aiSummary` on the scan document for the brand page
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
-- **User preference hints:** each scan prepares a tiny LLM-authored soft-guidance summary from explicit user-review signals before actor-run analysis begins; this is separate from the existing exact-URL `acknowledgedUrls` suppression path
+- **Historical URL suppression:** Google runs load previously seen normalized finding URLs for the brand and filter them out before any LLM classification begins
+- **User preference hints:** each scan prepares a tiny LLM-authored soft-guidance summary from explicit user-review signals before actor-run analysis begins; this is now the only historical-review context sent into classification prompts
 - **Existing taxonomy hints:** prompts receive the current brand's distinct `platform` and `theme` labels so the LLM can reuse them exactly where appropriate, while still inventing a new short label when none fit
 - **Google chunk output:** structured JSON `{ items: [{ resultId, title, severity, platform?, theme?, analysis, isFalsePositive }] }`
 - **Debug prompt transcript:** the exact system + user prompt used for finding-level AI analysis is stored on each finding as `llmAnalysisPrompt` for `?debug=true` inspection
