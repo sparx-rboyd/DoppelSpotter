@@ -23,7 +23,7 @@ import {
   formatScanScheduleFrequency,
   formatScheduledRunAt,
 } from '@/lib/scan-schedules';
-import { getFindingSourceLabel, GOOGLE_SCAN_SOURCE_ORDER } from '@/lib/scan-sources';
+import { getFindingSourceLabel, SCAN_SOURCE_ORDER } from '@/lib/scan-sources';
 import { cn, formatScanDate } from '@/lib/utils';
 import type { ActorRunInfo, BrandProfile, FindingCategory, FindingSource, FindingSummary, Scan, ScanSummary } from '@/lib/types';
 
@@ -44,10 +44,7 @@ type BookmarkUpdate = {
   isBookmarked?: boolean;
 };
 
-type FindingSourceFilter = Extract<
-  FindingSource,
-  'google' | 'reddit' | 'tiktok' | 'youtube' | 'facebook' | 'instagram'
->;
+type FindingSourceFilter = Exclude<FindingSource, 'unknown'>;
 
 // ---------------------------------------------------------------------------
 // localStorage helpers — persist active scan ID across page reloads
@@ -348,17 +345,9 @@ function parseDownloadFilename(headerValue: string | null) {
 }
 
 function parseFindingSourceFilter(value?: string | null): FindingSourceFilter | null {
-  if (
-    value === 'google'
-    || value === 'reddit'
-    || value === 'tiktok'
-    || value === 'youtube'
-    || value === 'facebook'
-    || value === 'instagram'
-  ) {
-    return value;
-  }
-  return null;
+  return value && SCAN_SOURCE_ORDER.includes(value as FindingSourceFilter)
+    ? value as FindingSourceFilter
+    : null;
 }
 
 function scrollToScanResultSet(scanId: string, attempt = 0) {
@@ -1907,7 +1896,7 @@ export default function BrandDetailPage() {
   const isAiDeepSearchEnabled = normalizeAllowAiDeepSearches(brand?.allowAiDeepSearches);
   const isSummarisingFindings = activeScan?.status === 'summarising';
   const normalizedScanSources = normalizeBrandScanSources(brand?.scanSources);
-  const progressSources = GOOGLE_SCAN_SOURCE_ORDER.filter(
+  const progressSources = SCAN_SOURCE_ORDER.filter(
     (source) => normalizedScanSources[source] || allRuns.some((run) => run.source === source),
   );
   const progressSourcesWithFallback: FindingSource[] = progressSources.length > 0 ? progressSources : ['google'];
@@ -1988,17 +1977,23 @@ export default function BrandDetailPage() {
     if (isDeepSearchActive) {
       return runStatus === 'waiting_for_preference_hints'
         ? 'Preparing analysis context'
-        : 'Investigating related queries';
+        : (source === 'discord' ? 'Investigating related server searches' : 'Investigating related queries');
     }
 
     switch (runStatus) {
       case 'waiting_for_preference_hints': return 'Preparing analysis context';
       case 'fetching_dataset':
-        return source === 'google' ? 'Fetching search results' : `Fetching ${sourceLabel} results`;
+        if (source === 'google') return 'Fetching search results';
+        if (source === 'discord') return 'Fetching Discord server results';
+        return `Fetching ${sourceLabel} results`;
       case 'analysing':
-        return source === 'google'
-          ? withAnalysisCounts('Analysing search results', 'Analysing search results', activeRun)
-          : withAnalysisCounts(`Analysing ${sourceLabel} results`, `Analysing ${sourceLabel} results`, activeRun);
+        if (source === 'google') {
+          return withAnalysisCounts('Analysing search results', 'Analysing search results', activeRun);
+        }
+        if (source === 'discord') {
+          return withAnalysisCounts('Analysing Discord server results', 'Analysing Discord server results', activeRun);
+        }
+        return withAnalysisCounts(`Analysing ${sourceLabel} results`, `Analysing ${sourceLabel} results`, activeRun);
       default:
         return source === 'google' ? 'Waiting for web search to complete' : `Waiting for ${sourceLabel} scan to complete`;
     }
@@ -2256,12 +2251,10 @@ export default function BrandDetailPage() {
   ];
   const findingSourceOptions = [
     { value: '', label: 'All scan types' },
-    { value: 'google', label: getFindingSourceLabel('google') },
-    { value: 'reddit', label: getFindingSourceLabel('reddit') },
-    { value: 'tiktok', label: getFindingSourceLabel('tiktok') },
-    { value: 'youtube', label: getFindingSourceLabel('youtube') },
-    { value: 'facebook', label: getFindingSourceLabel('facebook') },
-    { value: 'instagram', label: getFindingSourceLabel('instagram') },
+    ...SCAN_SOURCE_ORDER.map((source) => ({
+      value: source,
+      label: getFindingSourceLabel(source),
+    })),
   ];
   const visibleBookmarkedFindings = filterFindings(allBookmarkedFindings) ?? [];
   const bookmarkedHits = visibleBookmarkedFindings.filter((finding) => !finding.isFalsePositive);

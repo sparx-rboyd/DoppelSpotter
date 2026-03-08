@@ -1,5 +1,6 @@
 'use client';
 
+import { getFindingSourceLabel, SCAN_SOURCE_ORDER } from '@/lib/scan-sources';
 import type { BrandScanSources } from '@/lib/types';
 
 type BrandScanSourceFieldsProps = {
@@ -11,32 +12,10 @@ type BrandScanSourceFieldsProps = {
 const SOURCE_ROWS: Array<{
   key: keyof BrandScanSources;
   label: string;
-}> = [
-  {
-    key: 'google',
-    label: 'Web search',
-  },
-  {
-    key: 'reddit',
-    label: 'Reddit',
-  },
-  {
-    key: 'tiktok',
-    label: 'TikTok',
-  },
-  {
-    key: 'youtube',
-    label: 'YouTube',
-  },
-  {
-    key: 'facebook',
-    label: 'Facebook',
-  },
-  {
-    key: 'instagram',
-    label: 'Instagram',
-  },
-];
+}> = SCAN_SOURCE_ORDER.map((source) => ({
+  key: source,
+  label: getFindingSourceLabel(source),
+}));
 
 export function BrandScanSourceFields({ value, onChange, error }: BrandScanSourceFieldsProps) {
   function toggleSource(key: keyof BrandScanSources) {

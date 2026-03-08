@@ -18,7 +18,7 @@ import {
   startScanForBrand,
 } from '@/lib/scan-runner';
 
-// POST /api/scan — trigger all enabled Google-based scan sources for a brand
+// POST /api/scan — trigger all enabled scan sources for a brand
 export async function POST(request: NextRequest) {
   const { uid, error } = await requireAuth(request);
   if (error) return error;

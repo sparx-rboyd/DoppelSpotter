@@ -56,6 +56,7 @@ export interface BrandScanSources {
   youtube: boolean;
   facebook: boolean;
   instagram: boolean;
+  discord: boolean;
 }
 
 // ─── Brand Profile ─────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ export interface BrandProfile {
   allowAiDeepSearches?: boolean;
   /** User-configured deep search breadth (1-10) limiting AI-requested follow-up searches. */
   maxAiDeepSearches?: number;
-  /** Which scan surfaces are enabled for this brand; current implementations are Google-backed. */
+  /** Which scan surfaces are enabled for this brand. */
   scanSources?: BrandScanSources;
   /** Internal pointer to the currently active scan for this brand, if any. */
   activeScanId?: string;
@@ -154,6 +155,7 @@ export type FindingSource =
   | 'youtube'
   | 'facebook'
   | 'instagram'
+  | 'discord'
   | 'unknown';
 
 export interface FindingSummary {
@@ -212,13 +214,24 @@ export interface Finding extends FindingSummary {
 export type ScanStatus = 'pending' | 'running' | 'summarising' | 'completed' | 'failed' | 'cancelled';
 export type ScanSummaryEmailStatus = 'sending' | 'sent' | 'failed' | 'skipped';
 export type UserPreferenceHintsStatus = 'pending' | 'ready' | 'failed';
-export type GoogleScannerId =
+export type ScannerId =
   | 'google-web'
   | 'google-reddit'
   | 'google-tiktok'
   | 'google-youtube'
   | 'google-facebook'
-  | 'google-instagram';
+  | 'google-instagram'
+  | 'discord-servers';
+
+export type GoogleScannerId = Extract<
+  ScannerId,
+  | 'google-web'
+  | 'google-reddit'
+  | 'google-tiktok'
+  | 'google-youtube'
+  | 'google-facebook'
+  | 'google-instagram'
+>;
 
 export type ActorRunStatus =
   | 'pending'
@@ -238,18 +251,18 @@ export interface UserPreferenceHints {
 
 export interface ActorRunInfo {
   /** Stable logical scanner identifier, independent from the underlying Apify actor ID. */
-  scannerId: GoogleScannerId;
+  scannerId: ScannerId;
   actorId: string;
   source: FindingSource;
   /** Apify run status for this individual actor */
   status: ActorRunStatus;
   /** Default dataset identifier captured when a succeeded webhook arrives before preference hints are ready. */
   datasetId?: string;
-  /** Total deduped Google result candidates queued for classification in this run. */
+  /** Total deduped source-specific candidates queued for classification in this run. */
   itemCount?: number;
   /** Number of items that have completed AI analysis so far. */
   analysedCount?: number;
-  /** Number of URLs skipped because they already appeared in previous scans for this brand. */
+  /** Number of already-seen source identities skipped from previous scans for this brand. */
   skippedDuplicateCount?: number;
   /**
    * 0 = initial scan run; 1 = AI-requested deep follow-up.
@@ -271,7 +284,7 @@ export interface Scan {
   brandId: string;
   userId: string;
   status: ScanStatus;
-  /** The actor IDs started for this scan (currently always Google Search only). */
+  /** The underlying Apify actor IDs started for this scan. */
   actorIds: string[];
   /** Flat array of Apify run IDs — used for Firestore array-contains queries in the webhook handler */
   actorRunIds?: string[];

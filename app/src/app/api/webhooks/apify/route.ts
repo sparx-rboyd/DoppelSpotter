@@ -6,8 +6,12 @@ import { fetchDatasetItems, startDeepSearchRun } from '@/lib/apify/client';
 import { chatCompletion } from '@/lib/analysis/openrouter';
 import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-hints';
 import {
+  DISCORD_CLASSIFICATION_SYSTEM_PROMPT,
   GOOGLE_CLASSIFICATION_SYSTEM_PROMPT,
   SCAN_SUMMARY_SYSTEM_PROMPT,
+  buildDiscordChunkAnalysisPrompt,
+  buildDiscordFinalSelectionPrompt,
+  buildDiscordFinalSelectionSystemPrompt,
   buildGoogleFinalSelectionSystemPrompt,
   buildGoogleFinalSelectionPrompt,
   buildGoogleChunkAnalysisPrompt,
@@ -15,23 +19,30 @@ import {
   formatLlmPromptForDebug,
 } from '@/lib/analysis/prompts';
 import {
+  parseDiscordChunkAnalysisOutput,
   parseGoogleChunkAnalysisOutput,
-  parseGoogleSuggestionOutput,
+  parseSuggestedSearchOutput,
   parseScanSummaryOutput,
+  type DiscordChunkAnalysisItem,
+  type DiscordRunContext,
+  type DiscordServerCandidate,
+  type DiscordStoredFindingRawData,
   type GoogleChunkAnalysisItem,
   type GoogleRunContext,
   type GoogleSearchCandidate,
   type GoogleSearchSighting,
   type GoogleStoredFindingRawData,
 } from '@/lib/analysis/types';
-import type { BrandProfile, Finding, Scan, ActorRunInfo } from '@/lib/types';
+import type { BrandProfile, Finding, Scan, ActorRunInfo, GoogleScannerId } from '@/lib/types';
 import { normalizeAllowAiDeepSearches, normalizeMaxAiDeepSearches } from '@/lib/brands';
 import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
 import {
   buildGoogleScannerQuery,
-  getGoogleScannerConfigById,
-  getGoogleScannerConfigBySource,
+  getScannerConfigById,
+  getScannerConfigBySource,
   sanitizeGoogleQueryForDisplay,
+  type GoogleScannerConfig,
+  type ScannerConfig,
 } from '@/lib/scan-sources';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
@@ -40,9 +51,13 @@ import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSna
 const MAX_ITEMS_PER_RUN = 50;
 const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
 const GOOGLE_ANALYSIS_CONCURRENCY = 3;
+const DISCORD_ANALYSIS_CHUNK_SIZE = 10;
+const DISCORD_ANALYSIS_CONCURRENCY = 3;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';
 const GOOGLE_RAW_DATA_VERSION = 2;
+const DISCORD_FINDING_ID_PREFIX = 'discord';
+const DISCORD_RAW_DATA_VERSION = 1;
 type ScanDocHandle = {
   id: string;
   ref: DocumentReference;
@@ -291,22 +306,32 @@ async function handleSucceededRun({
 
   // Determine the source (surface) for this actor run
   const actorRunInfo = scan.actorRuns?.[runId];
-  const scannerConfig = resolveGoogleScannerConfig(actorRunInfo);
+  const scannerConfig = resolveScannerConfig(actorRunInfo);
   const source = actorRunInfo?.source ?? scannerConfig.source;
   const actorId = actorRunInfo?.actorId ?? scannerConfig.actorId;
   const searchDepth = actorRunInfo?.searchDepth ?? 0;
   const searchQuery = actorRunInfo?.searchQuery;
-  const displayQuery = actorRunInfo?.displayQuery ?? (searchQuery ? sanitizeGoogleQueryForDisplay(searchQuery) : undefined);
+  const displayQuery = actorRunInfo?.displayQuery ?? (
+    searchQuery
+      ? (scannerConfig.kind === 'google' ? sanitizeGoogleQueryForDisplay(searchQuery) : searchQuery)
+      : undefined
+  );
   const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
-  const shouldSkipPreviouslySeenUrls = source === 'google' || actorId === 'apify/google-search-scraper';
   const userPreferenceHints = scan.userPreferenceHints;
-  const previousFindingUrls = shouldSkipPreviouslySeenUrls
+  const previousFindingUrls = scannerConfig.kind === 'google'
     ? await loadPreviousFindingUrls({
       brandId: scan.brandId,
       userId: scan.userId,
       currentScanId: scan.id ?? scanDoc.id,
     })
-    : new Set<string>();
+    : undefined;
+  const previousDiscordServerIds = scannerConfig.kind === 'discord'
+    ? await loadPreviousDiscordServerIds({
+      brandId: scan.brandId,
+      userId: scan.userId,
+      currentScanId: scan.id ?? scanDoc.id,
+    })
+    : undefined;
   const existingTaxonomy = await loadBrandFindingTaxonomy({
     brandId: scan.brandId,
     userId: scan.userId,
@@ -348,24 +373,46 @@ async function handleSucceededRun({
   let skippedDuplicateCount = 0;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
 
-  // Send all SERP pages to AI analysis in one call → one Finding per individual search result
-  const { findingCount, suggestedSearches, counts: batchCounts, skippedDuplicateCount: batchSkippedDuplicateCount } = await analyseAndWriteBatch({
-    scanDoc,
-    scan,
-    brand,
-    source,
-    actorId,
-    datasetId,
-    runId,
-    items: itemsToAnalyse,
-    searchDepth,
-    searchQuery,
-    displayQuery,
-    userPreferenceHints,
-    previousFindingUrls,
-    existingTaxonomy,
-    scannerConfig,
-  });
+  const {
+    findingCount,
+    suggestedSearches,
+    counts: batchCounts,
+    skippedDuplicateCount: batchSkippedDuplicateCount,
+  } = scannerConfig.kind === 'google'
+    ? await analyseAndWriteGoogleBatch({
+      scanDoc,
+      scan,
+      brand,
+      source,
+      actorId,
+      datasetId,
+      runId,
+      items: itemsToAnalyse,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      userPreferenceHints,
+      previousFindingUrls,
+      existingTaxonomy,
+      scannerConfig,
+    })
+    : await analyseAndWriteDiscordBatch({
+      scanDoc,
+      scan,
+      brand,
+      source,
+      actorId,
+      datasetId,
+      runId,
+      items: itemsToAnalyse,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      userPreferenceHints,
+      previousServerIds: previousDiscordServerIds,
+      existingTaxonomy,
+      scannerConfig,
+    });
   newFindingCount = findingCount;
   skippedDuplicateCount = batchSkippedDuplicateCount;
   counts.high = batchCounts.high;
@@ -402,7 +449,7 @@ async function handleSucceededRun({
   }
 
   console.log(
-    `[webhook] Actor ${actorId} (run ${runId}, scanner ${scannerConfig.id}, depth ${searchDepth}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items, ${skippedDuplicateCount} skipped as previous duplicates (mode: google-batch)`,
+    `[webhook] Actor ${actorId} (run ${runId}, scanner ${scannerConfig.id}, depth ${searchDepth}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items, ${skippedDuplicateCount} skipped as previous duplicates (mode: ${scannerConfig.kind}-batch)`,
   );
 
   await markActorRunComplete(scanDoc, runId, 'succeeded', newFindingCount, counts, skippedDuplicateCount);
@@ -462,12 +509,44 @@ async function loadPreviousFindingUrls({
   return urls;
 }
 
+async function loadPreviousDiscordServerIds({
+  brandId,
+  userId,
+  currentScanId,
+}: {
+  brandId: string;
+  userId: string;
+  currentScanId: string;
+}): Promise<Set<string>> {
+  const previousFindingsSnap = await db
+    .collection('findings')
+    .where('brandId', '==', brandId)
+    .where('userId', '==', userId)
+    .select('scanId', 'rawData')
+    .get();
+
+  const serverIds = new Set<string>();
+  for (const doc of previousFindingsSnap.docs) {
+    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown> };
+    if (data.scanId === currentScanId) {
+      continue;
+    }
+
+    const serverId = readDiscordStoredFindingRawData(data.rawData)?.server.id;
+    if (typeof serverId === 'string' && serverId.trim().length > 0) {
+      serverIds.add(serverId.trim());
+    }
+  }
+
+  return serverIds;
+}
+
 /**
  * Batch mode: send all SERP pages to AI analysis in one call, then write one Finding
  * per individual search result assessed. Returns the count of non-false-positive
  * findings and any suggested follow-up search queries.
  */
-async function analyseAndWriteBatch({
+async function analyseAndWriteGoogleBatch({
   scanDoc,
   scan,
   brand,
@@ -488,7 +567,7 @@ async function analyseAndWriteBatch({
   scan: Scan;
   brand: BrandProfile;
   source: Finding['source'];
-  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
+  scannerConfig: GoogleScannerConfig;
   actorId: string;
   datasetId: string;
   runId: string;
@@ -631,6 +710,163 @@ async function analyseAndWriteBatch({
   return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
 }
 
+async function analyseAndWriteDiscordBatch({
+  scanDoc,
+  scan,
+  brand,
+  source,
+  scannerConfig,
+  actorId,
+  datasetId,
+  runId,
+  items,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  userPreferenceHints,
+  previousServerIds,
+  existingTaxonomy,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  brand: BrandProfile;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  datasetId: string;
+  runId: string;
+  items: Record<string, unknown>[];
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  userPreferenceHints?: Scan['userPreferenceHints'];
+  previousServerIds?: ReadonlySet<string>;
+  existingTaxonomy: { themes: string[] };
+}): Promise<{
+  findingCount: number;
+  suggestedSearches?: string[];
+  counts: { high: number; medium: number; low: number; nonHit: number };
+  skippedDuplicateCount: number;
+}> {
+  let findingCount = 0;
+  let suggestedSearches: string[] | undefined;
+  const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const canRunDeepSearchSelection = searchDepth === 0 && normalizeAllowAiDeepSearches(brand.allowAiDeepSearches);
+  const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
+
+  const normalizedRun = normalizeDiscordServerRun({
+    searchQuery,
+    displayQuery,
+    items,
+  });
+  const candidatesToAnalyse = normalizedRun.candidates.filter(
+    (candidate) => !previousServerIds?.has(candidate.serverId),
+  );
+  const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
+
+  await scanDoc.ref.update({
+    [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
+    [`actorRuns.${runId}.analysedCount`]: 0,
+    [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
+  });
+
+  if (candidatesToAnalyse.length === 0) {
+    return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
+  }
+
+  const outcomes = new Map<string, { candidate: DiscordServerCandidate; outcome: DiscordFindingOutcome }>();
+  const chunks = chunkArray(candidatesToAnalyse, DISCORD_ANALYSIS_CHUNK_SIZE);
+  const chunkResults = await mapWithConcurrency(
+    chunks,
+    DISCORD_ANALYSIS_CONCURRENCY,
+    async (chunk, chunkIndex): Promise<DiscordChunkAnalysisResult> => {
+      const prompt = buildDiscordChunkAnalysisPrompt({
+        brandName: brand.name,
+        keywords: brand.keywords,
+        officialDomains: brand.officialDomains,
+        watchWords: brand.watchWords,
+        safeWords: brand.safeWords,
+        userPreferenceHints,
+        existingThemes: existingTaxonomy.themes,
+        source,
+        candidates: chunk,
+        runContext: normalizedRun.runContext,
+      });
+      const llmAnalysisPrompt = formatLlmPromptForDebug(DISCORD_CLASSIFICATION_SYSTEM_PROMPT, prompt);
+
+      try {
+        return await analyseDiscordChunk({
+          candidates: chunk,
+          prompt,
+          llmAnalysisPrompt,
+        });
+      } catch (err) {
+        console.error(`[webhook] Discord chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
+
+        const fallbackOutcomes = new Map<string, { candidate: DiscordServerCandidate; outcome: DiscordFindingOutcome }>();
+        for (const candidate of chunk) {
+          fallbackOutcomes.set(candidate.serverId, {
+            candidate,
+            outcome: buildDiscordFallbackOutcome(
+              'AI analysis failed for this chunk. Raw data is preserved for manual review.',
+              undefined,
+              llmAnalysisPrompt,
+            ),
+          });
+        }
+
+        return {
+          outcomes: fallbackOutcomes,
+        };
+      } finally {
+        await scanDoc.ref.update({
+          [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
+        });
+      }
+    },
+  );
+
+  for (const chunkResult of chunkResults) {
+    for (const [serverId, value] of chunkResult.outcomes.entries()) {
+      outcomes.set(serverId, value);
+    }
+  }
+
+  if (canRunDeepSearchSelection) {
+    suggestedSearches = await finalizeDiscordSuggestedSearches({
+      brand,
+      scannerConfig,
+      runContext: normalizedRun.runContext,
+      maxSuggestedSearches,
+    });
+  }
+
+  for (const { candidate, outcome } of outcomes.values()) {
+    const delta = await upsertDiscordFinding({
+      scanDoc,
+      scan,
+      source,
+      actorId,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      candidate,
+      runContext: normalizedRun.runContext,
+      outcome,
+      scannerConfig,
+    });
+
+    findingCount += delta.findingCount;
+    counts.high += delta.counts.high;
+    counts.medium += delta.counts.medium;
+    counts.low += delta.counts.low;
+    counts.nonHit += delta.counts.nonHit;
+  }
+
+  return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
+}
+
 type GoogleFindingOutcome = {
   severity: Finding['severity'];
   title: string;
@@ -644,6 +880,21 @@ type GoogleFindingOutcome = {
 
 type GoogleChunkAnalysisResult = {
   outcomes: Map<string, { candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>;
+};
+
+type DiscordFindingOutcome = {
+  severity: Finding['severity'];
+  title: string;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+  llmAnalysisPrompt?: string;
+  rawLlmResponse?: string;
+  classificationSource: 'llm' | 'fallback';
+};
+
+type DiscordChunkAnalysisResult = {
+  outcomes: Map<string, { candidate: DiscordServerCandidate; outcome: DiscordFindingOutcome }>;
 };
 
 type FindingDelta = {
@@ -682,7 +933,7 @@ function normalizeGoogleSerpRun({
   items,
 }: {
   source: Finding['source'];
-  scannerId: ReturnType<typeof resolveGoogleScannerConfig>['id'];
+  scannerId: GoogleScannerConfig['id'];
   runId: string;
   searchDepth: number;
   searchQuery?: string;
@@ -779,6 +1030,105 @@ function normalizeGoogleSerpRun({
   };
 }
 
+function normalizeDiscordServerRun({
+  searchQuery,
+  displayQuery,
+  items,
+}: {
+  searchQuery?: string;
+  displayQuery?: string;
+  items: Record<string, unknown>[];
+}): { candidates: DiscordServerCandidate[]; runContext: DiscordRunContext } {
+  const candidateMap = new Map<string, DiscordServerCandidate>();
+  const sourceQueries = new Set<string>();
+  const observedKeywords = new Set<string>();
+  const observedCategories = new Set<string>();
+  const observedLocales = new Set<string>();
+  const sampleServerNames = new Set<string>();
+  let nextResultId = 1;
+
+  for (const sourceQuery of readDiscordSourceQueries(displayQuery ?? searchQuery)) {
+    sourceQueries.add(sourceQuery);
+  }
+
+  for (const item of items) {
+    const serverId = readDiscordServerId(item);
+    const vanityUrlCode = readDiscordVanityUrlCode(item);
+    if (!serverId || !vanityUrlCode) continue;
+
+    const inviteUrl = buildDiscordInviteUrl(vanityUrlCode);
+    if (!inviteUrl) continue;
+
+    const name = readDiscordServerName(item) ?? `Discord server ${serverId}`;
+    const description = readOptionalTrimmedString(item.description);
+    const keywords = readDiscordStringArray(item.keywords);
+    const categories = readDiscordCategoryNames(item.categories);
+    const primaryCategory = readDiscordPrimaryCategory(item.primary_category);
+    const features = readDiscordStringArray(item.features);
+    const preferredLocale = readOptionalTrimmedString(item.preferred_locale);
+    const approximateMemberCount = readOptionalFiniteNumber(item.approximate_member_count);
+    const approximatePresenceCount = readOptionalFiniteNumber(item.approximate_presence_count);
+    const premiumSubscriptionCount = readOptionalFiniteNumber(item.premium_subscription_count);
+    const isPublished = typeof item.is_published === 'boolean' ? item.is_published : undefined;
+
+    sampleServerNames.add(name);
+    for (const keyword of keywords) observedKeywords.add(keyword);
+    for (const category of categories) observedCategories.add(category);
+    if (primaryCategory) observedCategories.add(primaryCategory);
+    if (preferredLocale) observedLocales.add(preferredLocale);
+
+    const existing = candidateMap.get(serverId);
+    if (existing) {
+      existing.keywords = uniqueStrings([...existing.keywords, ...keywords]);
+      existing.categories = uniqueStrings([...existing.categories, ...categories]);
+      existing.features = uniqueStrings([...existing.features, ...features]);
+      if (!existing.description && description) existing.description = description;
+      if (!existing.primaryCategory && primaryCategory) existing.primaryCategory = primaryCategory;
+      if (existing.approximateMemberCount === undefined && approximateMemberCount !== undefined) {
+        existing.approximateMemberCount = approximateMemberCount;
+      }
+      if (existing.approximatePresenceCount === undefined && approximatePresenceCount !== undefined) {
+        existing.approximatePresenceCount = approximatePresenceCount;
+      }
+      if (existing.premiumSubscriptionCount === undefined && premiumSubscriptionCount !== undefined) {
+        existing.premiumSubscriptionCount = premiumSubscriptionCount;
+      }
+      if (!existing.preferredLocale && preferredLocale) existing.preferredLocale = preferredLocale;
+      if (existing.isPublished === undefined && isPublished !== undefined) existing.isPublished = isPublished;
+      continue;
+    }
+
+    candidateMap.set(serverId, {
+      resultId: `d${nextResultId++}`,
+      serverId,
+      inviteUrl,
+      vanityUrlCode,
+      name,
+      ...(description ? { description } : {}),
+      keywords,
+      categories,
+      ...(primaryCategory ? { primaryCategory } : {}),
+      features,
+      ...(approximateMemberCount !== undefined ? { approximateMemberCount } : {}),
+      ...(approximatePresenceCount !== undefined ? { approximatePresenceCount } : {}),
+      ...(premiumSubscriptionCount !== undefined ? { premiumSubscriptionCount } : {}),
+      ...(preferredLocale ? { preferredLocale } : {}),
+      ...(isPublished !== undefined ? { isPublished } : {}),
+    });
+  }
+
+  return {
+    candidates: Array.from(candidateMap.values()),
+    runContext: {
+      sourceQueries: uniqueStrings(Array.from(sourceQueries)),
+      observedKeywords: uniqueStrings(Array.from(observedKeywords)),
+      observedCategories: uniqueStrings(Array.from(observedCategories)),
+      observedLocales: uniqueStrings(Array.from(observedLocales)),
+      sampleServerNames: uniqueStrings(Array.from(sampleServerNames)).slice(0, 12),
+    },
+  };
+}
+
 async function analyseGoogleChunk({
   candidates,
   prompt,
@@ -818,6 +1168,45 @@ async function analyseGoogleChunk({
   return { outcomes };
 }
 
+async function analyseDiscordChunk({
+  candidates,
+  prompt,
+  llmAnalysisPrompt,
+}: {
+  candidates: DiscordServerCandidate[];
+  prompt: string;
+  llmAnalysisPrompt: string;
+}): Promise<DiscordChunkAnalysisResult> {
+  const raw = await chatCompletion([
+    { role: 'system', content: DISCORD_CLASSIFICATION_SYSTEM_PROMPT },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseDiscordChunkAnalysisOutput(raw, new Set(candidates.map((candidate) => candidate.resultId)));
+  if (!parsed) {
+    throw new Error(`Failed to parse Discord chunk analysis output: ${raw.slice(0, 200)}`);
+  }
+
+  const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  const outcomes = new Map<string, { candidate: DiscordServerCandidate; outcome: DiscordFindingOutcome }>();
+
+  for (const candidate of candidates) {
+    const item = byResultId.get(candidate.resultId);
+    outcomes.set(candidate.serverId, {
+      candidate,
+      outcome: item
+        ? buildDiscordFindingOutcome(item, raw, llmAnalysisPrompt)
+        : buildDiscordFallbackOutcome(
+            'AI analysis returned no assessment for this server. Raw data is preserved for manual review.',
+            raw,
+            llmAnalysisPrompt,
+          ),
+    });
+  }
+
+  return { outcomes };
+}
+
 async function analyseGoogleFinalSelection({
   brand,
   scannerConfig,
@@ -825,7 +1214,7 @@ async function analyseGoogleFinalSelection({
   maxSuggestedSearches,
 }: {
   brand: BrandProfile;
-  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
+  scannerConfig: GoogleScannerConfig;
   runContext: GoogleRunContext;
   maxSuggestedSearches: number;
 }): Promise<string[] | undefined> {
@@ -845,9 +1234,43 @@ async function analyseGoogleFinalSelection({
     { role: 'user', content: prompt },
   ]);
 
-  const parsed = parseGoogleSuggestionOutput(raw, maxSuggestedSearches);
+  const parsed = parseSuggestedSearchOutput(raw, maxSuggestedSearches);
   if (!parsed) {
     throw new Error(`Failed to parse Google final selection output: ${raw.slice(0, 200)}`);
+  }
+
+  return parsed.suggestedSearches;
+}
+
+async function analyseDiscordFinalSelection({
+  brand,
+  scannerConfig,
+  runContext,
+  maxSuggestedSearches,
+}: {
+  brand: BrandProfile;
+  scannerConfig: ScannerConfig;
+  runContext: DiscordRunContext;
+  maxSuggestedSearches: number;
+}): Promise<string[] | undefined> {
+  const prompt = buildDiscordFinalSelectionPrompt({
+    brandName: brand.name,
+    keywords: brand.keywords,
+    watchWords: brand.watchWords,
+    safeWords: brand.safeWords,
+    runContext,
+    maxSuggestedSearches,
+  });
+  const systemPrompt = buildDiscordFinalSelectionSystemPrompt(maxSuggestedSearches, scannerConfig);
+
+  const raw = await chatCompletion([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseSuggestedSearchOutput(raw, maxSuggestedSearches);
+  if (!parsed) {
+    throw new Error(`Failed to parse Discord final selection output: ${raw.slice(0, 200)}`);
   }
 
   return parsed.suggestedSearches;
@@ -860,7 +1283,7 @@ async function finalizeSuggestedSearches({
   maxSuggestedSearches,
 }: {
   brand: BrandProfile;
-  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
+  scannerConfig: GoogleScannerConfig;
   runContext: GoogleRunContext;
   maxSuggestedSearches: number;
 }): Promise<string[] | undefined> {
@@ -896,6 +1319,49 @@ async function finalizeSuggestedSearches({
   }
 }
 
+async function finalizeDiscordSuggestedSearches({
+  brand,
+  scannerConfig,
+  runContext,
+  maxSuggestedSearches,
+}: {
+  brand: BrandProfile;
+  scannerConfig: ScannerConfig;
+  runContext: DiscordRunContext;
+  maxSuggestedSearches: number;
+}): Promise<string[] | undefined> {
+  try {
+    const llmSuggestedSearches = await analyseDiscordFinalSelection({
+      brand,
+      scannerConfig,
+      runContext,
+      maxSuggestedSearches,
+    });
+
+    if (!llmSuggestedSearches || llmSuggestedSearches.length === 0) {
+      console.log(
+        `[webhook] Discord deep-search final selection keywords=${runContext.observedKeywords.length} categories=${runContext.observedCategories.length} selected=[]`,
+      );
+      return undefined;
+    }
+
+    const sourceQueryKeys = new Set(runContext.sourceQueries.map(normalizeSuggestedSearchKey));
+    const filteredSuggestions = llmSuggestedSearches.filter((query) => !sourceQueryKeys.has(normalizeSuggestedSearchKey(query)));
+    if (filteredSuggestions.length === 0) {
+      console.warn('[webhook] Discord final deep-search selection returned only source-query duplicates');
+      return undefined;
+    }
+
+    console.log(
+      `[webhook] Discord deep-search final selection keywords=${runContext.observedKeywords.length} categories=${runContext.observedCategories.length} selected=${JSON.stringify(filteredSuggestions)}`,
+    );
+    return filteredSuggestions;
+  } catch (err) {
+    console.error('[webhook] Discord final deep-search selection failed:', err);
+    return undefined;
+  }
+}
+
 async function upsertGoogleFinding({
   scanDoc,
   scan,
@@ -913,7 +1379,7 @@ async function upsertGoogleFinding({
   scanDoc: ScanDocHandle;
   scan: Scan;
   source: Finding['source'];
-  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
+  scannerConfig: GoogleScannerConfig;
   actorId: string;
   runId: string;
   searchDepth: number;
@@ -1022,6 +1488,132 @@ async function upsertGoogleFinding({
   });
 }
 
+async function upsertDiscordFinding({
+  scanDoc,
+  scan,
+  source,
+  scannerConfig,
+  actorId,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  candidate,
+  runContext,
+  outcome,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  candidate: DiscordServerCandidate;
+  runContext: DiscordRunContext;
+  outcome: DiscordFindingOutcome;
+}): Promise<FindingDelta> {
+  const scanId = scan.id ?? scanDoc.id;
+  const findingRef = db.collection('findings').doc(buildDiscordFindingId(scanId, candidate.serverId));
+
+  return db.runTransaction(async (tx) => {
+    const existingSnap = await tx.get(findingRef);
+    const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
+    const preferredOutcome = choosePreferredDiscordOutcome(existing, outcome);
+    const mergedRawData = buildDiscordStoredFindingRawData({
+      existingRawData: existing?.rawData,
+      candidate,
+      runContext,
+      source,
+      scannerConfig,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      classificationSource: preferredOutcome.classificationSource,
+    });
+    const preferredSource = choosePreferredFindingSource(existing?.source, source);
+
+    const previousState = existing ? getFindingCountState(existing) : emptyFindingCountState();
+    const nextState = getOutcomeCountState(preferredOutcome);
+
+    if (!existing) {
+      const finding: Omit<Finding, 'id'> = {
+        scanId,
+        brandId: scan.brandId,
+        userId: scan.userId,
+        source: preferredSource,
+        actorId,
+        severity: preferredOutcome.severity,
+        title: preferredOutcome.title,
+        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        description: preferredOutcome.analysis,
+        llmAnalysis: preferredOutcome.analysis,
+        url: candidate.inviteUrl,
+        rawData: mergedRawData,
+        isFalsePositive: preferredOutcome.isFalsePositive,
+        ...(preferredOutcome.isFalsePositive && {
+          isIgnored: true,
+          ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+        }),
+        ...(typeof preferredOutcome.llmAnalysisPrompt === 'string' && {
+          llmAnalysisPrompt: preferredOutcome.llmAnalysisPrompt,
+        }),
+        ...(typeof preferredOutcome.rawLlmResponse === 'string' && {
+          rawLlmResponse: preferredOutcome.rawLlmResponse,
+        }),
+        createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+      };
+      tx.set(findingRef, finding);
+      return diffFindingStates(previousState, nextState);
+    }
+
+    const updates: Record<string, unknown> = {
+      source: preferredSource,
+      severity: preferredOutcome.severity,
+      title: preferredOutcome.title,
+      platform: FieldValue.delete(),
+      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      description: preferredOutcome.analysis,
+      llmAnalysis: preferredOutcome.analysis,
+      url: candidate.inviteUrl,
+      rawData: mergedRawData,
+      isFalsePositive: preferredOutcome.isFalsePositive,
+    };
+
+    const llmAnalysisPrompt = preferredOutcome.llmAnalysisPrompt ?? existing.llmAnalysisPrompt;
+    if (typeof llmAnalysisPrompt === 'string') {
+      updates.llmAnalysisPrompt = llmAnalysisPrompt;
+    }
+
+    const rawLlmResponse = preferredOutcome.rawLlmResponse ?? existing.rawLlmResponse;
+    if (typeof rawLlmResponse === 'string') {
+      updates.rawLlmResponse = rawLlmResponse;
+    }
+
+    if (preferredOutcome.isFalsePositive) {
+      updates.isIgnored = true;
+      if (existing.isIgnored !== true) {
+        updates.ignoredAt = FieldValue.serverTimestamp();
+      }
+      updates.isAddressed = false;
+      if (existing.addressedAt) {
+        updates.addressedAt = FieldValue.delete();
+      }
+    } else {
+      updates.isIgnored = false;
+      if (existing.ignoredAt) {
+        updates.ignoredAt = FieldValue.delete();
+      }
+    }
+
+    tx.update(findingRef, updates);
+    return diffFindingStates(previousState, nextState);
+  });
+}
+
 async function reserveSuggestedSearches({
   scanDoc,
   runId,
@@ -1032,7 +1624,7 @@ async function reserveSuggestedSearches({
   scanDoc: ScanDocHandle;
   runId: string;
   suggestedSearches: string[];
-  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
+  scannerConfig: ScannerConfig;
   maxSuggestedSearches: number;
 }): Promise<string[]> {
   return db.runTransaction(async (tx) => {
@@ -1051,7 +1643,7 @@ async function reserveSuggestedSearches({
             existing.push(normalizeSuggestedSearchKey(value.searchQuery));
           }
 
-          const existingScannerConfig = resolveGoogleScannerConfig(value);
+          const existingScannerConfig = resolveScannerConfig(value);
           for (const suggestedQuery of value.suggestedSearches ?? []) {
             const executableQuery = buildExecutableSearchQuery(existingScannerConfig, suggestedQuery);
             if (executableQuery) {
@@ -1103,7 +1695,7 @@ async function triggerDeepSearches({
   suggestedSearches: string[];
   maxSuggestedSearches: number;
   webhookUrl: string;
-  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
+  scannerConfig: ScannerConfig;
 }) {
   const queries = suggestedSearches.slice(0, maxSuggestedSearches);
 
@@ -1181,6 +1773,23 @@ function buildGoogleFindingOutcome(
   };
 }
 
+function buildDiscordFindingOutcome(
+  item: DiscordChunkAnalysisItem,
+  rawLlmResponse: string,
+  llmAnalysisPrompt: string,
+): DiscordFindingOutcome {
+  return {
+    severity: item.severity,
+    title: item.title,
+    theme: item.theme,
+    analysis: item.analysis,
+    isFalsePositive: item.isFalsePositive,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'llm',
+  };
+}
+
 function buildGoogleFallbackOutcome(
   message: string,
   rawLlmResponse?: string,
@@ -1189,6 +1798,22 @@ function buildGoogleFallbackOutcome(
   return {
     severity: 'medium',
     title: 'Unanalysed result — review manually',
+    analysis: message,
+    isFalsePositive: false,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'fallback',
+  };
+}
+
+function buildDiscordFallbackOutcome(
+  message: string,
+  rawLlmResponse?: string,
+  llmAnalysisPrompt?: string,
+): DiscordFindingOutcome {
+  return {
+    severity: 'medium',
+    title: 'Unanalysed server - review manually',
     analysis: message,
     isFalsePositive: false,
     llmAnalysisPrompt,
@@ -1213,7 +1838,7 @@ function buildGoogleStoredFindingRawData({
   candidate: GoogleSearchCandidate;
   runContext: GoogleRunContext;
   source: Finding['source'];
-  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>;
+  scannerConfig: GoogleScannerConfig;
   runId: string;
   searchDepth: number;
   searchQuery?: string;
@@ -1312,6 +1937,131 @@ function readGoogleStoredFindingRawData(rawData?: Record<string, unknown>): Goog
   };
 }
 
+function buildDiscordStoredFindingRawData({
+  existingRawData,
+  candidate,
+  runContext,
+  source,
+  scannerConfig,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  classificationSource,
+}: {
+  existingRawData?: Record<string, unknown>;
+  candidate: DiscordServerCandidate;
+  runContext: DiscordRunContext;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  classificationSource: 'llm' | 'fallback';
+}): DiscordStoredFindingRawData {
+  const existing = readDiscordStoredFindingRawData(existingRawData);
+  return {
+    kind: 'discord-normalized',
+    version: DISCORD_RAW_DATA_VERSION,
+    server: {
+      id: candidate.serverId,
+      inviteUrl: candidate.inviteUrl,
+      vanityUrlCode: candidate.vanityUrlCode,
+      name: candidate.name,
+      ...(candidate.description ? { description: candidate.description } : {}),
+      keywords: uniqueStrings([...(existing?.server.keywords ?? []), ...candidate.keywords]),
+      categories: uniqueStrings([...(existing?.server.categories ?? []), ...candidate.categories]),
+      primaryCategory: candidate.primaryCategory ?? existing?.server.primaryCategory,
+      features: uniqueStrings([...(existing?.server.features ?? []), ...candidate.features]),
+      ...(candidate.approximateMemberCount !== undefined ? { approximateMemberCount: candidate.approximateMemberCount } : {}),
+      ...(candidate.approximatePresenceCount !== undefined ? { approximatePresenceCount: candidate.approximatePresenceCount } : {}),
+      ...(candidate.premiumSubscriptionCount !== undefined ? { premiumSubscriptionCount: candidate.premiumSubscriptionCount } : {}),
+      ...(candidate.preferredLocale ? { preferredLocale: candidate.preferredLocale } : {}),
+      ...(candidate.isPublished !== undefined ? { isPublished: candidate.isPublished } : {}),
+    },
+    context: {
+      sourceQueries: uniqueStrings([...(existing?.context.sourceQueries ?? []), ...runContext.sourceQueries]),
+      observedKeywords: uniqueStrings([...(existing?.context.observedKeywords ?? []), ...runContext.observedKeywords]),
+      observedCategories: uniqueStrings([...(existing?.context.observedCategories ?? []), ...runContext.observedCategories]),
+      observedLocales: uniqueStrings([...(existing?.context.observedLocales ?? []), ...runContext.observedLocales]),
+      sampleServerNames: uniqueStrings([...(existing?.context.sampleServerNames ?? []), ...runContext.sampleServerNames]).slice(0, 12),
+    },
+    analysis: {
+      source: classificationSource,
+      runId,
+      findingSource: source,
+      scannerId: scannerConfig.id,
+      searchDepth,
+      ...(searchQuery ? { searchQuery } : {}),
+      ...(displayQuery ? { displayQuery } : {}),
+    },
+  };
+}
+
+function readDiscordStoredFindingRawData(rawData?: Record<string, unknown>): DiscordStoredFindingRawData | null {
+  if (!rawData || rawData.kind !== 'discord-normalized' || rawData.version !== DISCORD_RAW_DATA_VERSION) {
+    return null;
+  }
+
+  const server = typeof rawData.server === 'object' && rawData.server !== null ? rawData.server as Record<string, unknown> : {};
+  const context = typeof rawData.context === 'object' && rawData.context !== null ? rawData.context as Record<string, unknown> : {};
+  const analysis = typeof rawData.analysis === 'object' && rawData.analysis !== null ? rawData.analysis as Record<string, unknown> : {};
+
+  return {
+    kind: 'discord-normalized',
+    version: DISCORD_RAW_DATA_VERSION,
+    server: {
+      id: typeof server.id === 'string' ? server.id : '',
+      inviteUrl: typeof server.inviteUrl === 'string' ? server.inviteUrl : '',
+      vanityUrlCode: typeof server.vanityUrlCode === 'string' ? server.vanityUrlCode : '',
+      name: typeof server.name === 'string' ? server.name : '',
+      description: typeof server.description === 'string' ? server.description : undefined,
+      keywords: Array.isArray(server.keywords)
+        ? server.keywords.filter((value): value is string => typeof value === 'string')
+        : [],
+      categories: Array.isArray(server.categories)
+        ? server.categories.filter((value): value is string => typeof value === 'string')
+        : [],
+      primaryCategory: typeof server.primaryCategory === 'string' ? server.primaryCategory : undefined,
+      features: Array.isArray(server.features)
+        ? server.features.filter((value): value is string => typeof value === 'string')
+        : [],
+      approximateMemberCount: typeof server.approximateMemberCount === 'number' ? server.approximateMemberCount : undefined,
+      approximatePresenceCount: typeof server.approximatePresenceCount === 'number' ? server.approximatePresenceCount : undefined,
+      premiumSubscriptionCount: typeof server.premiumSubscriptionCount === 'number' ? server.premiumSubscriptionCount : undefined,
+      preferredLocale: typeof server.preferredLocale === 'string' ? server.preferredLocale : undefined,
+      isPublished: typeof server.isPublished === 'boolean' ? server.isPublished : undefined,
+    },
+    context: {
+      sourceQueries: Array.isArray(context.sourceQueries)
+        ? context.sourceQueries.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedKeywords: Array.isArray(context.observedKeywords)
+        ? context.observedKeywords.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedCategories: Array.isArray(context.observedCategories)
+        ? context.observedCategories.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedLocales: Array.isArray(context.observedLocales)
+        ? context.observedLocales.filter((value): value is string => typeof value === 'string')
+        : [],
+      sampleServerNames: Array.isArray(context.sampleServerNames)
+        ? context.sampleServerNames.filter((value): value is string => typeof value === 'string')
+        : [],
+    },
+    analysis: {
+      source: analysis.source === 'fallback' ? 'fallback' : 'llm',
+      runId: typeof analysis.runId === 'string' ? analysis.runId : '',
+      findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'discord',
+      scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'discord-servers',
+      searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
+      searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
+      displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
+    },
+  };
+}
+
 function normalizeGoogleSearchSighting(value: unknown): GoogleSearchSighting | null {
   if (typeof value !== 'object' || value === null) return null;
   const sighting = value as Record<string, unknown>;
@@ -1355,11 +2105,24 @@ function isKnownFindingSource(value: unknown): value is Finding['source'] {
     || value === 'youtube'
     || value === 'facebook'
     || value === 'instagram'
+    || value === 'discord'
     || value === 'unknown'
   );
 }
 
-function isKnownGoogleScannerId(value: unknown): value is ActorRunInfo['scannerId'] {
+function isKnownScannerId(value: unknown): value is ActorRunInfo['scannerId'] {
+  return (
+    value === 'google-web'
+    || value === 'google-reddit'
+    || value === 'google-tiktok'
+    || value === 'google-youtube'
+    || value === 'google-facebook'
+    || value === 'google-instagram'
+    || value === 'discord-servers'
+  );
+}
+
+function isKnownGoogleScannerId(value: unknown): value is GoogleScannerId {
   return (
     value === 'google-web'
     || value === 'google-reddit'
@@ -1370,9 +2133,9 @@ function isKnownGoogleScannerId(value: unknown): value is ActorRunInfo['scannerI
   );
 }
 
-function resolveGoogleScannerConfig(actorRunInfo?: Partial<ActorRunInfo>) {
-  if (actorRunInfo?.scannerId && isKnownGoogleScannerId(actorRunInfo.scannerId)) {
-    return getGoogleScannerConfigById(actorRunInfo.scannerId);
+function resolveScannerConfig(actorRunInfo?: Partial<ActorRunInfo>): ScannerConfig {
+  if (actorRunInfo?.scannerId && isKnownScannerId(actorRunInfo.scannerId)) {
+    return getScannerConfigById(actorRunInfo.scannerId);
   }
 
   if (
@@ -1382,11 +2145,12 @@ function resolveGoogleScannerConfig(actorRunInfo?: Partial<ActorRunInfo>) {
     || actorRunInfo?.source === 'facebook'
     || actorRunInfo?.source === 'instagram'
     || actorRunInfo?.source === 'google'
+    || actorRunInfo?.source === 'discord'
   ) {
-    return getGoogleScannerConfigBySource(actorRunInfo.source);
+    return getScannerConfigBySource(actorRunInfo.source);
   }
 
-  return getGoogleScannerConfigById('google-web');
+  return getScannerConfigById('google-web');
 }
 
 function choosePreferredFindingSource(
@@ -1400,6 +2164,7 @@ function choosePreferredFindingSource(
       || source === 'youtube'
       || source === 'facebook'
       || source === 'instagram'
+      || source === 'discord'
     ) return 3;
     if (source === 'google') return 2;
     if (source === 'unknown') return 1;
@@ -1410,10 +2175,14 @@ function choosePreferredFindingSource(
 }
 
 function buildExecutableSearchQuery(
-  scannerConfig: ReturnType<typeof resolveGoogleScannerConfig>,
+  scannerConfig: ScannerConfig,
   query: string,
 ): string {
-  return buildGoogleScannerQuery(scannerConfig.source, query);
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) return '';
+  return scannerConfig.kind === 'google'
+    ? buildGoogleScannerQuery(scannerConfig.source, trimmedQuery)
+    : trimmedQuery;
 }
 
 function choosePreferredGoogleOutcome(existing: Finding | null, next: GoogleFindingOutcome): GoogleFindingOutcome {
@@ -1421,6 +2190,37 @@ function choosePreferredGoogleOutcome(existing: Finding | null, next: GoogleFind
 
   const existingSource = readGoogleStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
   const existingOutcome: GoogleFindingOutcome = {
+    severity: existing.severity,
+    title: existing.title,
+    theme: existing.theme,
+    analysis: existing.llmAnalysis,
+    isFalsePositive: existing.isFalsePositive === true,
+    llmAnalysisPrompt: existing.llmAnalysisPrompt,
+    rawLlmResponse: existing.rawLlmResponse,
+    classificationSource: existingSource,
+  };
+
+  if (existingOutcome.classificationSource !== next.classificationSource) {
+    return next.classificationSource === 'llm' ? next : existingOutcome;
+  }
+  if (existingOutcome.isFalsePositive !== next.isFalsePositive) {
+    return existingOutcome.isFalsePositive ? next : existingOutcome;
+  }
+
+  const existingRank = getSeverityRank(existingOutcome.severity);
+  const nextRank = getSeverityRank(next.severity);
+  if (nextRank !== existingRank) {
+    return nextRank > existingRank ? next : existingOutcome;
+  }
+
+  return next;
+}
+
+function choosePreferredDiscordOutcome(existing: Finding | null, next: DiscordFindingOutcome): DiscordFindingOutcome {
+  if (!existing) return next;
+
+  const existingSource = readDiscordStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
+  const existingOutcome: DiscordFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
     theme: existing.theme,
@@ -1469,7 +2269,7 @@ function getFindingCountState(finding: Pick<Finding, 'severity' | 'isFalsePositi
   };
 }
 
-function getOutcomeCountState(outcome: Pick<GoogleFindingOutcome, 'severity' | 'isFalsePositive'>) {
+function getOutcomeCountState(outcome: Pick<Finding, 'severity'> & { isFalsePositive: boolean }) {
   return getFindingCountState({
     severity: outcome.severity,
     isFalsePositive: outcome.isFalsePositive,
@@ -1738,6 +2538,10 @@ function buildGoogleFindingId(scanId: string, normalizedUrl: string): string {
   return `${GOOGLE_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${normalizedUrl}`).digest('hex')}`;
 }
 
+function buildDiscordFindingId(scanId: string, serverId: string): string {
+  return `${DISCORD_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${serverId}`).digest('hex')}`;
+}
+
 function normalizeUrlForFinding(url: string): string | null {
   if (!url) return null;
 
@@ -1796,6 +2600,78 @@ function readGoogleTitles(value: unknown): string[] {
       return typeof title === 'string' ? title.trim() : '';
     })
     .filter((title) => title.length > 0);
+}
+
+function readDiscordServerId(item: Record<string, unknown>): string | null {
+  const candidateIds = [item.id, item.objectID];
+  for (const value of candidateIds) {
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function readDiscordSourceQueries(value?: string): string[] {
+  if (!value) return [];
+  return uniqueStrings(
+    value
+      .split('|')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0),
+  );
+}
+
+function readDiscordServerName(item: Record<string, unknown>): string | undefined {
+  return readOptionalTrimmedString(item.name) ?? readOptionalTrimmedString(item.title);
+}
+
+function readDiscordVanityUrlCode(item: Record<string, unknown>): string | null {
+  const value = readOptionalTrimmedString(item.vanity_url_code);
+  return value && value.length > 0 ? value : null;
+}
+
+function buildDiscordInviteUrl(vanityUrlCode: string): string | null {
+  const normalized = vanityUrlCode.trim();
+  if (!normalized) return null;
+  return `https://discord.gg/${encodeURIComponent(normalized)}`;
+}
+
+function readDiscordCategoryNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return uniqueStrings(
+    value
+      .filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null)
+      .map((entry) => readOptionalTrimmedString(entry.name) ?? '')
+      .filter((entry) => entry.length > 0),
+  );
+}
+
+function readDiscordPrimaryCategory(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  return readOptionalTrimmedString((value as Record<string, unknown>).name);
+}
+
+function readDiscordStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return uniqueStrings(
+    value
+      .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
+      .map((entry) => entry.trim()),
+  );
+}
+
+function readOptionalTrimmedString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readOptionalFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim().length > 0 && !Number.isNaN(Number(value))) {
+    return Number(value);
+  }
+  return undefined;
 }
 
 function mergeGoogleSightings(

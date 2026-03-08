@@ -14,6 +14,7 @@ export const DEFAULT_BRAND_SCAN_SOURCES: BrandScanSources = {
   youtube: false,
   facebook: false,
   instagram: false,
+  discord: false,
 };
 
 export function isValidSearchResultPages(value: unknown): value is number {
@@ -70,7 +71,8 @@ export function isValidBrandScanSources(value: unknown): value is BrandScanSourc
     typeof scanSources.tiktok === 'boolean' &&
     typeof scanSources.youtube === 'boolean' &&
     typeof scanSources.facebook === 'boolean' &&
-    typeof scanSources.instagram === 'boolean'
+    typeof scanSources.instagram === 'boolean' &&
+    typeof scanSources.discord === 'boolean'
   );
 }
 
@@ -87,6 +89,7 @@ export function normalizeBrandScanSources(value: unknown): BrandScanSources {
     youtube: typeof scanSources.youtube === 'boolean' ? scanSources.youtube : DEFAULT_BRAND_SCAN_SOURCES.youtube,
     facebook: typeof scanSources.facebook === 'boolean' ? scanSources.facebook : DEFAULT_BRAND_SCAN_SOURCES.facebook,
     instagram: typeof scanSources.instagram === 'boolean' ? scanSources.instagram : DEFAULT_BRAND_SCAN_SOURCES.instagram,
+    discord: typeof scanSources.discord === 'boolean' ? scanSources.discord : DEFAULT_BRAND_SCAN_SOURCES.discord,
   };
 }
 
@@ -99,5 +102,6 @@ export function hasEnabledBrandScanSource(value: unknown): boolean {
     || scanSources.youtube
     || scanSources.facebook
     || scanSources.instagram
+    || scanSources.discord
   );
 }

@@ -1,21 +1,47 @@
 import { normalizeBrandScanSources } from '@/lib/brands';
-import type { BrandScanSources, FindingSource, GoogleScannerId } from '@/lib/types';
+import type { BrandScanSources, FindingSource, GoogleScannerId, ScannerId } from '@/lib/types';
 
+export type ScanFindingSource = Exclude<FindingSource, 'unknown'>;
 export type GoogleFindingSource = Extract<
-  FindingSource,
+  ScanFindingSource,
   'google' | 'reddit' | 'tiktok' | 'youtube' | 'facebook' | 'instagram'
 >;
 
-export interface GoogleScannerConfig {
-  id: GoogleScannerId;
-  source: GoogleFindingSource;
+interface BaseScannerConfig {
+  id: ScannerId;
+  source: ScanFindingSource;
   actorId: string;
   displayName: string;
   shortLabel: string;
+}
+
+export interface GoogleScannerConfig extends BaseScannerConfig {
+  id: GoogleScannerId;
+  source: GoogleFindingSource;
+  kind: 'google';
   siteHost?: string;
 }
 
+export interface DiscordScannerConfig extends BaseScannerConfig {
+  id: 'discord-servers';
+  source: 'discord';
+  kind: 'discord';
+}
+
+export type ScannerConfig = GoogleScannerConfig | DiscordScannerConfig;
+
 export const GOOGLE_SEARCH_ACTOR_ID = 'apify/google-search-scraper';
+export const DISCORD_SERVER_SCRAPER_ACTOR_ID = 'louisdeconinck/discord-server-scraper';
+
+export const SCAN_SOURCE_ORDER: ScanFindingSource[] = [
+  'google',
+  'reddit',
+  'tiktok',
+  'youtube',
+  'facebook',
+  'instagram',
+  'discord',
+];
 
 export const GOOGLE_SCAN_SOURCE_ORDER: GoogleFindingSource[] = [
   'google',
@@ -26,11 +52,12 @@ export const GOOGLE_SCAN_SOURCE_ORDER: GoogleFindingSource[] = [
   'instagram',
 ];
 
-const GOOGLE_SCANNER_CONFIGS: Record<GoogleScannerId, GoogleScannerConfig> = {
+const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
   'google-web': {
     id: 'google-web',
     source: 'google',
     actorId: GOOGLE_SEARCH_ACTOR_ID,
+    kind: 'google',
     displayName: 'Web search',
     shortLabel: 'Web',
   },
@@ -38,6 +65,7 @@ const GOOGLE_SCANNER_CONFIGS: Record<GoogleScannerId, GoogleScannerConfig> = {
     id: 'google-reddit',
     source: 'reddit',
     actorId: GOOGLE_SEARCH_ACTOR_ID,
+    kind: 'google',
     displayName: 'Reddit',
     shortLabel: 'Reddit',
     siteHost: 'reddit.com',
@@ -46,6 +74,7 @@ const GOOGLE_SCANNER_CONFIGS: Record<GoogleScannerId, GoogleScannerConfig> = {
     id: 'google-tiktok',
     source: 'tiktok',
     actorId: GOOGLE_SEARCH_ACTOR_ID,
+    kind: 'google',
     displayName: 'TikTok',
     shortLabel: 'TikTok',
     siteHost: 'tiktok.com',
@@ -54,6 +83,7 @@ const GOOGLE_SCANNER_CONFIGS: Record<GoogleScannerId, GoogleScannerConfig> = {
     id: 'google-youtube',
     source: 'youtube',
     actorId: GOOGLE_SEARCH_ACTOR_ID,
+    kind: 'google',
     displayName: 'YouTube',
     shortLabel: 'YouTube',
     siteHost: 'youtube.com',
@@ -62,6 +92,7 @@ const GOOGLE_SCANNER_CONFIGS: Record<GoogleScannerId, GoogleScannerConfig> = {
     id: 'google-facebook',
     source: 'facebook',
     actorId: GOOGLE_SEARCH_ACTOR_ID,
+    kind: 'google',
     displayName: 'Facebook',
     shortLabel: 'Facebook',
     siteHost: 'facebook.com',
@@ -70,39 +101,73 @@ const GOOGLE_SCANNER_CONFIGS: Record<GoogleScannerId, GoogleScannerConfig> = {
     id: 'google-instagram',
     source: 'instagram',
     actorId: GOOGLE_SEARCH_ACTOR_ID,
+    kind: 'google',
     displayName: 'Instagram',
     shortLabel: 'Instagram',
     siteHost: 'instagram.com',
   },
+  'discord-servers': {
+    id: 'discord-servers',
+    source: 'discord',
+    actorId: DISCORD_SERVER_SCRAPER_ACTOR_ID,
+    kind: 'discord',
+    displayName: 'Discord servers',
+    shortLabel: 'Discord',
+  },
 };
 
-const GOOGLE_SCANNER_ID_BY_SOURCE: Record<GoogleFindingSource, GoogleScannerId> = {
+const SCANNER_ID_BY_SOURCE: Record<ScanFindingSource, ScannerId> = {
   google: 'google-web',
   reddit: 'google-reddit',
   tiktok: 'google-tiktok',
   youtube: 'google-youtube',
   facebook: 'google-facebook',
   instagram: 'google-instagram',
+  discord: 'discord-servers',
 };
+
+export function isGoogleScannerConfig(config: ScannerConfig): config is GoogleScannerConfig {
+  return config.kind === 'google';
+}
 
 export function hasEnabledBrandScanSource(scanSources: BrandScanSources | undefined): boolean {
   const normalized = normalizeBrandScanSources(scanSources);
-  return GOOGLE_SCAN_SOURCE_ORDER.some((source) => normalized[source]);
+  return SCAN_SOURCE_ORDER.some((source) => normalized[source]);
+}
+
+export function getEnabledScannerConfigs(scanSources?: BrandScanSources): ScannerConfig[] {
+  const normalized = normalizeBrandScanSources(scanSources);
+  return SCAN_SOURCE_ORDER
+    .filter((source) => normalized[source])
+    .map((source) => SCANNER_CONFIGS[SCANNER_ID_BY_SOURCE[source]]);
 }
 
 export function getEnabledGoogleScannerConfigs(scanSources?: BrandScanSources): GoogleScannerConfig[] {
-  const normalized = normalizeBrandScanSources(scanSources);
-  return GOOGLE_SCAN_SOURCE_ORDER
-    .filter((source) => normalized[source])
-    .map((source) => GOOGLE_SCANNER_CONFIGS[GOOGLE_SCANNER_ID_BY_SOURCE[source]]);
+  return getEnabledScannerConfigs(scanSources).filter(isGoogleScannerConfig);
+}
+
+export function getScannerConfigById(id: ScannerId): ScannerConfig {
+  return SCANNER_CONFIGS[id];
 }
 
 export function getGoogleScannerConfigById(id: GoogleScannerId): GoogleScannerConfig {
-  return GOOGLE_SCANNER_CONFIGS[id];
+  const config = SCANNER_CONFIGS[id];
+  if (!isGoogleScannerConfig(config)) {
+    throw new Error(`Scanner ${id} is not a Google scanner`);
+  }
+  return config;
+}
+
+export function getScannerConfigBySource(source: ScanFindingSource): ScannerConfig {
+  return SCANNER_CONFIGS[SCANNER_ID_BY_SOURCE[source]];
 }
 
 export function getGoogleScannerConfigBySource(source: GoogleFindingSource): GoogleScannerConfig {
-  return GOOGLE_SCANNER_CONFIGS[GOOGLE_SCANNER_ID_BY_SOURCE[source]];
+  const config = SCANNER_CONFIGS[SCANNER_ID_BY_SOURCE[source]];
+  if (!isGoogleScannerConfig(config)) {
+    throw new Error(`Source ${source} is not Google-backed`);
+  }
+  return config;
 }
 
 export function getFindingSourceLabel(source: FindingSource): string {
@@ -110,7 +175,7 @@ export function getFindingSourceLabel(source: FindingSource): string {
     return 'Unknown';
   }
 
-  return getGoogleScannerConfigBySource(source).displayName;
+  return getScannerConfigBySource(source).displayName;
 }
 
 export function buildGoogleScannerQuery(
@@ -127,7 +192,8 @@ export function buildGoogleScannerQuery(
     return `site:${scanner.siteHost} ${trimmedBaseQuery}`.trim();
   }
 
-  const specialistExclusions = Object.values(GOOGLE_SCANNER_CONFIGS)
+  const specialistExclusions = Object.values(SCANNER_CONFIGS)
+    .filter(isGoogleScannerConfig)
     .filter((config) => config.source !== 'google')
     .map((config) => config.siteHost)
     .filter((siteHost): siteHost is string => typeof siteHost === 'string' && siteHost.length > 0)

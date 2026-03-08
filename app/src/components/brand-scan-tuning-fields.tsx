@@ -97,7 +97,7 @@ export function BrandScanTuningFields({
         <SliderField
           id="search-result-pages"
           label="Search depth"
-          tooltip="Controls how extensively DoppelSpotter searches for potential matches. Deeper searches increase coverage, but scans will be slower."
+          tooltip="Controls how extensively DoppelSpotter searches for potential matches on Google-backed scan types. Deeper searches increase coverage, but those scans will be slower."
           value={searchResultPages}
           min={MIN_SEARCH_RESULT_PAGES}
           max={MAX_SEARCH_RESULT_PAGES}
@@ -113,7 +113,7 @@ export function BrandScanTuningFields({
         <div className="flex min-w-0 flex-col gap-1">
           <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
             Allow AI analysis to request deeper searches
-            <InfoTooltip content="Allows AI analysis to request follow-up searches when it spots something concerning. More follow-up searching can increase coverage, but scans will be slower." />
+            <InfoTooltip content="Allows AI analysis to request follow-up searches when it spots something concerning, including Google follow-ups and Discord server discovery follow-ups where supported. More follow-up searching can increase coverage, but scans will be slower." />
           </div>
         </div>
         <button
@@ -146,7 +146,7 @@ export function BrandScanTuningFields({
           <SliderField
             id="max-ai-deep-searches"
             label="Deep search breadth"
-            tooltip="Controls how many follow-up searches AI analysis may request when it spots something concerning. More deep searches increase coverage, but scans will be slower."
+            tooltip="Controls how many follow-up searches AI analysis may request when it spots something concerning across supported scan types. More deep searches increase coverage, but scans will be slower."
             value={maxAiDeepSearches}
             min={MIN_AI_DEEP_SEARCHES}
             max={MAX_AI_DEEP_SEARCHES}

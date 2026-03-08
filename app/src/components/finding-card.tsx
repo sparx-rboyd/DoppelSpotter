@@ -116,6 +116,11 @@ const sourceConfig: Record<
     textClass: 'text-brand-600',
     label: getFindingSourceLabel('instagram'),
   },
+  discord: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('discord'),
+  },
   unknown: {
     bgClass: 'bg-gray-50',
     textClass: 'text-gray-500',

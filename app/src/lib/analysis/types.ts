@@ -1,4 +1,4 @@
-import type { FindingSource, GoogleScannerId, Severity } from '@/lib/types';
+import type { FindingSource, GoogleScannerId, ScannerId, Severity } from '@/lib/types';
 import { normalizeFindingTaxonomyLabel } from '@/lib/findings-taxonomy';
 
 /**
@@ -111,6 +111,91 @@ export interface GoogleStoredFindingRawData extends Record<string, unknown> {
   };
 }
 
+/**
+ * One joinable Discord server candidate returned by the public-server scraper.
+ */
+export interface DiscordServerCandidate {
+  resultId: string;
+  serverId: string;
+  inviteUrl: string;
+  vanityUrlCode: string;
+  name: string;
+  description?: string;
+  keywords: string[];
+  categories: string[];
+  primaryCategory?: string;
+  features: string[];
+  approximateMemberCount?: number;
+  approximatePresenceCount?: number;
+  premiumSubscriptionCount?: number;
+  preferredLocale?: string;
+  isPublished?: boolean;
+}
+
+/**
+ * Run-level Discord context shared with chunked analysis and deep-search selection.
+ */
+export interface DiscordRunContext {
+  sourceQueries: string[];
+  observedKeywords: string[];
+  observedCategories: string[];
+  observedLocales: string[];
+  sampleServerNames: string[];
+}
+
+/**
+ * One assessed Discord server returned by chunked AI analysis.
+ */
+export interface DiscordChunkAnalysisItem {
+  resultId: string;
+  title: string;
+  severity: Severity;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+}
+
+/**
+ * The structured JSON output expected from chunked Discord analysis.
+ */
+export interface DiscordChunkAnalysisOutput {
+  items: DiscordChunkAnalysisItem[];
+}
+
+/**
+ * Compact stored debug payload for Discord findings.
+ */
+export interface DiscordStoredFindingRawData extends Record<string, unknown> {
+  kind: 'discord-normalized';
+  version: 1;
+  server: {
+    id: string;
+    inviteUrl: string;
+    vanityUrlCode: string;
+    name: string;
+    description?: string;
+    keywords?: string[];
+    categories?: string[];
+    primaryCategory?: string;
+    features?: string[];
+    approximateMemberCount?: number;
+    approximatePresenceCount?: number;
+    premiumSubscriptionCount?: number;
+    preferredLocale?: string;
+    isPublished?: boolean;
+  };
+  context: DiscordRunContext;
+  analysis: {
+    source: 'llm' | 'fallback';
+    runId: string;
+    findingSource: FindingSource;
+    scannerId: ScannerId;
+    searchDepth: number;
+    searchQuery?: string;
+    displayQuery?: string;
+  };
+}
+
 /** Maximum follow-up deep-search queries AI analysis may request per Google batch run */
 export const MAX_SUGGESTED_SEARCHES = 5;
 
@@ -124,6 +209,69 @@ export function parseGoogleChunkAnalysisOutput(
   raw: string,
   validResultIds: Set<string>,
 ): GoogleChunkAnalysisOutput | null {
+  const items = parseChunkAnalysisItems(raw, validResultIds);
+  return items ? { items } : null;
+}
+
+/**
+ * Parse and validate the raw JSON string returned by chunked Discord analysis.
+ */
+export function parseDiscordChunkAnalysisOutput(
+  raw: string,
+  validResultIds: Set<string>,
+): DiscordChunkAnalysisOutput | null {
+  const items = parseChunkAnalysisItems(raw, validResultIds);
+  return items ? { items } : null;
+}
+
+/**
+ * Parse and validate the raw JSON string returned by the Google deep-search
+ * selection pass. Invalid or empty results collapse to an empty suggestion set.
+ */
+export function parseGoogleSuggestionOutput(raw: string, maxSuggestedSearches = MAX_SUGGESTED_SEARCHES): GoogleSuggestionOutput | null {
+  return parseSuggestedSearchOutput(raw, maxSuggestedSearches);
+}
+
+export function parseSuggestedSearchOutput(raw: string, maxSuggestedSearches = MAX_SUGGESTED_SEARCHES): GoogleSuggestionOutput | null {
+  try {
+    const stripped = stripJsonFences(raw);
+    const parsed = JSON.parse(stripped);
+
+    return {
+      suggestedSearches: normalizeSuggestedSearches(parsed.suggestedSearches, maxSuggestedSearches),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse and validate the raw JSON string returned by the scan-summary pass.
+ */
+export function parseScanSummaryOutput(raw: string): ScanSummaryOutput | null {
+  try {
+    const stripped = stripJsonFences(raw);
+    const parsed = JSON.parse(stripped);
+    if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) {
+      return null;
+    }
+
+    return {
+      summary: parsed.summary.trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function stripJsonFences(raw: string): string {
+  return raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+}
+
+function parseChunkAnalysisItems(
+  raw: string,
+  validResultIds: Set<string>,
+): GoogleChunkAnalysisItem[] | null {
   try {
     const stripped = stripJsonFences(raw);
     const parsed = JSON.parse(stripped);
@@ -163,54 +311,10 @@ export function parseGoogleChunkAnalysisOutput(
         };
       });
 
-    if (items.length === 0) return null;
-
-    return {
-      items,
-    };
+    return items.length > 0 ? items : null;
   } catch {
     return null;
   }
-}
-
-/**
- * Parse and validate the raw JSON string returned by the Google deep-search
- * selection pass. Invalid or empty results collapse to an empty suggestion set.
- */
-export function parseGoogleSuggestionOutput(raw: string, maxSuggestedSearches = MAX_SUGGESTED_SEARCHES): GoogleSuggestionOutput | null {
-  try {
-    const stripped = stripJsonFences(raw);
-    const parsed = JSON.parse(stripped);
-
-    return {
-      suggestedSearches: normalizeSuggestedSearches(parsed.suggestedSearches, maxSuggestedSearches),
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Parse and validate the raw JSON string returned by the scan-summary pass.
- */
-export function parseScanSummaryOutput(raw: string): ScanSummaryOutput | null {
-  try {
-    const stripped = stripJsonFences(raw);
-    const parsed = JSON.parse(stripped);
-    if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) {
-      return null;
-    }
-
-    return {
-      summary: parsed.summary.trim(),
-    };
-  } catch {
-    return null;
-  }
-}
-
-function stripJsonFences(raw: string): string {
-  return raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
 }
 
 function normalizeSuggestedSearches(value: unknown, maxSuggestedSearches: number): string[] | undefined {

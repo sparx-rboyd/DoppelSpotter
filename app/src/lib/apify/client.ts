@@ -23,13 +23,23 @@ export interface ActorRunResult {
 }
 
 /**
- * Build the Google Search actor input payload for a brand profile.
+ * Build a source-specific actor input payload for a brand profile.
  */
 export function buildActorInput(
   actor: ActorConfig,
   brand: BrandProfile,
 ): { input: Record<string, unknown>; query: string; displayQuery: string } {
-  const searchTerms = [brand.name, ...brand.keywords];
+  const searchTerms = normalizeSearchTerms([brand.name, ...brand.keywords]);
+
+  if (actor.kind === 'discord') {
+    const query = joinSearchTermsForDisplay(searchTerms);
+    return {
+      input: { keywords: searchTerms },
+      query,
+      displayQuery: query,
+    };
+  }
+
   const primaryQuery = searchTerms.join(' OR ');
   const query = buildGoogleScannerQuery(actor.source, primaryQuery);
   const googlePageCount = getInitialGooglePageCount(brand.searchResultPages);
@@ -68,9 +78,7 @@ export async function startActorRun(
 }
 
 /**
- * Start a Google Search actor run for a specific deep-search query.
- * Used by the webhook handler when AI analysis requests follow-up searches.
- * The actor input mirrors the core scan input but uses a custom query string.
+ * Start a source-specific deep-search actor run for a custom follow-up query.
  */
 export async function startDeepSearchRun(
   params: {
@@ -82,11 +90,27 @@ export async function startDeepSearchRun(
 ): Promise<{ runId: string; query: string; displayQuery: string }> {
   const { actor, query, searchResultPages, webhookUrl } = params;
   const client = getClient();
-  const executableQuery = buildGoogleScannerQuery(actor.source, query);
-  const deepSearchPageCount = getDeepSearchGooglePageCount(searchResultPages);
+
+  const trimmedQuery = query.trim();
+  if (!trimmedQuery) {
+    throw new Error('Deep-search query must not be empty');
+  }
+
+  const runInput = actor.kind === 'discord'
+    ? { keywords: normalizeSearchTerms([trimmedQuery]) }
+    : {
+        queries: buildGoogleScannerQuery(actor.source, trimmedQuery),
+        maxPagesPerQuery: getDeepSearchGooglePageCount(searchResultPages),
+      };
+  const executableQuery = actor.kind === 'discord'
+    ? trimmedQuery
+    : buildGoogleScannerQuery(actor.source, trimmedQuery);
+  const displayQuery = actor.kind === 'discord'
+    ? trimmedQuery
+    : sanitizeGoogleQueryForDisplay(executableQuery);
 
   const run = await client.actor(actor.actorId).start(
-    { queries: executableQuery, maxPagesPerQuery: deepSearchPageCount },
+    runInput,
     {
       webhooks: [
         {
@@ -101,7 +125,7 @@ export async function startDeepSearchRun(
   return {
     runId: run.id,
     query: executableQuery,
-    displayQuery: sanitizeGoogleQueryForDisplay(executableQuery),
+    displayQuery,
   };
 }
 
@@ -158,4 +182,24 @@ export async function runActor(
     datasetId: run.defaultDatasetId,
     items: items as Record<string, unknown>[],
   };
+}
+
+function normalizeSearchTerms(values: string[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const value of values) {
+    const trimmed = value.trim().replace(/\s+/g, ' ');
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(trimmed);
+  }
+
+  return normalized;
+}
+
+function joinSearchTermsForDisplay(values: string[]): string {
+  return values.join(' | ');
 }

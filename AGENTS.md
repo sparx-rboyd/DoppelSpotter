@@ -8,8 +8,8 @@ Keep it up to date when making significant structural changes.
 ## Project Overview
 
 **DoppelSpotter** is an AI-powered brand protection web app for SMEs. The current production
-pipeline monitors Google web search results for signs of brand infringement, then uses AI
-analysis to classify likely threats and summarise scan outcomes.
+pipeline monitors public web and community-discovery surfaces for signs of brand infringement,
+then uses AI analysis to classify likely threats and summarise scan outcomes.
 
 **Stack:**
 - Frontend / API: Next.js 15 (App Router), TypeScript, Tailwind CSS
@@ -44,19 +44,19 @@ analysis to classify likely threats and summarise scan outcomes.
 │       │       └── webhooks/apify/  # Apify webhook receiver → AI analysis pipeline
 │       └── lib/
 │           ├── apify/
-│           │   ├── actors.ts     # Logical Google scanner registry (web / Reddit / TikTok) + Apify actor lookup helpers
-│           │   └── client.ts     # Apify client: startActorRun, buildActorInput, fetchDatasetItems
+│           │   ├── actors.ts     # Logical scanner registry (Google + Discord) + Apify actor lookup helpers
+│           │   └── client.ts     # Apify client: source-specific actor input builders, run start helpers, dataset fetch
 │           ├── dashboard.ts      # Dashboard metrics helpers: terminal-scan totals + source/theme rollups
 │           ├── mailersend.ts     # MailerSend email client for transactional emails
 │           ├── scan-runner.ts    # Shared manual + scheduled scan reservation and actor startup
-│           ├── scan-sources.ts   # Shared Google scan-source config, site-operator policy, and display helpers
+│           ├── scan-sources.ts   # Shared scan-source/scanner config, Google site-operator policy, and display helpers
 │           ├── scan-summary-emails.ts # Branded scan-summary email composition + idempotent delivery
 │           ├── scan-schedules.ts # Schedule validation, timezone-aware recurrence, next-run helpers
 │           └── analysis/
 │               ├── google-scanner-policy.ts # Small prompt-policy helpers for Google specialist scans
-│               ├── prompts.ts    # Google classification + deep-search + scan-summary prompts
+│               ├── prompts.ts    # Google + Discord classification, deep-search, and scan-summary prompts
 │               ├── openrouter.ts # AI analysis client: chatCompletion()
-│               └── types.ts      # Google analysis output interfaces + parsers
+│               └── types.ts      # Google + Discord analysis output interfaces + parsers
 └── docs/
     ├── GCP_SETUP.md
     └── PIPELINE_SETUP.md
@@ -66,8 +66,7 @@ analysis to classify likely threats and summarise scan outcomes.
 
 ## Actor Registry
 
-The scan pipeline is still Google-only at the Apify layer, but it now has six logical
-Google-based scanner variants:
+The scan pipeline now has seven logical scanner variants backed by two physical Apify actors:
 
 - `google-web` → normal web search
 - `google-reddit` → Google Search constrained to `site:reddit.com`
@@ -75,10 +74,12 @@ Google-based scanner variants:
 - `google-youtube` → Google Search constrained to `site:youtube.com`
 - `google-facebook` → Google Search constrained to `site:facebook.com`
 - `google-instagram` → Google Search constrained to `site:instagram.com`
+- `discord-servers` → public Discord server discovery via the Apify Discord actor
 
-All three logical scanners reuse the same physical Apify actor
-`apify/google-search-scraper`. `app/src/lib/apify/actors.ts` therefore keys the registry by
-logical scanner id rather than raw `actorId`.
+The six Google logical scanners all reuse the same physical Apify actor
+`apify/google-search-scraper`. `discord-servers` uses
+`louisdeconinck/discord-server-scraper`. `app/src/lib/apify/actors.ts` therefore keys the
+registry by logical scanner id rather than raw `actorId`.
 
 The generic web scanner automatically appends `-site:` exclusions for every specialist scanner
 domain (`reddit.com`, `tiktok.com`, `youtube.com`, `facebook.com`, `instagram.com`) even when
@@ -86,6 +87,12 @@ those specialist scans are disabled on the brand, so the main web search and its
 follow-ups never surface those platform-specific results. Specialist scanners apply
 platform-specific query scoping, while source identity lives on the finding itself and the only
 remaining lightweight taxonomy label is `theme`.
+
+`discord-servers` is the first true non-Google source. It does not use `site:` operators or SERP
+pages. Instead it queries Discord's public server-discovery index through the Apify actor,
+filters out non-joinable servers without `vanity_url_code`, derives `https://discord.gg/<code>`
+as the user-visible URL, and uses the Discord server `id` as the canonical identity for
+per-scan upserts and historical repeat suppression.
 
 ---
 
@@ -97,7 +104,7 @@ Brand add/edit pages
  └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans currently map it to requested SERP pages
  └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches
  └─ persist `brands.maxAiDeepSearches` as the user-facing `Deep search breadth` setting; it caps AI-requested follow-up searches from 1-10
- └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram` so each Google-based scan surface can be enabled or disabled per brand
+ └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|discord` so each scan surface can be enabled or disabled per brand
  └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
  └─ scheduling is anchored from the chosen local start date/time and stored timezone
 
@@ -115,8 +122,8 @@ POST /api/scan
  └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
- └─ resolves the brand's enabled logical Google scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`)
- └─ maps `brands.searchResultPages` (default 3, min 1, max 10) to Google Search `maxPagesPerQuery`
+ └─ resolves the brand's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `discord-servers`)
+ └─ maps `brands.searchResultPages` (default 3, min 1, max 10) to Google Search `maxPagesPerQuery`; Discord server scans currently ignore this setting
  └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
  └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
  └─ once the scan-level preference hints are ready (or deliberately fail open), replays any deferred succeeded webhooks and then flips the scan to `running`
@@ -177,6 +184,13 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
       └─ in the default `llm-final` mode, chunk calls do classification only — they do not propose deep-search queries
       └─ the webhook collects the full deduped run-level `relatedQueries` + `peopleAlsoAsk` text signals (not URLs) and passes them to the final deep-search chooser without truncating them
+ └─ Discord server mode: normalize joinable public-server records into compact server candidates
+      └─ drops items without `vanity_url_code` because they do not yield a user-actionable invite URL
+      └─ derives `https://discord.gg/<vanity_url_code>` as the stored/displayed URL
+      └─ dedupes repeated server ids within the run before analysis
+      └─ skips Discord server ids that already appeared in previous scans for the same brand before any LLM analysis
+      └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
+      └─ final deep-search selection sees the run-level observed Discord names, categories, keywords, and locales, then synthesizes follow-up Discord discovery keywords
  └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and scanner-specific focus, and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
 └─ before each finding-level classification pass, the webhook loads the brand's existing finding `theme` labels so the LLM can preferentially reuse them
  └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
@@ -209,11 +223,12 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **File:** `app/src/lib/analysis/`
 - **When:** After each Apify actor run completes, inside the webhook handler
 - **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
-- **Prompts:** `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for the final deep-search query chooser; `SCAN_SUMMARY_SYSTEM_PROMPT` + `buildScanSummaryPrompt()` for the final scan summary
+- **Prompts:** `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `DISCORD_CLASSIFICATION_SYSTEM_PROMPT` + `buildDiscordChunkAnalysisPrompt()` for chunked Discord server classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for Google deep-search selection; `buildDiscordFinalSelectionSystemPrompt()` + `buildDiscordFinalSelectionPrompt()` for Discord deep-search selection; `SCAN_SUMMARY_SYSTEM_PROMPT` + `buildScanSummaryPrompt()` for the final scan summary
 - **Scan-level summary:** after all actor runs finish, the webhook runs one final LLM pass over the scan's actionable findings and stores a concise `aiSummary` on the scan document for the brand page
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
 - **Historical URL suppression:** Google runs load previously seen normalized finding URLs for the brand and filter them out before any LLM classification begins
+- **Historical Discord suppression:** Discord runs load previously seen Discord server ids for the brand and filter them out before any LLM classification begins
 - **User preference hints:** each scan prepares a tiny LLM-authored soft-guidance summary from explicit user-review signals before actor-run analysis begins; this is now the only historical-review context sent into classification prompts
 - **Existing taxonomy hints:** prompts receive the current brand's distinct `theme` labels so the LLM can reuse them exactly where appropriate, while still inventing a new short label when none fit
 - **Scanner-aware prompt policy:** specialist Google scans reuse the same shared prompt builders, but small scanner-policy helpers inject specialist-focus instructions instead of duplicating whole prompt families
@@ -233,20 +248,35 @@ same brand are filtered out before chunking, so repeat results do not trigger ne
 
 See `REVIEW.md` for full prompt text and AI analysis pipeline details.
 
+### Discord Analysis Shape
+
+Discord server results arrive as public community-discovery records. The webhook normalizes them
+into compact joinable-server candidates, drops records without `vanity_url_code`, dedupes by
+Discord server `id`, and classifies those candidates in bounded chunks. Discord findings store a
+compact normalized debug payload (`kind: 'discord-normalized'`) with server metadata, run-level
+context, and the derived invite URL rather than the full raw actor response.
+
 ### Deep search (`suggestedSearches`)
 
 When any logical Google scanner runs at depth 0 (initial scan), the webhook collects the full
 deduped run-level `relatedQueries` and `peopleAlsoAsk` text signals from every SERP page.
 Chunked Google classification assesses candidates only; it does not propose deep-search queries.
 The final deep-search chooser then sees that run-level intent context directly and synthesizes up
-to the brand's configured `maxAiDeepSearches` follow-up queries (1-10). In the current
-Google-backed pipeline, these are follow-up Google queries. Deep-search
-prompts treat that configured count as a hard cap rather than a target, and steer the model
-towards broader theme-led queries instead of narrow named websites, platforms, resources, books,
-or tools unless a named target is itself the key abuse vector. Specialist scanners additionally
-receive platform-specific focus guidance, while query execution still applies the actual `site:`
-/ `-site:` operators outside the user-visible UI. Deep search is only enabled when the brand's
-`allowAiDeepSearches` setting is true.
+to the brand's configured `maxAiDeepSearches` follow-up queries (1-10). Google prompts treat that
+configured count as a hard cap rather than a target, and steer the model towards broader
+theme-led queries instead of narrow named websites, platforms, resources, books, or tools unless
+a named target is itself the key abuse vector. Specialist scanners additionally receive
+platform-specific focus guidance, while query execution still applies the actual `site:` /
+`-site:` operators outside the user-visible UI.
+
+When `discord-servers` runs at depth 0, the webhook collects the deduped run-level server names,
+keywords, categories, and locales surfaced by the Discord actor. Chunked Discord classification
+assesses candidates only; it does not propose deep-search queries. The final Discord deep-search
+chooser then synthesizes follow-up Discord server discovery keywords from that metadata. Discord
+deep-search suggestions are stored and executed through the same `startDeepSearchRun()` path, but
+they submit actor `keywords[]` rather than Google query strings.
+
+Deep search is only enabled when the brand's `allowAiDeepSearches` setting is true.
 
 The webhook handler calls `startDeepSearchRun()` for each suggested query, registers the new
 Apify run IDs on the scan document, and processes results via the same webhook pipeline at
@@ -261,9 +291,9 @@ setting, which defaults to 3 and is constrained to 1-10.
 
 `ActorRunInfo` now carries `scannerId`, `searchDepth`, raw `searchQuery`, and operator-free
 `displayQuery`. The brand page progress indicator groups active work by source (`Web search`,
-`Reddit`, `TikTok`, `YouTube`, `Facebook`, `Instagram`), lets the user switch between those
-source-specific progress bars, and only ever surfaces `displayQuery` so internal `site:` /
-`-site:` operators are never shown to users.
+`Reddit`, `TikTok`, `YouTube`, `Facebook`, `Instagram`, `Discord servers`), lets the user switch
+between those source-specific progress bars, and only ever surfaces `displayQuery` so internal
+Google `site:` / `-site:` operators are never shown to users.
 
 ---
 
@@ -421,9 +451,9 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, **sessionVersion?**, **passwordChangedAt?**, **dashboardPreferences?** (`selectedBrandId?`), createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `discord`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`scannerId`, `source`, `status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`, `displayQuery?`, `deepSearchSuggestionsProcessed?`, `suggestedSearches?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
+| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`discord`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 
 ---
 

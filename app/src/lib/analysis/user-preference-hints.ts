@@ -32,7 +32,8 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
     "tiktok": ["Optional short source-specific hint"],
     "youtube": ["Optional short source-specific hint"],
     "facebook": ["Optional short source-specific hint"],
-    "instagram": ["Optional short source-specific hint"]
+    "instagram": ["Optional short source-specific hint"],
+    "discord": ["Optional short source-specific hint"]
   }
 }
 

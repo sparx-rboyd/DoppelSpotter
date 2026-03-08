@@ -1,28 +1,30 @@
 import {
-  getEnabledGoogleScannerConfigs,
-  getGoogleScannerConfigById,
+  getEnabledScannerConfigs,
+  getScannerConfigById,
   GOOGLE_SEARCH_ACTOR_ID,
-  type GoogleScannerConfig,
+  DISCORD_SERVER_SCRAPER_ACTOR_ID,
+  type ScannerConfig,
 } from '@/lib/scan-sources';
-import type { BrandProfile, GoogleScannerId } from '@/lib/types';
+import type { BrandProfile, ScannerId } from '@/lib/types';
 
-export type ActorConfig = GoogleScannerConfig;
+export type ActorConfig = ScannerConfig;
 
-export const CORE_SCANNER_IDS: GoogleScannerId[] = [
+export const CORE_SCANNER_IDS: ScannerId[] = [
   'google-web',
   'google-reddit',
   'google-tiktok',
   'google-youtube',
   'google-facebook',
   'google-instagram',
+  'discord-servers',
 ];
 
-export function getActorConfigByScannerId(scannerId: GoogleScannerId): ActorConfig {
-  return getGoogleScannerConfigById(scannerId);
+export function getActorConfigByScannerId(scannerId: ScannerId): ActorConfig {
+  return getScannerConfigById(scannerId);
 }
 
 export function getTargetActorConfigs(brand: BrandProfile): ActorConfig[] {
-  return getEnabledGoogleScannerConfigs(brand.scanSources);
+  return getEnabledScannerConfigs(brand.scanSources);
 }
 
-export { GOOGLE_SEARCH_ACTOR_ID };
+export { DISCORD_SERVER_SCRAPER_ACTOR_ID, GOOGLE_SEARCH_ACTOR_ID };
