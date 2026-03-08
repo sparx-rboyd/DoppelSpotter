@@ -1,6 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
+import {
+  drainBrandDeletion,
+  drainBrandHistoryDeletion,
+  drainScanDeletion,
+  isBrandDeletionActive,
+  isBrandHistoryDeletionActive,
+  loadDeletingScanIdsForBrand,
+} from '@/lib/async-deletions';
 import type { BrandProfile } from '@/lib/types';
 import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
 
@@ -17,12 +25,34 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const brandDoc = await db.collection('brands').doc(brandId).get();
   if (!brandDoc.exists) return errorResponse('Brand not found', 404);
-  if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
+  const brand = brandDoc.data() as BrandProfile;
+  if (brand.userId !== uid) return errorResponse('Forbidden', 403);
+  if (isBrandDeletionActive(brand)) {
+    void drainBrandDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return errorResponse('Brand not found', 404);
+  }
+  if (isBrandHistoryDeletionActive(brand)) {
+    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return NextResponse.json({ data: { themes: [] } });
+  }
+
+  const deletingScanIds = await loadDeletingScanIdsForBrand({ brandId, userId: uid });
+  const firstDeletingScanId = deletingScanIds[0];
+  if (firstDeletingScanId) {
+    void drainScanDeletion({ brandId, scanId: firstDeletingScanId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+  }
 
   const taxonomy = await loadBrandFindingTaxonomy({
     brandId,
     userId: uid,
     excludeScanId,
+    excludeScanIds: deletingScanIds,
   });
 
   return NextResponse.json({ data: taxonomy });

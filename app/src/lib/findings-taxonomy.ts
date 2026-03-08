@@ -57,8 +57,10 @@ export async function loadBrandFindingTaxonomy(params: {
   brandId: string;
   userId: string;
   excludeScanId?: string;
+  excludeScanIds?: Iterable<string>;
 }): Promise<FindingTaxonomyOptions> {
-  const { brandId, userId, excludeScanId } = params;
+  const { brandId, userId, excludeScanId, excludeScanIds } = params;
+  const excludedScanIds = new Set(excludeScanIds);
 
   const snapshot = await db
     .collection('findings')
@@ -67,8 +69,8 @@ export async function loadBrandFindingTaxonomy(params: {
     .select('scanId', 'theme')
     .get();
   const docs = excludeScanId
-    ? snapshot.docs.filter((doc) => doc.get('scanId') !== excludeScanId)
-    : snapshot.docs;
+    ? snapshot.docs.filter((doc) => doc.get('scanId') !== excludeScanId && !excludedScanIds.has(doc.get('scanId')))
+    : snapshot.docs.filter((doc) => !excludedScanIds.has(doc.get('scanId')));
 
   return {
     themes: dedupeFindingTaxonomyLabels(docs.map((doc) => doc.get('theme'))),

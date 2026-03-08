@@ -1,6 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
+import {
+  drainBrandDeletion,
+  drainBrandHistoryDeletion,
+  drainScanDeletion,
+  isBrandDeletionActive,
+  isBrandHistoryDeletionActive,
+  isScanDeletionActive,
+} from '@/lib/async-deletions';
 import type { BrandProfile, Scan, ScanSummary, ScanStatus } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
@@ -19,7 +27,20 @@ export async function GET(request: NextRequest, { params }: Params) {
   // Verify brand ownership
   const brandDoc = await db.collection('brands').doc(brandId).get();
   if (!brandDoc.exists) return errorResponse('Brand not found', 404);
-  if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
+  const brand = brandDoc.data() as BrandProfile;
+  if (brand.userId !== uid) return errorResponse('Forbidden', 403);
+  if (isBrandDeletionActive(brand)) {
+    void drainBrandDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return errorResponse('Brand not found', 404);
+  }
+  if (isBrandHistoryDeletionActive(brand)) {
+    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return NextResponse.json({ data: [] as ScanSummary[] });
+  }
 
   // Fetch all terminal scans for the brand, newest first
   const scansSnap = await db
@@ -34,12 +55,19 @@ export async function GET(request: NextRequest, { params }: Params) {
     id: doc.id,
     ...(doc.data() as Omit<Scan, 'id'>),
   }));
+  const deletingScan = allScans.find((scan) => isScanDeletionActive(scan));
+  if (deletingScan) {
+    void drainScanDeletion({ brandId, scanId: deletingScan.id, userId: uid }).catch(() => {
+      // Non-critical
+    });
+  }
 
   const terminalScans = allScans.filter((s) => TERMINAL_STATUSES.includes(s.status));
+  const visibleTerminalScans = terminalScans.filter((scan) => !isScanDeletionActive(scan));
 
   // Use denormalized counts stored on each scan document. The `?? 0` fallback
   // handles scans created before the backfill script ran.
-  const summaries: ScanSummary[] = terminalScans.map((scan) => ({
+  const summaries: ScanSummary[] = visibleTerminalScans.map((scan) => ({
     id: scan.id,
     status: scan.status,
     startedAt: scan.startedAt,

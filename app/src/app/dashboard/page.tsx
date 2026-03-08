@@ -348,7 +348,7 @@ export default function DashboardPage() {
               )}
 
               {!metricsLoading && metrics && !metrics.hasTerminalScans && (
-                metrics.activeScan ? (
+                selectedBrand.isHistoryDeletionInProgress ? null : metrics.activeScan ? (
                   <DashboardCtaCard
                     eyebrow="First scan in progress"
                     title="Your first scan is underway"

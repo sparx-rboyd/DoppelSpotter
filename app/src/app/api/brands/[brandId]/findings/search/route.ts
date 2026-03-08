@@ -2,8 +2,16 @@ import { Buffer } from 'node:buffer';
 import { FieldPath, Timestamp, type Query } from '@google-cloud/firestore';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
-import { requireAuth } from '@/lib/api-utils';
-import type { FindingCategory, FindingSource, FindingSummary, ScanStatus } from '@/lib/types';
+import { errorResponse, requireAuth } from '@/lib/api-utils';
+import {
+  drainBrandDeletion,
+  drainBrandHistoryDeletion,
+  drainScanDeletion,
+  isBrandDeletionActive,
+  isBrandHistoryDeletionActive,
+  loadDeletingScanIdsForBrand,
+} from '@/lib/async-deletions';
+import type { BrandProfile, FindingCategory, FindingSource, FindingSummary, ScanStatus } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
 
@@ -51,6 +59,7 @@ function parseSearchSource(value?: string | null): FindingSource | null {
     || value === 'youtube'
     || value === 'facebook'
     || value === 'instagram'
+    || value === 'telegram'
     || value === 'discord'
     || value === 'github'
     || value === 'x'
@@ -187,6 +196,56 @@ export async function GET(request: NextRequest, { params }: Params) {
   const resultLimit = parseResultLimit(request.nextUrl.searchParams.get('limit'));
   const parsedCursor = decodeCursor(request.nextUrl.searchParams.get('cursor'));
 
+  const brandDoc = await db.collection('brands').doc(brandId).get();
+  if (!brandDoc.exists) return errorResponse('Brand not found', 404);
+
+  const brand = brandDoc.data() as BrandProfile;
+  if (brand.userId !== uid) return errorResponse('Forbidden', 403);
+  if (isBrandDeletionActive(brand)) {
+    void drainBrandDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return NextResponse.json({
+      data: {
+        results: [] as FindingSearchResult[],
+        nextCursor: null,
+        hasMore: false,
+        truncated: false,
+      },
+    });
+  }
+  if (isBrandHistoryDeletionActive(brand)) {
+    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return NextResponse.json({
+      data: {
+        results: [] as FindingSearchResult[],
+        nextCursor: null,
+        hasMore: false,
+        truncated: false,
+      },
+    });
+  }
+
+  const deletingScanIds = new Set(await loadDeletingScanIdsForBrand({ brandId, userId: uid }));
+  const firstDeletingScanId = deletingScanIds.values().next().value as string | undefined;
+  if (firstDeletingScanId) {
+    void drainScanDeletion({ brandId, scanId: firstDeletingScanId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+  }
+  if (scanId && deletingScanIds.has(scanId)) {
+    return NextResponse.json({
+      data: {
+        results: [] as FindingSearchResult[],
+        nextCursor: null,
+        hasMore: false,
+        truncated: false,
+      },
+    });
+  }
+
   if (normalizedQuery.length < MIN_SEARCH_QUERY_LENGTH) {
     return NextResponse.json({
       data: {
@@ -264,7 +323,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       };
       scannedFindings++;
 
-      if (matchesSearchFilters(finding, { normalizedQuery, category, source, normalizedTheme })) {
+      if (!deletingScanIds.has(finding.scanId) && matchesSearchFilters(finding, { normalizedQuery, category, source, normalizedTheme })) {
         collectedMatches.push(finding);
         collectedMatchCursors.push(lastScannedCursor);
         if (collectedMatches.length >= resultLimit + 1) {

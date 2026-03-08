@@ -2,6 +2,14 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { errorResponse, requireAuth } from '@/lib/api-utils';
 import {
+  drainBrandDeletion,
+  drainBrandHistoryDeletion,
+  drainScanDeletion,
+  isBrandDeletionActive,
+  isBrandHistoryDeletionActive,
+  isScanDeletionActive,
+} from '@/lib/async-deletions';
+import {
   buildDashboardBreakdownRows,
   buildDashboardMetricTotalsFromScans,
   buildDashboardSourceBreakdownRows,
@@ -33,6 +41,18 @@ export async function GET(request: NextRequest) {
 
   const brand = brandDoc.data() as BrandProfile;
   if (brand.userId !== uid) return errorResponse('Forbidden', 403);
+  if (isBrandDeletionActive(brand)) {
+    void drainBrandDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return errorResponse('Brand not found', 404);
+  }
+  if (isBrandHistoryDeletionActive(brand)) {
+    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+  }
+  const historyDeletionInProgress = isBrandHistoryDeletionActive(brand);
 
   const scansSnap = await db
     .collection('scans')
@@ -58,8 +78,15 @@ export async function GET(request: NextRequest) {
     id: doc.id,
     ...(doc.data() as Omit<Scan, 'id'>),
   }));
+  const deletingScan = allScans.find((scan) => isScanDeletionActive(scan));
+  if (deletingScan) {
+    void drainScanDeletion({ brandId, scanId: deletingScan.id, userId: uid }).catch(() => {
+      // Non-critical
+    });
+  }
 
-  const terminalScans: ScanSummary[] = allScans
+  const terminalScans: ScanSummary[] = (historyDeletionInProgress ? [] : allScans)
+    .filter((scan) => !isScanDeletionActive(scan))
     .filter((scan) => TERMINAL_DASHBOARD_SCAN_STATUSES.includes(scan.status))
     .map((scan) => ({
       id: scan.id,
@@ -106,7 +133,7 @@ export async function GET(request: NextRequest) {
   const terminalScanIds = new Set(terminalScans.map((scan) => scan.id));
   let findingsForBreakdown: Array<Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'source' | 'theme'>> = [];
 
-  if (selectedScans.length > 0) {
+  if (!historyDeletionInProgress && selectedScans.length > 0) {
     let findingsQuery = db
       .collection('findings')
       .where('brandId', '==', brandId)

@@ -31,7 +31,6 @@ const POLL_INTERVAL_MS = 5_000;
 const ACTIVE_SCAN_IDLE_POLL_INTERVAL_MS = 20_000;
 const ACTIVE_SCAN_DELETE_TOOLTIP =
   "Scan history can't be changed while a scan is running because current results are compared against previous findings.";
-const CLEARING_HISTORY_DELETE_TOOLTIP = 'Please wait while scan history is being deleted.';
 const SCAN_RESULT_SET_HASH_PREFIX = 'scan-result-set-';
 const OTHER_FINDING_TAXONOMY_KEY = 'other';
 const DRILLDOWN_CATEGORY_QUERY_PARAM = 'category';
@@ -42,6 +41,11 @@ const RETURN_TO_DASHBOARD_VALUE = 'dashboard';
 const FINDING_SEARCH_MIN_QUERY_LENGTH = 2;
 const FINDING_SEARCH_DEBOUNCE_MS = 250;
 const FINDING_SEARCH_RESULTS_PAGE_SIZE = 50;
+
+function hasActiveHistoryDeletion(brand?: Pick<BrandProfile, 'historyDeletion'> | null) {
+  const status = brand?.historyDeletion?.status;
+  return status === 'queued' || status === 'running';
+}
 
 type BookmarkUpdate = {
   isBookmarked?: boolean;
@@ -1973,6 +1977,9 @@ export default function BrandDetailPage() {
       setFindingTaxonomyOptions({ themes: [] });
       setExpandedScanIds([]);
       setActiveScan(null);
+      await refreshBrandProfile().catch(() => {
+        // Non-critical
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to clear history');
     } finally {
@@ -2146,7 +2153,7 @@ export default function BrandDetailPage() {
     if (isDeepSearchActive) {
       return runStatus === 'waiting_for_preference_hints'
         ? 'Preparing analysis context'
-        : (source === 'discord' ? 'Investigating related server searches' : 'Investigating related queries');
+        : 'Investigating related queries';
     }
 
     switch (runStatus) {
@@ -2406,6 +2413,7 @@ export default function BrandDetailPage() {
   const totalIgnored = scans.reduce((sum, s) => sum + (s.ignoredCount ?? 0), 0);
   const totalSkipped = scans.reduce((sum, s) => sum + (s.skippedCount ?? 0), 0);
   const totalResultsCount = totalFindings + totalNonHits + totalAddressed + totalIgnored + totalSkipped;
+  const historyDeletionInProgress = hasActiveHistoryDeletion(brand);
   const requiresClearHistoryConfirmation = totalResultsCount > 0;
   const isAwaitingClearHistoryConfirmation = confirmClear && requiresClearHistoryConfirmation;
   const activeFindingsFilterLabel = isFindingsSearchActive && (hasActiveFindingSourceFilter || hasActiveFindingThemeFilter || hasActiveFindingCategoryFilter)
@@ -2459,11 +2467,7 @@ export default function BrandDetailPage() {
     || visibleLiveScanNonHits.length > 0
     || scansToRender.length > 0
   );
-  const clearHistoryDisabledReason = scanning
-    ? ACTIVE_SCAN_DELETE_TOOLTIP
-    : clearing
-      ? CLEARING_HISTORY_DELETE_TOOLTIP
-      : null;
+  const clearHistoryDisabledReason = scanning ? ACTIVE_SCAN_DELETE_TOOLTIP : null;
   const showClearHistoryAction = activeTab === 'scans' && scans.length > 0 && !isAwaitingClearHistoryConfirmation;
 
   // ---------------------------------------------------------------------------
@@ -2593,7 +2597,7 @@ export default function BrandDetailPage() {
                         size="sm"
                         onClick={triggerScan}
                         loading={scanning}
-                        disabled={scanning || clearing || isAwaitingClearHistoryConfirmation}
+                        disabled={scanning || clearing || historyDeletionInProgress || isAwaitingClearHistoryConfirmation}
                         className="border-white/15 bg-white !text-brand-700 hover:border-white/30 hover:bg-brand-50 disabled:hover:bg-white"
                       >
                         <Play className="w-4 h-4" />
@@ -3328,9 +3332,7 @@ export default function BrandDetailPage() {
                               : (scan.ignoredCount ?? 0);
                             const deleteDisabledReason = scanning
                               ? ACTIVE_SCAN_DELETE_TOOLTIP
-                              : clearing
-                                ? CLEARING_HISTORY_DELETE_TOOLTIP
-                                : null;
+                              : null;
 
                             return (
                               <div

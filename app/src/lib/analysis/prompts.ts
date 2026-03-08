@@ -1,6 +1,6 @@
 import type { FindingSource, Severity, UserPreferenceHints } from '@/lib/types';
 import { MAX_FINDING_TAXONOMY_WORDS } from '@/lib/findings-taxonomy';
-import type { GoogleScannerConfig, ScannerConfig } from '@/lib/scan-sources';
+import type { GoogleScannerConfig } from '@/lib/scan-sources';
 import {
   buildGoogleClassificationSurfaceLine,
   buildGoogleDeepSearchSystemPolicy,
@@ -301,33 +301,6 @@ For example:
 | **\`#\`** | Searches for a specific hashtag across social platforms and websites. | \`#throwbackthursday\` |
 
 `;
-}
-
-export function buildDiscordFinalSelectionSystemPrompt(
-  maxSuggestedSearches: number,
-  scanner: ScannerConfig,
-): string {
-  return `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
-
-You will receive metadata about a brand, the Discord server search terms already used, and patterns observed in the public Discord servers returned so far.
-
-Your task is to identify up to ${maxSuggestedSearches} follow-up Discord server discovery keyword searches that are likely to surface further evidence of potential brand misuse.
-
-You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
-{
-  "suggestedSearches": ["query 1", "query 2"]
-}
-
-Rules:
-- "suggestedSearches" is optional. Omit it entirely if no follow-up searches are warranted.
-- Suggest at most ${maxSuggestedSearches} follow-up Discord server search keywords or short phrases.
-- Quality over quantity: return fewer than ${maxSuggestedSearches} queries when only a small number of genuinely useful follow-ups are warranted.
-- Prefer coverage across distinct abuse themes rather than near-duplicate query variants.
-- Do NOT suggest the original search terms again or obvious paraphrases of them.
-- Do NOT suggest clearly legitimate or generic navigational searches.
-- Prefer short Discord-ready keywords or short phrases, not full sentences.
-- Keep every suggestion grounded in the provided evidence and metadata.
-- This pass is specifically for ${scanner.displayName}.`;
 }
 
 /**
@@ -663,54 +636,6 @@ People Also Ask queries returned by Google for the above search:
 ${runContext.peopleAlsoAsk.length > 0 ? runContext.peopleAlsoAsk.map((question) => `- ${question}`).join('\n') : '- none'}
 
 Maximum number of follow-up Google searches you may suggest:
-- ${maxSuggestedSearches}`;
-}
-
-export function buildDiscordFinalSelectionPrompt(params: {
-  brandName: string;
-  keywords: string[];
-  watchWords?: string[];
-  safeWords?: string[];
-  runContext: DiscordRunContext;
-  maxSuggestedSearches: number;
-}): string {
-  const {
-    brandName,
-    keywords,
-    watchWords,
-    safeWords,
-    runContext,
-    maxSuggestedSearches,
-  } = params;
-
-  const watchWordsLine = watchWords && watchWords.length > 0
-    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand; you can use slices or combinations of these in your suggested queries as you see appropriate): ${watchWords.join(', ')}`
-    : null;
-
-  const safeWordsLine = safeWords && safeWords.length > 0
-    ? `Safe words (terms the brand owner is comfortable being associated with; use these to avoid over-focusing on clearly benign communities): ${safeWords.join(', ')}`
-    : null;
-
-  return `Brand being protected: "${brandName}"
-
-Brand keywords (keywords that the brand owner wants to monitor and protect; you can use slices or combinations of these in your suggested queries as you see appropriate): ${keywords.length > 0 ? keywords.join(', ') : 'none'}
-
-${watchWordsLine ? `${watchWordsLine}\n\n` : ''}${safeWordsLine ? `${safeWordsLine}\n\n` : ''}Original Discord server search terms:
-${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.map((query) => `- ${query}`).join('\n') : '- none'}
-
-Observed server names:
-${runContext.sampleServerNames.length > 0 ? runContext.sampleServerNames.map((name) => `- ${name}`).join('\n') : '- none'}
-
-Observed Discord server keywords:
-${runContext.observedKeywords.length > 0 ? runContext.observedKeywords.map((value) => `- ${value}`).join('\n') : '- none'}
-
-Observed Discord categories:
-${runContext.observedCategories.length > 0 ? runContext.observedCategories.map((value) => `- ${value}`).join('\n') : '- none'}
-
-Observed locales:
-${runContext.observedLocales.length > 0 ? runContext.observedLocales.map((value) => `- ${value}`).join('\n') : '- none'}
-
-Maximum number of follow-up Discord server searches you may suggest:
 - ${maxSuggestedSearches}`;
 }
 

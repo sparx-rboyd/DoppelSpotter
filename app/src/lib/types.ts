@@ -56,9 +56,25 @@ export interface BrandScanSources {
   youtube: boolean;
   facebook: boolean;
   instagram: boolean;
+  telegram: boolean;
   discord: boolean;
   github: boolean;
   x: boolean;
+}
+
+export type AsyncDeletionStatus = 'queued' | 'running';
+
+export interface AsyncDeletionState {
+  /** Whether deletion work is waiting to run or currently being processed. */
+  status: AsyncDeletionStatus;
+  /** When the deletion was first requested. */
+  requestedAt: Timestamp;
+  /** When a worker first started processing this deletion. */
+  startedAt?: Timestamp;
+  /** Most recent time a worker claimed or refreshed this deletion. */
+  lastHeartbeatAt?: Timestamp;
+  /** Lease expiry used to avoid duplicate workers processing the same deletion. */
+  leaseExpiresAt?: Timestamp;
 }
 
 // ─── Brand Profile ─────────────────────────────────────────────────────────
@@ -73,9 +89,9 @@ export interface BrandProfile {
   searchResultPages?: number;
   /** Whether completed scans should send a summary email to the brand owner's account email. */
   sendScanSummaryEmails?: boolean;
-  /** Whether AI analysis may trigger follow-up deep-search runs for this brand. */
+  /** Whether AI analysis may trigger follow-up deep-search runs for supported Google-backed scans for this brand. */
   allowAiDeepSearches?: boolean;
-  /** User-configured deep search breadth (1-5) limiting AI-requested follow-up searches. */
+  /** User-configured deep search breadth (1-5) limiting AI-requested follow-up searches on supported Google-backed scans. */
   maxAiDeepSearches?: number;
   /** Which scan surfaces are enabled for this brand. */
   scanSources?: BrandScanSources;
@@ -87,6 +103,10 @@ export interface BrandProfile {
   safeWords?: string[];
   /** Optional recurring schedule for automatic scans. */
   scanSchedule?: BrandScanSchedule;
+  /** Async clear-history job state for this brand, if findings/scans are being purged. */
+  historyDeletion?: AsyncDeletionState;
+  /** Async brand deletion job state, if this brand is being removed entirely. */
+  brandDeletion?: AsyncDeletionState;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -126,6 +146,7 @@ export interface BrandSummary {
   findingCount: number;
   nonHitCount: number;
   isScanInProgress: boolean;
+  isHistoryDeletionInProgress: boolean;
   lastScanStartedAt?: Timestamp;
   scanSchedule?: Pick<BrandScanSchedule, 'enabled' | 'timeZone' | 'nextRunAt'>;
   createdAt: Timestamp;
@@ -157,6 +178,7 @@ export type FindingSource =
   | 'youtube'
   | 'facebook'
   | 'instagram'
+  | 'telegram'
   | 'discord'
   | 'github'
   | 'x'
@@ -225,6 +247,7 @@ export type ScannerId =
   | 'google-youtube'
   | 'google-facebook'
   | 'google-instagram'
+  | 'google-telegram'
   | 'discord-servers'
   | 'github-repos'
   | 'x-search';
@@ -237,6 +260,7 @@ export type GoogleScannerId = Extract<
   | 'google-youtube'
   | 'google-facebook'
   | 'google-instagram'
+  | 'google-telegram'
 >;
 
 export type ActorRunStatus =
@@ -290,6 +314,8 @@ export interface Scan {
   brandId: string;
   userId: string;
   status: ScanStatus;
+  /** Async deletion job state, if this scan and its findings are being removed. */
+  deletion?: AsyncDeletionState;
   /** The underlying Apify actor IDs started for this scan. */
   actorIds: string[];
   /** Flat array of Apify run IDs — used for Firestore array-contains queries in the webhook handler */

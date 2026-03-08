@@ -117,7 +117,7 @@ export async function startActorRun(
 }
 
 /**
- * Start a source-specific deep-search actor run for a custom follow-up query.
+ * Start a deep-search actor run for a supported custom follow-up query.
  */
 export async function startDeepSearchRun(
   params: {
@@ -152,12 +152,7 @@ export async function startDeepSearchRun(
     ],
   };
 
-  if (actor.kind === 'discord') {
-    runInput = { keywords: normalizeSearchTerms([trimmedQuery]) };
-    executableQuery = trimmedQuery;
-    displayQuery = trimmedQuery;
-    startOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(searchResultPages);
-  } else if (actor.kind === 'google') {
+  if (actor.kind === 'google') {
     executableQuery = buildGoogleScannerQuery(actor.source, trimmedQuery);
     runInput = {
       queries: executableQuery,

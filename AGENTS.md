@@ -66,7 +66,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 
 ## Actor Registry
 
-The scan pipeline now has nine logical scanner variants backed by four physical Apify actors:
+The scan pipeline now has ten logical scanner variants backed by four physical Apify actors:
 
 - `google-web` → normal web search
 - `google-reddit` → Google Search constrained to `site:reddit.com`
@@ -74,11 +74,12 @@ The scan pipeline now has nine logical scanner variants backed by four physical 
 - `google-youtube` → Google Search constrained to `site:youtube.com`
 - `google-facebook` → Google Search constrained to `site:facebook.com`
 - `google-instagram` → Google Search constrained to `site:instagram.com`
+- `google-telegram` → Google Search constrained to `site:t.me`
 - `discord-servers` → public Discord server discovery via the Apify Discord actor
 - `github-repos` → public GitHub repository discovery via the Apify GitHub repo-search actor
 - `x-search` → public X post discovery via the Apify tweet-search actor
 
-The six Google logical scanners all reuse the same physical Apify actor
+The seven Google logical scanners all reuse the same physical Apify actor
 `apify/google-search-scraper`. `discord-servers` uses
 `louisdeconinck/discord-server-scraper`, `github-repos` uses
 `ryanclinton/github-repo-search`, and `x-search` uses `apidojo/tweet-scraper`.
@@ -86,9 +87,9 @@ The six Google logical scanners all reuse the same physical Apify actor
 `actorId`.
 
 The generic web scanner automatically appends `-site:` exclusions for every specialist scanner
-domain (`reddit.com`, `tiktok.com`, `youtube.com`, `facebook.com`, `instagram.com`) even when
-those specialist scans are disabled on the brand, so the main web search and its deep-search
-follow-ups never surface those platform-specific results. Specialist scanners apply
+domain (`reddit.com`, `tiktok.com`, `youtube.com`, `facebook.com`, `instagram.com`, `t.me`) even
+when those specialist scans are disabled on the brand, so the main web search and its
+deep-search follow-ups never surface those platform-specific results. Specialist scanners apply
 platform-specific query scoping, while source identity lives on the finding itself and the only
 remaining lightweight taxonomy label is `theme`.
 
@@ -118,9 +119,9 @@ support deep-search follow-up runs.
 Brand add/edit pages
  └─ persist `brands.sendScanSummaryEmails` to opt the brand into post-scan summary emails
  └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Discord maps it to an Apify spend cap (`$0.20..$0.60` per run), GitHub maps it to requested repo volume (`50..250`), and X maps it to requested tweet volume (`50..250`)
- └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches
- └─ persist `brands.maxAiDeepSearches` as the user-facing `Deep search breadth` setting; it caps AI-requested follow-up searches from 1-5
- └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|discord|github|x` so each scan surface can be enabled or disabled per brand
+ └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches on supported Google-backed scan types
+ └─ persist `brands.maxAiDeepSearches` as the user-facing `Google deep search breadth` setting; it caps AI-requested follow-up searches from 1-5 on supported Google-backed scan types
+ └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|telegram|discord|github|x` so each scan surface can be enabled or disabled per brand
  └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
  └─ scheduling is anchored from the chosen local start date/time and stored timezone
 
@@ -134,11 +135,12 @@ POST /api/internal/scheduled-scans/dispatch
 
 POST /api/scan
  └─ verifies ownership, then delegates to the shared scan runner
+ └─ refuses to start while `brands.historyDeletion` or `brands.brandDeletion` is active
  └─ checks `brands.activeScanId` inside a Firestore transaction
  └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
- └─ resolves the brand's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `discord-servers`, `github-repos`, `x-search`)
+ └─ resolves the brand's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `discord-servers`, `github-repos`, `x-search`)
  └─ maps `brands.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Discord maps the same setting to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to `maxResults = 50..250`; X maps it to `maxItems = 50..250`
  └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
  └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
@@ -159,6 +161,8 @@ GET /api/brands/[brandId]/active-scan
 
 GET /api/brands/[brandId]/scans
  └─ returns all terminal scans (completed|cancelled|failed) ordered newest-first
+ └─ hides scans with async `scans.deletion` state so deleted scans stay invisible across reloads while Firestore cleanup continues
+ └─ returns `[]` while `brands.historyDeletion` is active
  └─ returns denormalized per-scan counts (high/medium/low/nonHit/ignored/skipped) plus `aiSummary` from the scan document
  └─ returns ScanSummary[] — lightweight shape used by the brand page to render per-scan result sets
 
@@ -175,21 +179,30 @@ GET /api/brands/[brandId]/scans/[scanId]/export/pdf
 
 DELETE /api/brands/[brandId]/scans/[scanId]
  └─ verifies ownership; returns 409 if scan is pending/running
- └─ batch-deletes all findings for the scan, then deletes the scan doc
+ └─ marks `scans.deletion = { status: 'queued', ... }`, returns 202 immediately, and drains the delete in Firestore-sized chunks
+ └─ list/search/taxonomy routes hide that scan while background cleanup is still deleting findings/documents
 
 DELETE /api/brands/[brandId]
  └─ verifies ownership
  └─ returns 409 if any scan for the brand is still pending/running/summarising
- └─ batch-deletes all findings and scans for the brand before deleting the brand doc
+ └─ marks `brands.brandDeletion = { status: 'queued', ... }`, returns 202 immediately, and drains findings/scans/brand deletion in chunks
+ └─ brand list + dashboard bootstrap hide deleting brands immediately so they do not reappear on reload
 
 GET /api/brands/[brandId]/findings?scanId=xxx
  └─ optional scanId param filters findings to a single scan (used for lazy loading in the UI)
+ └─ returns `[]` while `brands.historyDeletion` is active and filters out findings that belong to scans with `scans.deletion`
+
+DELETE /api/brands/[brandId]/findings
+ └─ verifies ownership; returns 409 if any scan for the brand is still pending/running/summarising
+ └─ marks `brands.historyDeletion = { status: 'queued', ... }`, returns 202 immediately, and drains findings/scans deletion in chunks
+ └─ brand detail, brand list, and dashboard surfaces treat the brand as empty while that history purge is still in progress
 
 GET /api/brands/[brandId]/findings/search?q=...
  └─ authenticated brand-scoped text search over lightweight finding summaries used by the brand page when the search box is non-empty
  └─ accepts optional `scanId`, `category`, `source`, `theme`, `limit`, and `cursor`
  └─ applies exact Firestore filters first where available, then server-side substring matching on `title`, `url`, and `llmAnalysis`
  └─ returns flat paginated matches annotated with `displayBucket` (`hit` | `non-hit` | `ignored` | `addressed`) plus scan-level context (`scanStartedAt`, `scanStatus`)
+ └─ excludes matches from scans that are currently being deleted
  └─ includes cursor pagination and a scan-budget cap so very broad queries degrade gracefully instead of freezing the browser
 
 Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
@@ -213,7 +226,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ dedupes repeated server ids within the run before analysis
       └─ skips Discord server ids that already appeared in previous scans for the same brand before any LLM analysis
       └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
-      └─ final deep-search selection sees the run-level observed Discord names, categories, keywords, and locales, then synthesizes follow-up Discord discovery keywords
+      └─ does not run deep-search suggestion generation or follow-up runs
  └─ GitHub mode: normalize public repository-search records into compact repository candidates
       └─ derives `https://github.com/<fullName>` as the stored/displayed URL
       └─ dedupes repeated repository `fullName` values within the run before analysis
@@ -233,7 +246,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ isFalsePositive: true findings are stored but excluded from default API responses
  └─ normalized Google URLs that already appeared in previous scans for the same brand are filtered out before AI analysis, so historical repeats never reach the classifier
  └─ a separate scan-level `userPreferenceHints` summary is still passed into classification prompts as soft guidance only; it is derived from explicit user ignore / reclassification signals and must not override clear evidence
- └─ (batch mode, depth 0 only) if ranked chunk/fallback suggestions are present and the brand allows deep search → triggers deep-search runs
+ └─ (batch mode, depth 0 only) if ranked chunk/fallback suggestions are present on a supported Google-backed run and the brand allows deep search → triggers deep-search runs
       └─ suggestions are reserved on the originating run so duplicate callbacks do not fan out extra searches
       └─ each deep-search run inherits the parent scanner policy, is registered on the scan document (actorRunIds, actorRuns), and preserves raw vs display query text separately
       └─ each deep-search Google run uses the same `brands.searchResultPages` setting as the initial search
@@ -258,7 +271,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **File:** `app/src/lib/analysis/`
 - **When:** After each Apify actor run completes, inside the webhook handler
 - **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
-- **Prompts:** `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `DISCORD_CLASSIFICATION_SYSTEM_PROMPT` + `buildDiscordChunkAnalysisPrompt()` for chunked Discord server classification; `GITHUB_CLASSIFICATION_SYSTEM_PROMPT` + `buildGitHubChunkAnalysisPrompt()` for chunked GitHub repository classification; `X_CLASSIFICATION_SYSTEM_PROMPT` + `buildXChunkAnalysisPrompt()` for chunked X post classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for Google deep-search selection; `buildDiscordFinalSelectionSystemPrompt()` + `buildDiscordFinalSelectionPrompt()` for Discord deep-search selection; `SCAN_SUMMARY_SYSTEM_PROMPT` + `buildScanSummaryPrompt()` for the final scan summary
+- **Prompts:** `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `DISCORD_CLASSIFICATION_SYSTEM_PROMPT` + `buildDiscordChunkAnalysisPrompt()` for chunked Discord server classification; `GITHUB_CLASSIFICATION_SYSTEM_PROMPT` + `buildGitHubChunkAnalysisPrompt()` for chunked GitHub repository classification; `X_CLASSIFICATION_SYSTEM_PROMPT` + `buildXChunkAnalysisPrompt()` for chunked X post classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for Google deep-search selection; `SCAN_SUMMARY_SYSTEM_PROMPT` + `buildScanSummaryPrompt()` for the final scan summary
 - **Scan-level summary:** after all actor runs finish, the webhook runs one final LLM pass over the scan's actionable findings and stores a concise `aiSummary` on the scan document for the brand page
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
@@ -321,12 +334,8 @@ a named target is itself the key abuse vector. Specialist scanners additionally 
 platform-specific focus guidance, while query execution still applies the actual `site:` /
 `-site:` operators outside the user-visible UI.
 
-When `discord-servers` runs at depth 0, the webhook collects the deduped run-level server names,
-keywords, categories, and locales surfaced by the Discord actor. Chunked Discord classification
-assesses candidates only; it does not propose deep-search queries. The final Discord deep-search
-chooser then synthesizes follow-up Discord server discovery keywords from that metadata. Discord
-deep-search suggestions are stored and executed through the same `startDeepSearchRun()` path, but
-they submit actor `keywords[]` rather than Google query strings.
+`discord-servers` does not support deep search. Even when the brand-level deep-search toggle is
+enabled, Discord runs stay initial-scan-only and never reserve or execute follow-up searches.
 
 `x-search` does not support deep search. Even when the brand-level deep-search toggle is enabled,
 X runs stay initial-scan-only and never reserve or execute follow-up searches.
@@ -334,13 +343,15 @@ X runs stay initial-scan-only and never reserve or execute follow-up searches.
 `github-repos` also does not support deep search. Even when the brand-level deep-search toggle is
 enabled, GitHub runs stay initial-scan-only and never reserve or execute follow-up searches.
 
-Deep search is only enabled when the brand's `allowAiDeepSearches` setting is true.
+Deep search is only enabled for supported Google-backed scan types when the brand's
+`allowAiDeepSearches` setting is true.
 
-The webhook handler calls `startDeepSearchRun()` for each suggested query, registers the new
-Apify run IDs on the scan document, and processes results via the same webhook pipeline at
-depth 1. Deep-search runs never produce further follow-ups (hard loop guard: `searchDepth === 0`
-check before triggering). Suggested queries are reserved on the originating run before any new
-Apify runs are started, so duplicate webhook callbacks do not fan out duplicate deep-search runs.
+The webhook handler calls `startDeepSearchRun()` for each supported Google-backed suggested query,
+registers the new Apify run IDs on the scan document, and processes results via the same webhook
+pipeline at depth 1. Deep-search runs never produce further follow-ups (hard loop guard:
+`searchDepth === 0` check before triggering). Suggested queries are reserved on the originating
+run before any new Apify runs are started, so duplicate webhook callbacks do not fan out
+duplicate deep-search runs.
 `markActorRunComplete` always reads `actorRunIds.length` from a fresh Firestore snapshot inside
 its transaction, so dynamically-added runs are counted correctly for scan completion. Deep-search
 runs are skipped entirely when `allowAiDeepSearches` is false for the brand. When enabled, both
@@ -349,7 +360,7 @@ setting, which defaults to 3 and is constrained to 1-5.
 
 `ActorRunInfo` now carries `scannerId`, `searchDepth`, raw `searchQuery`, and operator-free
 `displayQuery`. The brand page progress indicator groups active work by source (`Web search`,
-`Reddit`, `TikTok`, `YouTube`, `Facebook`, `Instagram`, `Discord servers`, `GitHub repos`, `X`),
+`Reddit`, `TikTok`, `YouTube`, `Facebook`, `Instagram`, `Telegram channels`, `Discord servers`, `GitHub repos`, `X`),
 lets the user switch between those source-specific progress bars, and only ever surfaces
 `displayQuery` so internal Google `site:` / `-site:` operators are never shown to users.
 
@@ -469,6 +480,7 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 - Brand selection changes call `PATCH /api/dashboard/preferences` so the same default brand is restored across reloads and devices
 - Dashboard analytics call `GET /api/dashboard/metrics?brandId=...&scanId=...`
 - The metrics route returns all terminal scans for the selected brand (newest first) for the scan-scope dropdown
+- Brands with `brandDeletion` are hidden from the dashboard brand picker; brands with `historyDeletion` remain selectable but report zero terminal scans/counts until deletion completes
 - Dashboard KPI totals come from denormalized per-scan `highCount`, `mediumCount`, `lowCount`, and `nonHitCount` fields so all-time rollups do not require hydrating every finding
 - The scan-type and theme charts aggregate findings for the selected scope and use the same visible-count semantics as the rest of the app: actionable hits plus non-hits, excluding ignored and addressed real findings
 - Missing `theme` labels are grouped into an `Unlabelled` chart bucket
@@ -509,9 +521,9 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | Collection | Key Fields |
 |---|---|
 | `users` | id, email, passwordHash, **sessionVersion?**, **passwordChangedAt?**, **dashboardPreferences?** (`selectedBrandId?`), createdAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), createdAt, updatedAt |
-| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), actorIds[], actorRuns{} (`scannerId`, `source`, `status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`, `displayQuery?`, `deepSearchSuggestionsProcessed?`, `suggestedSearches?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), createdAt, updatedAt |
+| `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), **deletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), actorIds[], actorRuns{} (`scannerId`, `source`, `status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`, `displayQuery?`, `deepSearchSuggestionsProcessed?`, `suggestedSearches?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
+| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 
 ---
 

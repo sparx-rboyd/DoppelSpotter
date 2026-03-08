@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
-import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
+import { drainScanDeletion, isBrandDeletionActive, isBrandHistoryDeletionActive, isScanDeletionActive, markScanDeletionQueued } from '@/lib/async-deletions';
 import type { BrandProfile, Scan } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string; scanId: string }> };
@@ -26,20 +26,21 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const scan = scanDoc.data() as Scan;
   if (scan.userId !== uid) return errorResponse('Forbidden', 403);
   if (scan.brandId !== brandId) return errorResponse('Scan does not belong to this brand', 400);
+  if (isBrandDeletionActive(brandDoc.data() as BrandProfile) || isBrandHistoryDeletionActive(brandDoc.data() as BrandProfile)) {
+    return errorResponse('Cannot delete an individual scan while brand deletion is already in progress', 409);
+  }
 
   if (scan.status === 'pending' || scan.status === 'running') {
     return errorResponse('Cannot delete a scan that is still in progress', 409);
   }
 
-  // Fetch all findings for this scan
-  const findingsSnap = await db
-    .collection('findings')
-    .where('scanId', '==', scanId)
-    .where('userId', '==', uid)
-    .get();
+  if (!isScanDeletionActive(scan)) {
+    await markScanDeletionQueued(scanId);
+  }
 
-  const allDocs = [...findingsSnap.docs, scanDoc];
-  await runWriteBatchInChunks(allDocs, (batch, doc) => batch.delete(doc.ref));
+  void drainScanDeletion({ brandId, scanId, userId: uid }).catch((error) => {
+    console.error(`[scan-delete] Failed to process deletion for scan ${scanId}:`, error);
+  });
 
-  return new NextResponse(null, { status: 204 });
+  return new NextResponse(null, { status: 202 });
 }

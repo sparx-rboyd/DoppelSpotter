@@ -1,8 +1,16 @@
 import { type Query, type QueryDocumentSnapshot } from '@google-cloud/firestore';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
-import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
+import {
+  drainBrandDeletion,
+  drainBrandHistoryDeletion,
+  drainScanDeletion,
+  isBrandDeletionActive,
+  isBrandHistoryDeletionActive,
+  loadDeletingScanIdsForBrand,
+  markBrandHistoryDeletionQueued,
+} from '@/lib/async-deletions';
 import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
 import type { BrandProfile, FindingSummary } from '@/lib/types';
 
@@ -61,14 +69,34 @@ export async function GET(request: NextRequest, { params }: Params) {
   const bookmarkedOnly = request.nextUrl.searchParams.get('bookmarkedOnly') === 'true';
   const scanId = request.nextUrl.searchParams.get('scanId');
 
-  // Authorization is enforced by the userId filter in every Firestore query below —
-  // a user can only retrieve findings that belong to them. We still verify brand
-  // existence for the cross-scan ignoredOnly path to return a proper 404, but skip
-  // it for per-scan queries where an empty result is a sufficient response.
-  if ((ignoredOnly || addressedOnly || bookmarkedOnly) && !scanId) {
-    const brandDoc = await db.collection('brands').doc(brandId).get();
-    if (!brandDoc.exists) return errorResponse('Brand not found', 404);
-    if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
+  const brandDoc = await db.collection('brands').doc(brandId).get();
+  if (!brandDoc.exists) return errorResponse('Brand not found', 404);
+
+  const brand = brandDoc.data() as BrandProfile;
+  if (brand.userId !== uid) return errorResponse('Forbidden', 403);
+  if (isBrandDeletionActive(brand)) {
+    void drainBrandDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return errorResponse('Brand not found', 404);
+  }
+  if (isBrandHistoryDeletionActive(brand)) {
+    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return NextResponse.json({ data: [] });
+  }
+
+  const deletingScanIds = new Set(await loadDeletingScanIdsForBrand({ brandId, userId: uid }));
+  const firstDeletingScanId = deletingScanIds.values().next().value as string | undefined;
+  if (firstDeletingScanId) {
+    void drainScanDeletion({ brandId, scanId: firstDeletingScanId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+  }
+
+  if (scanId && deletingScanIds.has(scanId)) {
+    return NextResponse.json({ data: [] });
   }
 
   let query = db
@@ -118,6 +146,9 @@ export async function GET(request: NextRequest, { params }: Params) {
     .orderBy(bookmarkedOnly ? 'bookmarkedAt' : addressedOnly ? 'addressedAt' : 'createdAt', 'desc');
 
   const matchesFinding = (finding: FindingSummary) => {
+    if (deletingScanIds.has(finding.scanId)) {
+      return false;
+    }
     if (bookmarkedOnly) {
       return finding.isBookmarked === true;
     }
@@ -154,13 +185,18 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   // Verify brand ownership
   const brandDoc = await db.collection('brands').doc(brandId).get();
   if (!brandDoc.exists) return errorResponse('Brand not found', 404);
-  if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
+  const brand = brandDoc.data() as BrandProfile;
+  if (brand.userId !== uid) return errorResponse('Forbidden', 403);
+  if (isBrandDeletionActive(brand)) return errorResponse('Brand is already being deleted', 409);
 
-  // Fetch all findings and scans for this brand
-  const [findingsSnap, scansSnap] = await Promise.all([
-    db.collection('findings').where('brandId', '==', brandId).where('userId', '==', uid).get(),
-    db.collection('scans').where('brandId', '==', brandId).where('userId', '==', uid).get(),
-  ]);
+  if (isBrandHistoryDeletionActive(brand)) {
+    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch((error) => {
+      console.error(`[brand-history-delete] Failed to continue deletion for brand ${brandId}:`, error);
+    });
+    return new NextResponse(null, { status: 202 });
+  }
+
+  const scansSnap = await db.collection('scans').where('brandId', '==', brandId).where('userId', '==', uid).get();
 
   const activeScan = scansSnap.docs
     .map(scanFromSnapshot)
@@ -170,9 +206,10 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return errorResponse('Cannot clear history while a scan is still in progress', 409);
   }
 
-  const allDocs = [...findingsSnap.docs, ...scansSnap.docs];
+  await markBrandHistoryDeletionQueued(brandId);
+  void drainBrandHistoryDeletion({ brandId, userId: uid }).catch((error) => {
+    console.error(`[brand-history-delete] Failed to process deletion for brand ${brandId}:`, error);
+  });
 
-  await runWriteBatchInChunks(allDocs, (batch, doc) => batch.delete(doc.ref));
-
-  return new NextResponse(null, { status: 204 });
+  return new NextResponse(null, { status: 202 });
 }

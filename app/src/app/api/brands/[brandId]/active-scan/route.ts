@@ -1,6 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
+import {
+  drainBrandDeletion,
+  drainBrandHistoryDeletion,
+  isBrandDeletionActive,
+  isBrandHistoryDeletionActive,
+} from '@/lib/async-deletions';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import type { BrandProfile } from '@/lib/types';
 import {
@@ -27,6 +33,18 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const brand = brandDoc.data() as BrandProfile;
   if (brand.userId !== uid) return errorResponse('Forbidden', 403);
+  if (isBrandDeletionActive(brand)) {
+    void drainBrandDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return errorResponse('Brand not found', 404);
+  }
+  if (isBrandHistoryDeletionActive(brand)) {
+    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch(() => {
+      // Non-critical
+    });
+    return NextResponse.json({ data: null });
+  }
 
   if (!brand.activeScanId) {
     return NextResponse.json({ data: null });

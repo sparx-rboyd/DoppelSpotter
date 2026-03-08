@@ -14,6 +14,7 @@ export const DEFAULT_BRAND_SCAN_SOURCES: BrandScanSources = {
   youtube: false,
   facebook: false,
   instagram: false,
+  telegram: false,
   discord: false,
   github: false,
   x: false,
@@ -101,6 +102,7 @@ export function isValidBrandScanSources(value: unknown): value is BrandScanSourc
     typeof scanSources.youtube === 'boolean' &&
     typeof scanSources.facebook === 'boolean' &&
     typeof scanSources.instagram === 'boolean' &&
+    typeof scanSources.telegram === 'boolean' &&
     typeof scanSources.discord === 'boolean' &&
     typeof scanSources.github === 'boolean' &&
     typeof scanSources.x === 'boolean'
@@ -120,6 +122,7 @@ export function normalizeBrandScanSources(value: unknown): BrandScanSources {
     youtube: typeof scanSources.youtube === 'boolean' ? scanSources.youtube : DEFAULT_BRAND_SCAN_SOURCES.youtube,
     facebook: typeof scanSources.facebook === 'boolean' ? scanSources.facebook : DEFAULT_BRAND_SCAN_SOURCES.facebook,
     instagram: typeof scanSources.instagram === 'boolean' ? scanSources.instagram : DEFAULT_BRAND_SCAN_SOURCES.instagram,
+    telegram: typeof scanSources.telegram === 'boolean' ? scanSources.telegram : DEFAULT_BRAND_SCAN_SOURCES.telegram,
     discord: typeof scanSources.discord === 'boolean' ? scanSources.discord : DEFAULT_BRAND_SCAN_SOURCES.discord,
     github: typeof scanSources.github === 'boolean' ? scanSources.github : DEFAULT_BRAND_SCAN_SOURCES.github,
     x: typeof scanSources.x === 'boolean' ? scanSources.x : DEFAULT_BRAND_SCAN_SOURCES.x,
@@ -135,6 +138,7 @@ export function hasEnabledBrandScanSource(value: unknown): boolean {
     || scanSources.youtube
     || scanSources.facebook
     || scanSources.instagram
+    || scanSources.telegram
     || scanSources.discord
     || scanSources.github
     || scanSources.x

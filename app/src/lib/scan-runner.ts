@@ -2,6 +2,7 @@ import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
 import { db } from './firestore';
 import type { ActorRunInfo, BrandProfile, Scan } from './types';
 import type { ActorConfig } from './apify/actors';
+import { isBrandDeletionActive, isBrandHistoryDeletionActive } from './async-deletions';
 import {
   clearBrandActiveScanIfMatches,
   isPendingScanStale,
@@ -36,7 +37,7 @@ type StartScanForBrandParams = {
   scheduled?: ScheduledStartOptions;
 };
 
-type ScheduledScanSkipReason = 'not_due' | 'active_scan';
+type ScheduledScanSkipReason = 'not_due' | 'active_scan' | 'deletion_in_progress';
 
 export type StartScanForBrandResult =
   | {
@@ -92,6 +93,21 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
     const brandData = brandDoc.data() as BrandProfile;
     if (params.ownerUserId && brandData.userId !== params.ownerUserId) {
       throw new ScanStartError('Forbidden', 403);
+    }
+
+    if (isBrandDeletionActive(brandData) || isBrandHistoryDeletionActive(brandData)) {
+      if (params.scheduled && brandData.scanSchedule) {
+        tx.update(brandRef, {
+          'scanSchedule.nextRunAt': computeNextScheduledRun(brandData.scanSchedule, now),
+        });
+        scheduledSkipResult = {
+          outcome: 'skipped',
+          reason: 'deletion_in_progress',
+        };
+        throw new ScheduledScanSkipError('deletion_in_progress');
+      }
+
+      throw new ScanStartError('Cannot start a scan while deletion is in progress for this brand', 409);
     }
 
     if (params.scheduled) {

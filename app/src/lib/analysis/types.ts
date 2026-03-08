@@ -133,7 +133,7 @@ export interface DiscordServerCandidate {
 }
 
 /**
- * Run-level Discord context shared with chunked analysis and deep-search selection.
+ * Run-level Discord context shared with chunked analysis.
  */
 export interface DiscordRunContext {
   sourceQueries: string[];

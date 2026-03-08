@@ -4,7 +4,7 @@ import type { BrandScanSources, FindingSource, GoogleScannerId, ScannerId } from
 export type ScanFindingSource = Exclude<FindingSource, 'unknown'>;
 export type GoogleFindingSource = Extract<
   ScanFindingSource,
-  'google' | 'reddit' | 'tiktok' | 'youtube' | 'facebook' | 'instagram'
+  'google' | 'reddit' | 'tiktok' | 'youtube' | 'facebook' | 'instagram' | 'telegram'
 >;
 
 interface BaseScannerConfig {
@@ -59,6 +59,7 @@ export const SCAN_SOURCE_ORDER: ScanFindingSource[] = [
   'youtube',
   'facebook',
   'instagram',
+  'telegram',
   'discord',
   'github',
   'x',
@@ -71,6 +72,7 @@ export const GOOGLE_SCAN_SOURCE_ORDER: GoogleFindingSource[] = [
   'youtube',
   'facebook',
   'instagram',
+  'telegram',
 ];
 
 const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
@@ -133,6 +135,16 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     siteHost: 'instagram.com',
     supportsDeepSearch: true,
   },
+  'google-telegram': {
+    id: 'google-telegram',
+    source: 'telegram',
+    actorId: GOOGLE_SEARCH_ACTOR_ID,
+    kind: 'google',
+    displayName: 'Telegram channels',
+    shortLabel: 'Telegram',
+    siteHost: 't.me',
+    supportsDeepSearch: true,
+  },
   'discord-servers': {
     id: 'discord-servers',
     source: 'discord',
@@ -140,7 +152,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     kind: 'discord',
     displayName: 'Discord servers',
     shortLabel: 'Discord',
-    supportsDeepSearch: true,
+    supportsDeepSearch: false,
   },
   'github-repos': {
     id: 'github-repos',
@@ -169,6 +181,7 @@ const SCANNER_ID_BY_SOURCE: Record<ScanFindingSource, ScannerId> = {
   youtube: 'google-youtube',
   facebook: 'google-facebook',
   instagram: 'google-instagram',
+  telegram: 'google-telegram',
   discord: 'discord-servers',
   github: 'github-repos',
   x: 'x-search',

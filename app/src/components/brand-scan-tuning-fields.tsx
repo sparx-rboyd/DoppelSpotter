@@ -97,7 +97,7 @@ export function BrandScanTuningFields({
         <SliderField
           id="search-result-pages"
           label="Search depth"
-          tooltip="Controls how extensively DoppelSpotter searches for potential matches. Google-backed scan types use this as search-result depth, GitHub repos and X map it to result volume from 50 to 250 items, and Discord servers map it to an Apify spend cap from $0.20 to $0.60 per run."
+          tooltip="Controls how extensively DoppelSpotter searches for potential matches. Google-backed scan types like Web search, Reddit, TikTok, YouTube, Facebook, Instagram, and Telegram channels use this as search-result depth, GitHub repos and X map it to result volume from 50 to 250 items, and Discord servers map it to an Apify spend cap from $0.20 to $0.60 per run."
           value={searchResultPages}
           min={MIN_SEARCH_RESULT_PAGES}
           max={MAX_SEARCH_RESULT_PAGES}
@@ -112,15 +112,15 @@ export function BrandScanTuningFields({
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
           <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-            Allow AI analysis to request deeper searches
-            <InfoTooltip content="Allows AI analysis to request follow-up searches when it spots something concerning on scan types that support deep search. Some scan types, such as GitHub repos and X, do not support deep search." />
+            Allow AI analysis to request deeper Google-backed searches
+            <InfoTooltip content="Allows AI analysis to request follow-up searches when it spots something concerning on Google-backed scan types such as Web search, Reddit, TikTok, YouTube, Facebook, Instagram, and Telegram channels. Discord servers, GitHub repos, and X do not support deep search." />
           </div>
         </div>
         <button
           type="button"
           role="switch"
           aria-checked={allowAiDeepSearches}
-          aria-label="Allow AI analysis to request deeper searches"
+          aria-label="Allow AI analysis to request deeper Google-backed searches"
           onClick={() => onAllowAiDeepSearchesChange(!allowAiDeepSearches)}
           className={`inline-flex items-center gap-2 rounded-md text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
             allowAiDeepSearches ? 'text-brand-700' : 'text-gray-600'
@@ -145,8 +145,8 @@ export function BrandScanTuningFields({
         <div className="-mx-6 border-t border-gray-100 bg-gray-50 px-6 py-4">
           <SliderField
             id="max-ai-deep-searches"
-            label="Deep search breadth"
-            tooltip="Controls how many follow-up searches AI analysis may request when it spots something concerning on scan types that support deep search. More deep searches increase coverage, but scans will be slower."
+            label="Google deep search breadth"
+            tooltip="Controls how many follow-up searches AI analysis may request when it spots something concerning on Google-backed scan types. More deep searches increase coverage, but scans will be slower."
             value={maxAiDeepSearches}
             min={MIN_AI_DEEP_SEARCHES}
             max={MAX_AI_DEEP_SEARCHES}

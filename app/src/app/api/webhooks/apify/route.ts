@@ -12,8 +12,6 @@ import {
   SCAN_SUMMARY_SYSTEM_PROMPT,
   X_CLASSIFICATION_SYSTEM_PROMPT,
   buildDiscordChunkAnalysisPrompt,
-  buildDiscordFinalSelectionPrompt,
-  buildDiscordFinalSelectionSystemPrompt,
   buildGitHubChunkAnalysisPrompt,
   buildGoogleFinalSelectionSystemPrompt,
   buildGoogleFinalSelectionPrompt,
@@ -66,13 +64,13 @@ import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSna
 
 /** Maximum normalized candidates per LLM request chunk. */
 const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
-const GOOGLE_ANALYSIS_CONCURRENCY = 3;
+const GOOGLE_ANALYSIS_CONCURRENCY = 6;
 const DISCORD_ANALYSIS_CHUNK_SIZE = 10;
-const DISCORD_ANALYSIS_CONCURRENCY = 3;
+const DISCORD_ANALYSIS_CONCURRENCY = 6;
 const GITHUB_ANALYSIS_CHUNK_SIZE = 10;
-const GITHUB_ANALYSIS_CONCURRENCY = 3;
+const GITHUB_ANALYSIS_CONCURRENCY = 6;
 const X_ANALYSIS_CHUNK_SIZE = 10;
-const X_ANALYSIS_CONCURRENCY = 3;
+const X_ANALYSIS_CONCURRENCY = 6;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';
 const GOOGLE_RAW_DATA_VERSION = 2;
@@ -879,10 +877,7 @@ async function analyseAndWriteDiscordBatch({
   skippedDuplicateCount: number;
 }> {
   let findingCount = 0;
-  let suggestedSearches: string[] | undefined;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
-  const canRunDeepSearchSelection = searchDepth === 0 && normalizeAllowAiDeepSearches(brand.allowAiDeepSearches);
-  const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
 
   const normalizedRun = normalizeDiscordServerRun({
     searchQuery,
@@ -901,7 +896,7 @@ async function analyseAndWriteDiscordBatch({
   });
 
   if (candidatesToAnalyse.length === 0) {
-    return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
+    return { findingCount, counts, skippedDuplicateCount };
   }
 
   const outcomes = new Map<string, { candidate: DiscordServerCandidate; outcome: DiscordFindingOutcome }>();
@@ -962,15 +957,6 @@ async function analyseAndWriteDiscordBatch({
     }
   }
 
-  if (canRunDeepSearchSelection) {
-    suggestedSearches = await finalizeDiscordSuggestedSearches({
-      brand,
-      scannerConfig,
-      runContext: normalizedRun.runContext,
-      maxSuggestedSearches,
-    });
-  }
-
   for (const { candidate, outcome } of outcomes.values()) {
     const delta = await upsertDiscordFinding({
       scanDoc,
@@ -994,7 +980,7 @@ async function analyseAndWriteDiscordBatch({
     counts.nonHit += delta.counts.nonHit;
   }
 
-  return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
+  return { findingCount, counts, skippedDuplicateCount };
 }
 
 async function analyseAndWriteXBatch({
@@ -1918,40 +1904,6 @@ async function analyseGoogleFinalSelection({
   return parsed.suggestedSearches;
 }
 
-async function analyseDiscordFinalSelection({
-  brand,
-  scannerConfig,
-  runContext,
-  maxSuggestedSearches,
-}: {
-  brand: BrandProfile;
-  scannerConfig: ScannerConfig;
-  runContext: DiscordRunContext;
-  maxSuggestedSearches: number;
-}): Promise<string[] | undefined> {
-  const prompt = buildDiscordFinalSelectionPrompt({
-    brandName: brand.name,
-    keywords: brand.keywords,
-    watchWords: brand.watchWords,
-    safeWords: brand.safeWords,
-    runContext,
-    maxSuggestedSearches,
-  });
-  const systemPrompt = buildDiscordFinalSelectionSystemPrompt(maxSuggestedSearches, scannerConfig);
-
-  const raw = await chatCompletion([
-    { role: 'system', content: systemPrompt },
-    { role: 'user', content: prompt },
-  ]);
-
-  const parsed = parseSuggestedSearchOutput(raw, maxSuggestedSearches);
-  if (!parsed) {
-    throw new Error(`Failed to parse Discord final selection output: ${raw.slice(0, 200)}`);
-  }
-
-  return parsed.suggestedSearches;
-}
-
 async function finalizeSuggestedSearches({
   brand,
   scannerConfig,
@@ -1991,49 +1943,6 @@ async function finalizeSuggestedSearches({
     return filteredSuggestions;
   } catch (err) {
     console.error('[webhook] Google final deep-search selection failed:', err);
-    return undefined;
-  }
-}
-
-async function finalizeDiscordSuggestedSearches({
-  brand,
-  scannerConfig,
-  runContext,
-  maxSuggestedSearches,
-}: {
-  brand: BrandProfile;
-  scannerConfig: ScannerConfig;
-  runContext: DiscordRunContext;
-  maxSuggestedSearches: number;
-}): Promise<string[] | undefined> {
-  try {
-    const llmSuggestedSearches = await analyseDiscordFinalSelection({
-      brand,
-      scannerConfig,
-      runContext,
-      maxSuggestedSearches,
-    });
-
-    if (!llmSuggestedSearches || llmSuggestedSearches.length === 0) {
-      console.log(
-        `[webhook] Discord deep-search final selection keywords=${runContext.observedKeywords.length} categories=${runContext.observedCategories.length} selected=[]`,
-      );
-      return undefined;
-    }
-
-    const sourceQueryKeys = new Set(runContext.sourceQueries.map(normalizeSuggestedSearchKey));
-    const filteredSuggestions = llmSuggestedSearches.filter((query) => !sourceQueryKeys.has(normalizeSuggestedSearchKey(query)));
-    if (filteredSuggestions.length === 0) {
-      console.warn('[webhook] Discord final deep-search selection returned only source-query duplicates');
-      return undefined;
-    }
-
-    console.log(
-      `[webhook] Discord deep-search final selection keywords=${runContext.observedKeywords.length} categories=${runContext.observedCategories.length} selected=${JSON.stringify(filteredSuggestions)}`,
-    );
-    return filteredSuggestions;
-  } catch (err) {
-    console.error('[webhook] Discord final deep-search selection failed:', err);
     return undefined;
   }
 }
@@ -3348,6 +3257,7 @@ function isKnownFindingSource(value: unknown): value is Finding['source'] {
     || value === 'youtube'
     || value === 'facebook'
     || value === 'instagram'
+    || value === 'telegram'
     || value === 'discord'
     || value === 'github'
     || value === 'x'
@@ -3363,6 +3273,7 @@ function isKnownScannerId(value: unknown): value is ActorRunInfo['scannerId'] {
     || value === 'google-youtube'
     || value === 'google-facebook'
     || value === 'google-instagram'
+    || value === 'google-telegram'
     || value === 'discord-servers'
     || value === 'github-repos'
     || value === 'x-search'
@@ -3377,6 +3288,7 @@ function isKnownGoogleScannerId(value: unknown): value is GoogleScannerId {
     || value === 'google-youtube'
     || value === 'google-facebook'
     || value === 'google-instagram'
+    || value === 'google-telegram'
   );
 }
 
@@ -3391,6 +3303,7 @@ function resolveScannerConfig(actorRunInfo?: Partial<ActorRunInfo>): ScannerConf
     || actorRunInfo?.source === 'youtube'
     || actorRunInfo?.source === 'facebook'
     || actorRunInfo?.source === 'instagram'
+    || actorRunInfo?.source === 'telegram'
     || actorRunInfo?.source === 'google'
     || actorRunInfo?.source === 'discord'
     || actorRunInfo?.source === 'github'
@@ -3413,6 +3326,7 @@ function choosePreferredFindingSource(
       || source === 'youtube'
       || source === 'facebook'
       || source === 'instagram'
+      || source === 'telegram'
       || source === 'discord'
       || source === 'github'
       || source === 'x'

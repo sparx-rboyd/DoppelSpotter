@@ -1,8 +1,14 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
-import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
+import {
+  drainBrandDeletion,
+  drainBrandHistoryDeletion,
+  isBrandDeletionActive,
+  isBrandHistoryDeletionActive,
+  markBrandDeletionQueued,
+} from '@/lib/async-deletions';
 import {
   hasEnabledBrandScanSource,
   isValidAllowAiDeepSearches,
@@ -37,6 +43,17 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const data = doc.data() as Omit<BrandProfile, 'id'>;
   if (data.userId !== uid) return errorResponse('Forbidden', 403);
+  if (isBrandDeletionActive(data)) {
+    void drainBrandDeletion({ brandId, userId: uid }).catch((error) => {
+      console.error(`[brand-delete] Failed to continue deletion for brand ${brandId}:`, error);
+    });
+    return errorResponse('Brand not found', 404);
+  }
+  if (isBrandHistoryDeletionActive(data)) {
+    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch((error: unknown) => {
+      console.error(`[brand-history-delete] Failed to continue deletion for brand ${brandId}:`, error);
+    });
+  }
 
   return NextResponse.json({ data: { id: doc.id, ...data } });
 }
@@ -52,6 +69,10 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   if (!doc.exists) return errorResponse('Brand not found', 404);
   const existingBrand = doc.data() as BrandProfile;
   if (existingBrand.userId !== uid) return errorResponse('Forbidden', 403);
+  if (isBrandDeletionActive(existingBrand)) return errorResponse('Brand not found', 404);
+  if (isBrandHistoryDeletionActive(existingBrand)) {
+    return errorResponse('Cannot update a brand while its history is being deleted', 409);
+  }
 
   let body: BrandProfileUpdateInput;
   try {
@@ -95,7 +116,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
   if (body.scanSources !== undefined) {
     if (!isValidBrandScanSources(body.scanSources)) {
-      return errorResponse('scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, discord, github, and x values');
+      return errorResponse('scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, telegram, discord, github, and x values');
     }
     if (!hasEnabledBrandScanSource(body.scanSources)) {
       return errorResponse('At least one scan source must be enabled');
@@ -142,20 +163,21 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   const doc = await brandRef.get();
 
   if (!doc.exists) return errorResponse('Brand not found', 404);
-  if ((doc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
+  const brand = doc.data() as BrandProfile;
+  if (brand.userId !== uid) return errorResponse('Forbidden', 403);
 
-  const [scanSnapshot, findingsSnapshot] = await Promise.all([
-    db
-      .collection('scans')
-      .where('brandId', '==', brandId)
-      .where('userId', '==', uid)
-      .get(),
-    db
-      .collection('findings')
-      .where('brandId', '==', brandId)
-      .where('userId', '==', uid)
-      .get(),
-  ]);
+  if (isBrandDeletionActive(brand)) {
+    void drainBrandDeletion({ brandId, userId: uid }).catch((error) => {
+      console.error(`[brand-delete] Failed to continue deletion for brand ${brandId}:`, error);
+    });
+    return new NextResponse(null, { status: 202 });
+  }
+
+  const scanSnapshot = await db
+    .collection('scans')
+    .where('brandId', '==', brandId)
+    .where('userId', '==', uid)
+    .get();
 
   const activeScan = scanSnapshot.docs
     .map(scanFromSnapshot)
@@ -165,9 +187,10 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     return errorResponse('Cannot delete a brand while a scan is still in progress', 409);
   }
 
-  const docsToDelete = [...findingsSnapshot.docs, ...scanSnapshot.docs, doc];
+  await markBrandDeletionQueued(brandId);
+  void drainBrandDeletion({ brandId, userId: uid }).catch((error) => {
+    console.error(`[brand-delete] Failed to process deletion for brand ${brandId}:`, error);
+  });
 
-  await runWriteBatchInChunks(docsToDelete, (batch, snapshot) => batch.delete(snapshot.ref));
-
-  return new NextResponse(null, { status: 204 });
+  return new NextResponse(null, { status: 202 });
 }

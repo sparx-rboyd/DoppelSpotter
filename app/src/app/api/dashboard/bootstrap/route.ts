@@ -2,6 +2,13 @@ import { FieldValue } from '@google-cloud/firestore';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth } from '@/lib/api-utils';
+import {
+  drainBrandDeletion,
+  drainBrandHistoryDeletion,
+  isBrandDeletionActive,
+  isBrandHistoryDeletionActive,
+  isScanDeletionActive,
+} from '@/lib/async-deletions';
 import type { BrandProfile, BrandSummary, DashboardBootstrapData, Scan, UserRecord } from '@/lib/types';
 
 const TERMINAL_SCAN_STATUSES = new Set(['completed', 'cancelled', 'failed']);
@@ -26,7 +33,7 @@ export async function GET(request: NextRequest) {
     db
       .collection('scans')
       .where('userId', '==', uid)
-      .select('brandId', 'status', 'startedAt', 'highCount', 'mediumCount', 'lowCount', 'nonHitCount')
+      .select('brandId', 'status', 'startedAt', 'highCount', 'mediumCount', 'lowCount', 'nonHitCount', 'deletion')
       .get(),
   ]);
 
@@ -36,7 +43,11 @@ export async function GET(request: NextRequest) {
   >();
 
   for (const doc of scanSnapshot.docs) {
-    const scan = doc.data() as Pick<Scan, 'brandId' | 'status' | 'startedAt' | 'highCount' | 'mediumCount' | 'lowCount' | 'nonHitCount'>;
+    const scan = doc.data() as Pick<Scan, 'brandId' | 'status' | 'startedAt' | 'highCount' | 'mediumCount' | 'lowCount' | 'nonHitCount' | 'deletion'>;
+    if (isScanDeletionActive(scan)) {
+      continue;
+    }
+
     const current = countsByBrandId.get(scan.brandId) ?? {
       scanCount: 0,
       findingCount: 0,
@@ -64,29 +75,45 @@ export async function GET(request: NextRequest) {
     countsByBrandId.set(scan.brandId, current);
   }
 
-  const brands: BrandSummary[] = brandSnapshot.docs.map((doc) => {
-    const data = doc.data() as Pick<BrandProfile, 'name' | 'createdAt' | 'scanSchedule'>;
-    const counts = countsByBrandId.get(doc.id);
-    const scanSchedule = data.scanSchedule?.enabled
-      ? {
-          enabled: data.scanSchedule.enabled,
-          timeZone: data.scanSchedule.timeZone,
-          nextRunAt: data.scanSchedule.nextRunAt,
-        }
-      : undefined;
+  const brands = brandSnapshot.docs.reduce<BrandSummary[]>((acc, doc) => {
+      const data = doc.data() as Pick<BrandProfile, 'name' | 'createdAt' | 'scanSchedule' | 'historyDeletion' | 'brandDeletion'>;
+      if (isBrandDeletionActive(data)) {
+        void drainBrandDeletion({ brandId: doc.id, userId: uid }).catch(() => {
+          // Non-critical
+        });
+        return acc;
+      }
 
-    return {
-      id: doc.id,
-      name: data.name,
-      scanCount: counts?.scanCount ?? 0,
-      findingCount: counts?.findingCount ?? 0,
-      nonHitCount: counts?.nonHitCount ?? 0,
-      isScanInProgress: counts?.isScanInProgress ?? false,
-      lastScanStartedAt: counts?.lastScanStartedAt,
-      scanSchedule,
-      createdAt: data.createdAt,
-    };
-  });
+      if (isBrandHistoryDeletionActive(data)) {
+        void drainBrandHistoryDeletion({ brandId: doc.id, userId: uid }).catch(() => {
+          // Non-critical
+        });
+      }
+
+      const counts = countsByBrandId.get(doc.id);
+      const scanSchedule = data.scanSchedule?.enabled
+        ? {
+            enabled: data.scanSchedule.enabled,
+            timeZone: data.scanSchedule.timeZone,
+            nextRunAt: data.scanSchedule.nextRunAt,
+          }
+        : undefined;
+
+      acc.push({
+        id: doc.id,
+        name: data.name,
+        scanCount: isBrandHistoryDeletionActive(data) ? 0 : (counts?.scanCount ?? 0),
+        findingCount: isBrandHistoryDeletionActive(data) ? 0 : (counts?.findingCount ?? 0),
+        nonHitCount: isBrandHistoryDeletionActive(data) ? 0 : (counts?.nonHitCount ?? 0),
+        isScanInProgress: counts?.isScanInProgress ?? false,
+        isHistoryDeletionInProgress: isBrandHistoryDeletionActive(data),
+        scanSchedule,
+        createdAt: data.createdAt,
+        ...(counts?.lastScanStartedAt ? { lastScanStartedAt: counts.lastScanStartedAt } : {}),
+      });
+
+      return acc;
+    }, []);
 
   const user = userDoc.data() as UserRecord | undefined;
   const preferredBrandId = user?.dashboardPreferences?.selectedBrandId;
