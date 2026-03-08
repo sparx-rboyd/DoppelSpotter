@@ -7,11 +7,6 @@ import {
   AlertCircle,
   AlertTriangle,
   Globe,
-  Instagram,
-  Twitter,
-  Facebook,
-  Smartphone,
-  BookMarked,
   Info,
   Sparkles,
   ExternalLink,
@@ -92,60 +87,12 @@ const sourceConfig: Record<
     iconClassName?: string;
   }
 > = {
-  domain: {
-    icon: Globe,
-    bgClass: 'bg-red-50',
-    textClass: 'text-red-600',
-    label: 'Domain',
-  },
-  instagram: {
-    icon: Instagram,
-    bgClass: 'bg-amber-50',
-    textClass: 'text-amber-600',
-    label: 'Instagram',
-  },
-  twitter: {
-    icon: Twitter,
-    bgClass: 'bg-sky-50',
-    textClass: 'text-sky-600',
-    label: 'Twitter / X',
-  },
-  facebook: {
-    icon: Facebook,
-    bgClass: 'bg-blue-50',
-    textClass: 'text-blue-600',
-    label: 'Facebook',
-  },
-  tiktok: {
-    icon: Smartphone,
-    bgClass: 'bg-gray-50',
-    textClass: 'text-gray-600',
-    label: 'TikTok',
-  },
   google: {
     icon: Globe,
     bgClass: 'bg-brand-50',
     textClass: 'text-brand-600',
     label: 'Web search',
     iconClassName: 'w-4 h-4 sm:w-[18px] sm:h-[18px]',
-  },
-  'google-play': {
-    icon: Smartphone,
-    bgClass: 'bg-green-50',
-    textClass: 'text-green-600',
-    label: 'Google Play',
-  },
-  'app-store': {
-    icon: Smartphone,
-    bgClass: 'bg-gray-50',
-    textClass: 'text-gray-600',
-    label: 'App Store',
-  },
-  trademark: {
-    icon: BookMarked,
-    bgClass: 'bg-purple-50',
-    textClass: 'text-purple-600',
-    label: 'Trademark',
   },
   unknown: {
     icon: Globe,

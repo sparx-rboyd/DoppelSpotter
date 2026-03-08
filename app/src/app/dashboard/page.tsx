@@ -153,7 +153,7 @@ export default function DashboardPage() {
           {!loading && findings.length === 0 && (
             <div className="mt-6 bg-brand-50 border border-brand-100 rounded-xl p-5 text-sm text-brand-700">
               <strong>Getting started:</strong> Add a brand to begin monitoring.
-              DoppelSpotter will scan social media, newly-registered domains, Google Search, and app stores for potential infringements.{' '}
+              DoppelSpotter will scan Google web results for potential infringements and suspicious brand misuse.{' '}
               <Link href="/brands/new" className="font-semibold underline hover:no-underline">
                 Add your first brand →
               </Link>

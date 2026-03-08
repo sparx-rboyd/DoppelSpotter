@@ -1,8 +1,0 @@
-{
-  "actorSpecification": 1,
-  "name": "whoisxml-brand-alert",
-  "title": "WhoisXML Brand Alert — Newly-Registered Domain Monitor",
-  "description": "Detects newly-registered domains containing your brand keywords using the WhoisXML Brand Alert API. Surfaces typosquatting, lookalike domains, and potential impersonation attempts across 7,596+ TLDs. Bring your own WhoisXML API key.",
-  "version": "0.1",
-  "input": "./input_schema.json"
-}

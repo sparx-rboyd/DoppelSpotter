@@ -119,15 +119,7 @@ export type UserPreferenceSignalReason =
   | 'reclassified_non_hit_to_high';
 
 export type FindingSource =
-  | 'domain'
-  | 'instagram'
-  | 'twitter'
-  | 'facebook'
-  | 'tiktok'
   | 'google'
-  | 'google-play'
-  | 'app-store'
-  | 'trademark'
   | 'unknown';
 
 export interface FindingSummary {
@@ -212,7 +204,7 @@ export interface ActorRunInfo {
   status: ActorRunStatus;
   /** Default dataset identifier captured when a succeeded webhook arrives before preference hints are ready. */
   datasetId?: string;
-  /** Total analysable items for this run (dataset items for per-item actors, deduped result candidates for Google). */
+  /** Total deduped Google result candidates queued for classification in this run. */
   itemCount?: number;
   /** Number of items that have completed AI analysis so far. */
   analysedCount?: number;
@@ -236,7 +228,7 @@ export interface Scan {
   brandId: string;
   userId: string;
   status: ScanStatus;
-  /** The actor IDs requested for this scan */
+  /** The actor IDs started for this scan (currently always Google Search only). */
   actorIds: string[];
   /** Flat array of Apify run IDs — used for Firestore array-contains queries in the webhook handler */
   actorRunIds?: string[];

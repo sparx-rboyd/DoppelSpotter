@@ -7,9 +7,9 @@ Keep it up to date when making significant structural changes.
 
 ## Project Overview
 
-**DoppelSpotter** is an AI-powered brand protection web app for SMEs. It monitors the web for
-brand infringement (lookalike domains, fake social accounts, clone apps, trademark squatting)
-using Apify actors for scraping and AI analysis for classification.
+**DoppelSpotter** is an AI-powered brand protection web app for SMEs. The current production
+pipeline monitors Google web search results for signs of brand infringement, then uses AI
+analysis to classify likely threats and summarise scan outcomes.
 
 **Stack:**
 - Frontend / API: Next.js 15 (App Router), TypeScript, Tailwind CSS
@@ -30,8 +30,6 @@ using Apify actors for scraping and AI analysis for classification.
 ├── PITCH.md                      # Product pitch / spec
 ├── cloudbuild.yaml               # GCP Cloud Build CI/CD pipeline
 ├── wrangler.toml                 # Cloudflare Workers config (landing page)
-├── actors/
-│   └── whoisxml-brand-alert/     # Custom Apify Actor (published to Apify Store)
 ├── landing-page/                 # Static marketing site
 ├── app/                          # Next.js 15 application
 │   └── src/
@@ -45,16 +43,16 @@ using Apify actors for scraping and AI analysis for classification.
 │       │       └── webhooks/apify/  # Apify webhook receiver → AI analysis pipeline
 │       └── lib/
 │           ├── apify/
-│           │   ├── actors.ts     # ACTOR_REGISTRY — all actor definitions + enable/disable
+│           │   ├── actors.ts     # Google Search actor definition + lookup helpers
 │           │   └── client.ts     # Apify client: startActorRun, buildActorInput, fetchDatasetItems
 │           ├── mailersend.ts     # MailerSend email client for transactional emails
 │           ├── scan-runner.ts    # Shared manual + scheduled scan reservation and actor startup
 │           ├── scan-summary-emails.ts # Branded scan-summary email composition + idempotent delivery
 │           ├── scan-schedules.ts # Schedule validation, timezone-aware recurrence, next-run helpers
 │           └── analysis/
-│               ├── prompts.ts    # SYSTEM_PROMPT + buildAnalysisPrompt()
+│               ├── prompts.ts    # Google classification + deep-search + scan-summary prompts
 │               ├── openrouter.ts # AI analysis client: chatCompletion()
-│               └── types.ts      # AnalysisOutput interface + parseAnalysisOutput()
+│               └── types.ts      # Google analysis output interfaces + parsers
 └── docs/
     ├── GCP_SETUP.md
     └── PIPELINE_SETUP.md
@@ -64,13 +62,11 @@ using Apify actors for scraping and AI analysis for classification.
 
 ## Actor Registry
 
-All actors are defined in `app/src/lib/apify/actors.ts` → `ACTOR_REGISTRY`.
+The app is currently Google-only. `app/src/lib/apify/actors.ts` keeps a tiny registry/lookup
+layer, but the only supported actor is `apify/google-search-scraper`.
 
-To enable or disable an actor, set its `enabledByDefault` flag. Actors with `enabledByDefault: true`
-are automatically included in every scan via `CORE_ACTOR_IDS`.
-
-**Current state (as of scan quality review):** Only `apify/google-search-scraper` is enabled.
-See `REVIEW.md` for full actor table and rationale.
+New scans always reserve the Google Search actor; there is no longer any request-time actor
+override path.
 
 ---
 
@@ -97,7 +93,7 @@ POST /api/scan
  └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
- └─ reads CORE_ACTOR_IDS (or actorIds from request body)
+ └─ reserves the Google Search actor for the scan
  └─ uses `brands.searchResultPages` (default 3, min 1, max 10) as Google Search `maxPagesPerQuery`
  └─ starts Apify actors and scan-level user-preference-hint generation concurrently
  └─ stores runId → scan document incrementally as each actor starts, reducing the race window for early callbacks
@@ -151,8 +147,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ once the scan-level preference hints are `ready` or `failed`, deferred succeeded callbacks are replayed through the same webhook route so they resume normal processing
  └─ duplicate callbacks for a run already in `fetching_dataset` / `analysing` are acknowledged and skipped before expensive work starts
  └─ fetches up to 50 items from Apify dataset
- └─ per-item mode: one AI analysis call per dataset item → one Finding per item
- └─ batch mode (Google Search): normalize SERP pages into compact organic-result candidates
+ └─ Google Search mode: normalize SERP pages into compact organic-result candidates
       └─ excludes ads from AI analysis; keeps `relatedQueries` + `peopleAlsoAsk` as run-level context
       └─ dedupes repeated URLs within the run before analysis
       └─ skips normalized URLs that already appeared in previous scans for the same brand before any LLM analysis
@@ -191,33 +186,25 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **File:** `app/src/lib/analysis/`
 - **When:** After each Apify actor run completes, inside the webhook handler
 - **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
-- **Prompts:** `SYSTEM_PROMPT` + `buildAnalysisPrompt()` for per-item mode; `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for the final deep-search query chooser
+- **Prompts:** `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for the final deep-search query chooser; `SCAN_SUMMARY_SYSTEM_PROMPT` + `buildScanSummaryPrompt()` for the final scan summary
 - **Scan-level summary:** after all actor runs finish, the webhook runs one final LLM pass over the scan's actionable findings and stores a concise `aiSummary` on the scan document for the brand page
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
 - **User preference hints:** each scan prepares a tiny LLM-authored soft-guidance summary from explicit user-review signals before actor-run analysis begins; this is separate from the existing exact-URL `acknowledgedUrls` suppression path
 - **Existing taxonomy hints:** prompts receive the current brand's distinct `platform` and `theme` labels so the LLM can reuse them exactly where appropriate, while still inventing a new short label when none fit
-- **Per-item output:** structured JSON `{ severity, title, platform?, theme?, llmAnalysis, isFalsePositive }`
 - **Google chunk output:** structured JSON `{ items: [{ resultId, title, severity, platform?, theme?, analysis, isFalsePositive }] }`
 - **Debug prompt transcript:** the exact system + user prompt used for finding-level AI analysis is stored on each finding as `llmAnalysisPrompt` for `?debug=true` inspection
 - **Raw AI response** string is stored on every finding as `rawLlmResponse` for debugging
 - **False positives** are written to Firestore with `isFalsePositive: true`; filtered from default API responses; visible in the brand page "Non-hits" section
 
-### Analysis modes (`ActorConfig.analysisMode`)
+### Google Analysis Shape
 
-Each actor in the registry declares how its dataset items should be sent to AI analysis:
-
-| Mode | Behaviour |
-|---|---|
-| `'per-item'` (default) | One AI analysis call per dataset item → one Finding per item |
-| `'batch'` | Run-level normalization/chunking before AI analysis → one Finding per normalized URL |
-
-`'batch'` is used for actors whose items are pages/slices of the same query (e.g. Google Search
-SERP pages), so the webhook can normalize and dedupe repeated URLs before AI analysis. Google
-findings now store a compact normalized debug payload (`kind: 'google-normalized'`) with
-candidate metadata, merged sightings, and SERP context instead of the full page blobs.
-Normalized Google URLs that already appeared in previous scans for the same brand are filtered out
-before chunking, so repeat results do not trigger new LLM calls.
+Google Search results arrive as page-level SERP blobs. The webhook normalizes them into compact
+organic-result candidates, dedupes repeated URLs within the run, and classifies those candidates
+in bounded chunks. Google findings store a compact normalized debug payload
+(`kind: 'google-normalized'`) with candidate metadata, merged sightings, and SERP context instead
+of the full page blobs. Normalized Google URLs that already appeared in previous scans for the
+same brand are filtered out before chunking, so repeat results do not trigger new LLM calls.
 
 See `REVIEW.md` for full prompt text and AI analysis pipeline details.
 
@@ -359,7 +346,6 @@ Findings can now carry two optional lightweight taxonomy labels: `platform` and 
 |---|---|
 | `APIFY_API_TOKEN` | Apify platform token |
 | `APIFY_WEBHOOK_SECRET` | Shared secret for webhook validation |
-| `WHOISXML_API_KEY` | WhoisXML Brand Alert API key (custom actor) |
 | `OPENROUTER_API_KEY` | OpenRouter API key |
 | `OPENROUTER_MODEL` | AI analysis model override (default: `anthropic/claude-3.5-haiku`) |
 | `MAILERSEND_API_TOKEN` | MailerSend API token used to send branded transactional emails |

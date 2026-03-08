@@ -3,14 +3,11 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
 import { fetchDatasetItems, startDeepSearchRun } from '@/lib/apify/client';
-import { getActorConfig } from '@/lib/apify/actors';
 import { chatCompletion } from '@/lib/analysis/openrouter';
 import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-hints';
 import {
-  SYSTEM_PROMPT,
   GOOGLE_CLASSIFICATION_SYSTEM_PROMPT,
   SCAN_SUMMARY_SYSTEM_PROMPT,
-  buildAnalysisPrompt,
   buildGoogleFinalSelectionSystemPrompt,
   buildGoogleFinalSelectionPrompt,
   buildGoogleChunkAnalysisPrompt,
@@ -18,7 +15,6 @@ import {
   formatLlmPromptForDebug,
 } from '@/lib/analysis/prompts';
 import {
-  parseAnalysisOutput,
   parseGoogleChunkAnalysisOutput,
   parseGoogleSuggestionOutput,
   parseScanSummaryOutput,
@@ -289,15 +285,12 @@ async function handleSucceededRun({
 
   // Determine the source (surface) for this actor run
   const actorRunInfo = scan.actorRuns?.[runId];
-  const source = actorRunInfo?.source ?? 'unknown';
-  const actorId = actorRunInfo?.actorId ?? 'unknown';
+  const source = actorRunInfo?.source ?? 'google';
+  const actorId = actorRunInfo?.actorId ?? 'apify/google-search-scraper';
   const searchDepth = actorRunInfo?.searchDepth ?? 0;
   const searchQuery = actorRunInfo?.searchQuery;
   const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
-  const actorConfig = getActorConfig(actorId);
-  const analysisMode = actorConfig?.analysisMode ?? 'per-item';
-  const shouldSkipPreviouslySeenUrls =
-    analysisMode === 'batch' || source === 'google' || actorId === 'apify/google-search-scraper';
+  const shouldSkipPreviouslySeenUrls = source === 'google' || actorId === 'apify/google-search-scraper';
   const userPreferenceHints = scan.userPreferenceHints;
 
   // Fetch all URLs that the user has previously dismissed or addressed for this
@@ -371,147 +364,60 @@ async function handleSucceededRun({
   let skippedDuplicateCount = 0;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
 
-  if (analysisMode === 'batch') {
-    // Send all SERP pages to AI analysis in one call → one Finding per individual search result
-    const { findingCount, suggestedSearches, counts: batchCounts, skippedDuplicateCount: batchSkippedDuplicateCount } = await analyseAndWriteBatch({
+  // Send all SERP pages to AI analysis in one call → one Finding per individual search result
+  const { findingCount, suggestedSearches, counts: batchCounts, skippedDuplicateCount: batchSkippedDuplicateCount } = await analyseAndWriteBatch({
+    scanDoc,
+    scan,
+    brand,
+    source,
+    actorId,
+    datasetId,
+    runId,
+    items: itemsToAnalyse,
+    searchDepth,
+    searchQuery,
+    acknowledgedUrls,
+    userPreferenceHints,
+    previousFindingUrls,
+    existingTaxonomy,
+  });
+  newFindingCount = findingCount;
+  skippedDuplicateCount = batchSkippedDuplicateCount;
+  counts.high = batchCounts.high;
+  counts.medium = batchCounts.medium;
+  counts.low = batchCounts.low;
+  counts.nonHit = batchCounts.nonHit;
+
+  // Trigger deep follow-up searches only when this is a depth-0 run and the
+  // brand still allows AI-requested deeper searches.
+  if (
+    suggestedSearches &&
+    suggestedSearches.length > 0 &&
+    searchDepth === 0 &&
+    normalizeAllowAiDeepSearches(brand.allowAiDeepSearches)
+  ) {
+    const reservedQueries = await reserveSuggestedSearches({
       scanDoc,
-      scan,
-      brand,
-      source,
-      actorId,
-      datasetId,
       runId,
-      items: itemsToAnalyse,
-      searchDepth,
-      searchQuery,
-      acknowledgedUrls,
-      userPreferenceHints,
-      previousFindingUrls,
-      existingTaxonomy,
+      suggestedSearches,
+      maxSuggestedSearches,
     });
-    newFindingCount = findingCount;
-    skippedDuplicateCount = batchSkippedDuplicateCount;
-    counts.high = batchCounts.high;
-    counts.medium = batchCounts.medium;
-    counts.low = batchCounts.low;
-    counts.nonHit = batchCounts.nonHit;
-
-    // Trigger deep follow-up searches only when this is a depth-0 run and the
-    // brand still allows AI-requested deeper searches.
-    if (
-      suggestedSearches &&
-      suggestedSearches.length > 0 &&
-      searchDepth === 0 &&
-      normalizeAllowAiDeepSearches(brand.allowAiDeepSearches)
-    ) {
-      const reservedQueries = await reserveSuggestedSearches({
+    if (reservedQueries.length > 0) {
+      await triggerDeepSearches({
         scanDoc,
-        runId,
-        suggestedSearches,
+        scan,
+        brand,
+        suggestedSearches: reservedQueries,
         maxSuggestedSearches,
-      });
-      if (reservedQueries.length > 0) {
-        await triggerDeepSearches({
-          scanDoc,
-          scan,
-          brand,
-          suggestedSearches: reservedQueries,
-          maxSuggestedSearches,
-          webhookUrl,
-          source,
-          actorId: 'apify/google-search-scraper',
-        });
-      }
-    }
-  } else {
-    // Analyse each item sequentially to avoid rate-limiting OpenRouter
-    for (const item of itemsToAnalyse) {
-      const prompt = buildAnalysisPrompt({
-        brandName: brand.name,
-        keywords: brand.keywords,
-        officialDomains: brand.officialDomains,
-        watchWords: brand.watchWords,
-        safeWords: brand.safeWords,
-        acknowledgedUrls,
-        userPreferenceHints,
-        existingPlatforms: existingTaxonomy.platforms,
-        existingThemes: existingTaxonomy.themes,
+        webhookUrl,
         source,
-        rawData: item,
-      });
-      const llmAnalysisPrompt = formatLlmPromptForDebug(SYSTEM_PROMPT, prompt);
-
-      try {
-        const analysisResult = await analyseItem({ prompt });
-        const findingRef = db.collection('findings').doc();
-        const finding: Omit<Finding, 'id'> = {
-          scanId: scan.id ?? scanDoc.id,
-          brandId: scan.brandId,
-          userId: scan.userId,
-          source,
-          actorId,
-          severity: analysisResult.severity,
-          title: analysisResult.title,
-          ...(analysisResult.platform ? { platform: analysisResult.platform } : {}),
-          ...(analysisResult.theme ? { theme: analysisResult.theme } : {}),
-          description: analysisResult.llmAnalysis,
-          llmAnalysis: analysisResult.llmAnalysis,
-          url: extractUrl(item),
-          rawData: item,
-          isFalsePositive: analysisResult.isFalsePositive,
-          // Auto-ignore AI-classified false positives so their URLs are excluded
-          // from future scans. Users can later reclassify them if the AI got it wrong.
-          ...(analysisResult.isFalsePositive && {
-            isIgnored: true,
-            ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
-          }),
-          llmAnalysisPrompt,
-          rawLlmResponse: analysisResult.rawLlmResponse,
-          createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
-        };
-        await findingRef.set(finding);
-        if (analysisResult.isFalsePositive) {
-          counts.nonHit++;
-        } else {
-          newFindingCount++;
-          if (analysisResult.severity === 'high') counts.high++;
-          else if (analysisResult.severity === 'medium') counts.medium++;
-          else if (analysisResult.severity === 'low') counts.low++;
-        }
-      } catch (err) {
-        // On AI analysis failure, write a fallback finding so no data is silently lost
-        console.error(`[webhook] AI analysis failed for item in dataset ${datasetId}:`, err);
-        const findingRef = db.collection('findings').doc();
-        const fallbackFinding: Omit<Finding, 'id'> = {
-          scanId: scan.id ?? scanDoc.id,
-          brandId: scan.brandId,
-          userId: scan.userId,
-          source,
-          actorId,
-          severity: 'medium',
-          title: 'Unanalysed result — review manually',
-          description: 'AI analysis failed for this item. Raw data is preserved for manual review.',
-          llmAnalysis: 'AI analysis failed for this item. Raw data is preserved for manual review.',
-          url: extractUrl(item),
-          rawData: item,
-          isFalsePositive: false,
-          llmAnalysisPrompt,
-          createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
-        };
-        await findingRef.set(fallbackFinding);
-        newFindingCount++;
-        counts.medium++;
-      }
-
-      // Update per-item progress counter so the UI can show "X / N analysed"
-      await scanDoc.ref.update({
-        [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(1),
+        actorId: 'apify/google-search-scraper',
       });
     }
   }
 
   console.log(
-    `[webhook] Actor ${actorId} (run ${runId}, depth ${searchDepth}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items, ${skippedDuplicateCount} skipped as previous duplicates (mode: ${analysisMode})`,
+    `[webhook] Actor ${actorId} (run ${runId}, depth ${searchDepth}): ${newFindingCount} findings written from ${itemsToAnalyse.length} items, ${skippedDuplicateCount} skipped as previous duplicates (mode: google-batch)`,
   );
 
   await markActorRunComplete(scanDoc, runId, 'succeeded', newFindingCount, counts, skippedDuplicateCount);
@@ -1207,36 +1113,6 @@ async function triggerDeepSearches({
   // sees the right total when it reads scan.actorRunIds. In practice this is already
   // handled by the fresh-snapshot read inside the transaction, but being explicit helps.
   void scan; // scan is stale after this point — always use fresh reads in transactions
-}
-
-/**
- * Run a single dataset item through AI analysis for classification.
- * Returns parsed fields plus the raw AI response string for storage / debugging.
- */
-async function analyseItem({
-  prompt,
-}: {
-  prompt: string;
-}): Promise<{
-  severity: Finding['severity'];
-  title: string;
-  platform?: string;
-  theme?: string;
-  llmAnalysis: string;
-  isFalsePositive: boolean;
-  rawLlmResponse: string;
-}> {
-  const raw = await chatCompletion([
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: prompt },
-  ]);
-
-  const parsed = parseAnalysisOutput(raw);
-  if (!parsed) {
-    throw new Error(`Failed to parse AI analysis output: ${raw.slice(0, 200)}`);
-  }
-
-  return { ...parsed, rawLlmResponse: raw };
 }
 
 function buildGoogleFindingOutcome(
@@ -1951,17 +1827,3 @@ async function markActorRunComplete(
   }
 }
 
-/**
- * Best-effort extraction of a URL from a dataset item.
- * Different actors use different field names for the source URL.
- */
-function extractUrl(item: Record<string, unknown>): string | undefined {
-  const candidates = ['url', 'link', 'pageUrl', 'profileUrl', 'appUrl', 'storeUrl'];
-  for (const key of candidates) {
-    const val = item[key];
-    if (typeof val === 'string' && val.startsWith('http')) {
-      return val;
-    }
-  }
-  return undefined;
-}

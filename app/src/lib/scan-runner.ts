@@ -30,7 +30,6 @@ type ScheduledStartOptions = {
 
 type StartScanForBrandParams = {
   brandId: string;
-  actorIds?: string[];
   requestHeaders: Headers;
   ownerUserId?: string;
   scheduled?: ScheduledStartOptions;
@@ -63,7 +62,7 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
   const { startActorRun } = await import('@/lib/apify/client');
   const { prepareUserPreferenceHintsForScan } = await import('@/lib/analysis/user-preference-hints');
 
-  const targetActorIds = params.actorIds ?? CORE_ACTOR_IDS;
+  const targetActorIds = CORE_ACTOR_IDS;
   const brandRef = db.collection('brands').doc(params.brandId);
   const scanRef = db.collection('scans').doc();
   const now = params.scheduled?.dispatchedAt ?? new Date();

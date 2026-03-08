@@ -22,48 +22,14 @@ export interface ActorRunResult {
 }
 
 /**
- * Build the actor input payload for a given actor and brand profile.
- * Each actor expects a different input shape — map brand profile fields accordingly.
- * Exported so the scan route can inspect inputs during start-up logging.
+ * Build the Google Search actor input payload for a brand profile.
  */
-export function buildActorInput(actorId: string, brand: BrandProfile): Record<string, unknown> {
+export function buildActorInput(brand: BrandProfile): Record<string, unknown> {
   const searchTerms = [brand.name, ...brand.keywords];
   const primaryQuery = searchTerms.join(' OR ');
   const googlePageCount = getInitialGooglePageCount(brand.searchResultPages);
 
-  // Actor-specific input mappings
-  switch (actorId) {
-    case 'apify/google-search-scraper':
-      return { queries: primaryQuery, maxPagesPerQuery: googlePageCount };
-
-    case 'apify/instagram-search-scraper':
-      return { searchQueries: searchTerms, maxResults: 20 };
-
-    case 'data-slayer/twitter-search':
-      return { searchTerms: searchTerms, maxTweets: 50 };
-
-    case 'apify/facebook-search-scraper':
-      return { queries: searchTerms, maxResults: 20 };
-
-    case 'apilab/google-play-scraper':
-      return { searchQuery: brand.name, country: 'us', limit: 20 };
-
-    case 'dan.scraper/apple-app-store-search-scraper':
-      return { queries: [brand.name], country: 'us', limit: 20 };
-
-    case 'doppelspotter/whoisxml-brand-alert':
-      return {
-        brandKeywords: searchTerms,
-        apiKey: process.env.WHOISXML_API_KEY,
-        lookbackDays: 1,
-      };
-
-    case 'ryanclinton/euipo-trademark-search':
-      return { searchTerm: brand.name, maxResults: 50 };
-
-    default:
-      return { query: primaryQuery };
-  }
+  return { queries: primaryQuery, maxPagesPerQuery: googlePageCount };
 }
 
 /**
@@ -77,7 +43,7 @@ export async function startActorRun(
   webhookUrl: string,
 ): Promise<{ runId: string }> {
   const client = getClient();
-  const input = buildActorInput(actor.actorId, brand);
+  const input = buildActorInput(brand);
 
   const run = await client.actor(actor.actorId).start(input, {
     webhooks: [
@@ -150,7 +116,7 @@ export async function runActor(
   webhookUrl?: string,
 ): Promise<ActorRunResult> {
   const client = getClient();
-  const input = buildActorInput(actor.actorId, brand);
+  const input = buildActorInput(brand);
 
   const runOptions: Record<string, unknown> = { input };
 

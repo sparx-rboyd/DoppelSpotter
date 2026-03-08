@@ -2,18 +2,6 @@ import type { Severity } from '@/lib/types';
 import { normalizeFindingTaxonomyLabel } from '@/lib/findings-taxonomy';
 
 /**
- * The structured JSON output expected from AI analysis for each finding.
- */
-export interface AnalysisOutput {
-  severity: Severity;
-  title: string;
-  platform?: string;
-  theme?: string;
-  llmAnalysis: string;
-  isFalsePositive: boolean;
-}
-
-/**
  * A single Google result appearance captured from a SERP page.
  */
 export interface GoogleSearchSighting {
@@ -120,38 +108,6 @@ export interface GoogleStoredFindingRawData extends Record<string, unknown> {
 
 /** Maximum follow-up deep-search queries AI analysis may request per Google batch run */
 export const MAX_SUGGESTED_SEARCHES = 5;
-
-/**
- * Parse and validate the raw JSON string returned by AI analysis.
- * Returns null if parsing fails or the output is malformed.
- */
-export function parseAnalysisOutput(raw: string): AnalysisOutput | null {
-  try {
-    const stripped = stripJsonFences(raw);
-    const parsed = JSON.parse(stripped);
-
-    if (
-      typeof parsed.severity !== 'string' ||
-      !['high', 'medium', 'low'].includes(parsed.severity) ||
-      typeof parsed.title !== 'string' ||
-      typeof parsed.llmAnalysis !== 'string' ||
-      typeof parsed.isFalsePositive !== 'boolean'
-    ) {
-      return null;
-    }
-
-    return {
-      severity: parsed.severity as Severity,
-      title: parsed.title,
-      platform: normalizeFindingTaxonomyLabel(parsed.platform),
-      theme: normalizeFindingTaxonomyLabel(parsed.theme),
-      llmAnalysis: parsed.llmAnalysis,
-      isFalsePositive: parsed.isFalsePositive,
-    };
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Parse and validate the raw JSON string returned by chunked Google analysis.

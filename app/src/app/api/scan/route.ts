@@ -18,26 +18,24 @@ import {
   startScanForBrand,
 } from '@/lib/scan-runner';
 
-// POST /api/scan — trigger a scan for a brand
-// Body: { brandId: string; actorIds?: string[] }
+// POST /api/scan — trigger a Google-only scan for a brand
 export async function POST(request: NextRequest) {
   const { uid, error } = await requireAuth(request);
   if (error) return error;
 
-  let body: { brandId: string; actorIds?: string[] };
+  let body: { brandId: string };
   try {
     body = await request.json();
   } catch {
     return errorResponse('Invalid JSON body');
   }
 
-  const { brandId, actorIds } = body;
+  const { brandId } = body;
   if (!brandId) return errorResponse('brandId is required');
 
   try {
     const result = await startScanForBrand({
       brandId,
-      actorIds,
       ownerUserId: uid,
       requestHeaders: request.headers,
     });
