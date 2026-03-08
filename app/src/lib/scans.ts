@@ -34,7 +34,7 @@ function buildEmptyScanAiSummary(scan: Pick<Scan, 'nonHitCount' | 'skippedCount'
 
   if ((scan.nonHitCount ?? 0) > 0) {
     sentences.push(
-      `${scan.nonHitCount} result${scan.nonHitCount === 1 ? ' was' : 's were'} classified as non-hits.`,
+      `${scan.nonHitCount} result${scan.nonHitCount === 1 ? ' was' : 's were'} classified as non-findings.`,
     );
   }
   if ((scan.skippedCount ?? 0) > 0) {

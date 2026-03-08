@@ -181,8 +181,8 @@ const categoryConfig = {
     className: 'text-emerald-600',
   },
   'non-hit': {
-    label: 'Non-hit',
-    description: 'Move this finding into the non-hits section.',
+    label: 'Non-finding',
+    description: 'Move this finding into the non-findings section.',
     icon: SearchCheck,
     className: 'text-gray-600',
   },

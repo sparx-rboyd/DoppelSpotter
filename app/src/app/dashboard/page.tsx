@@ -427,7 +427,7 @@ export default function DashboardPage() {
                       onClick={() => navigateToMetricCardDrilldown('low')}
                     />
                     <DashboardMetricCard
-                      label="Non-hits"
+                      label="Non-findings"
                       value={metrics.totals.nonHit}
                       description="Results classified as benign or irrelevant."
                       icon={SearchCheck}
@@ -441,13 +441,14 @@ export default function DashboardPage() {
                       <CardHeader>
                         <h3 className="text-base font-semibold text-gray-900">Findings by scan type</h3>
                         <p className="mt-1 text-sm text-gray-500">
-                          Compare where findings are appearing across scan types.
+                          Compare where actionable findings are appearing across scan types.
                         </p>
                       </CardHeader>
                       <CardContent>
                         <DashboardStackedBarChart
                           data={metrics.sourceBreakdown}
-                          emptyMessage="No scan-type findings are available in this scope yet."
+                          emptyMessage="No actionable scan-type findings are available in this scope yet."
+                          hiddenCategories={['nonHit']}
                           onSegmentClick={(category, row) => navigateToChartDrilldown('source', category, row)}
                         />
                       </CardContent>
@@ -457,13 +458,14 @@ export default function DashboardPage() {
                       <CardHeader>
                         <h3 className="text-base font-semibold text-gray-900">Findings by theme</h3>
                         <p className="mt-1 text-sm text-gray-500">
-                          See which themes recur most often.
+                          See which themes recur most often among actionable findings.
                         </p>
                       </CardHeader>
                       <CardContent>
                         <DashboardStackedBarChart
                           data={metrics.themeBreakdown}
-                          emptyMessage="No theme-labelled findings are available in this scope yet."
+                          emptyMessage="No actionable theme-labelled findings are available in this scope yet."
+                          hiddenCategories={['nonHit']}
                           onSegmentClick={(category, row) => navigateToChartDrilldown('theme', category, row)}
                         />
                       </CardContent>

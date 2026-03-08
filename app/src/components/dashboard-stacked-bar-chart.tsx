@@ -18,6 +18,7 @@ type DashboardStackedBarChartProps = {
   data: DashboardBreakdownRow[];
   emptyMessage: string;
   onSegmentClick?: (category: DashboardBreakdownCategory, row: DashboardBreakdownRow) => void;
+  hiddenCategories?: DashboardBreakdownCategory[];
 };
 
 type DashboardChartTooltipEntry = {
@@ -47,7 +48,7 @@ const chartSeries = [
   { key: 'high', label: 'High', color: '#dc2626', hoverColor: '#b91c1c' },
   { key: 'medium', label: 'Medium', color: '#d97706', hoverColor: '#b45309' },
   { key: 'low', label: 'Low', color: '#059669', hoverColor: '#047857' },
-  { key: 'nonHit', label: 'Non-hit', color: '#cbd5e1', hoverColor: '#94a3b8' },
+  { key: 'nonHit', label: 'Non-finding', color: '#cbd5e1', hoverColor: '#94a3b8' },
 ] as const;
 
 function DashboardChartTooltip({ active, payload, label }: DashboardChartTooltipProps) {
@@ -92,6 +93,7 @@ export function DashboardStackedBarChart({
   data,
   emptyMessage,
   onSegmentClick,
+  hiddenCategories = [],
 }: DashboardStackedBarChartProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [hoveredSegmentKey, setHoveredSegmentKey] = useState<string | null>(null);
@@ -100,6 +102,23 @@ export function DashboardStackedBarChart({
     showLeft: false,
     showRight: false,
   });
+  const visibleSeries = chartSeries.filter((series) => !hiddenCategories.includes(series.key));
+  const visibleData = data
+    .map((row) => {
+      const nextRow: DashboardBreakdownRow = { ...row, total: 0 };
+
+      for (const series of chartSeries) {
+        if (hiddenCategories.includes(series.key)) {
+          nextRow[series.key] = 0;
+          continue;
+        }
+
+        nextRow.total += row[series.key];
+      }
+
+      return nextRow;
+    })
+    .filter((row) => row.total > 0);
 
   const updateScrollCues = useCallback(() => {
     const container = scrollRef.current;
@@ -127,9 +146,9 @@ export function DashboardStackedBarChart({
       window.cancelAnimationFrame(frameId);
       window.removeEventListener('resize', updateScrollCues);
     };
-  }, [data, updateScrollCues]);
+  }, [visibleData.length, updateScrollCues]);
 
-  if (data.length === 0) {
+  if (visibleData.length === 0) {
     return (
       <div className="flex min-h-[20rem] items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 px-6 text-center text-sm text-gray-500">
         {emptyMessage}
@@ -137,7 +156,7 @@ export function DashboardStackedBarChart({
     );
   }
 
-  const chartWidth = Math.max(520, data.length * 92);
+  const chartWidth = Math.max(520, visibleData.length * 92);
 
   return (
     <div
@@ -152,7 +171,7 @@ export function DashboardStackedBarChart({
         <div style={{ width: chartWidth, height: 340 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
-              data={data}
+              data={visibleData}
               margin={{ top: 8, right: 12, left: 0, bottom: 48 }}
               barGap={4}
               barCategoryGap={20}
@@ -195,7 +214,7 @@ export function DashboardStackedBarChart({
                   <span className="text-[12px] text-slate-500">{value}</span>
                 )}
               />
-              {chartSeries.map((series) => (
+              {visibleSeries.map((series) => (
                 <Bar
                   key={series.key}
                   dataKey={series.key}

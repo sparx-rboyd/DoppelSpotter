@@ -61,7 +61,7 @@ function buildCountRows(scan: Scan) {
     { label: 'High', value: scan.highCount ?? 0, tone: 'high' as const },
     { label: 'Medium', value: scan.mediumCount ?? 0, tone: 'medium' as const },
     { label: 'Low', value: scan.lowCount ?? 0, tone: 'low' as const },
-    { label: 'Non-hits', value: scan.nonHitCount ?? 0, tone: 'neutral' as const },
+    { label: 'Non-findings', value: scan.nonHitCount ?? 0, tone: 'neutral' as const },
     { label: 'Skipped', value: scan.skippedCount ?? 0, tone: 'neutral' as const },
   ];
 }

@@ -95,7 +95,7 @@ export function buildPdfFilename(brandName: string, startedAt: ExportTimestamp):
 }
 
 export function formatSeverity(finding: Pick<Finding, 'severity' | 'isFalsePositive'>): string {
-  return finding.isFalsePositive === true ? 'Non-hit' : capitalise(finding.severity);
+  return finding.isFalsePositive === true ? 'Non-finding' : capitalise(finding.severity);
 }
 
 export function formatFindingSource(finding: Pick<Finding, 'source'>): string {

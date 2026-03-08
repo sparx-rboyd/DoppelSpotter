@@ -2839,7 +2839,7 @@ export default function BrandDetailPage() {
                                   </span>
                                 </p>
                                 <p className="mt-1 text-xs text-gray-500">
-                                  Matching findings across scans, bookmarks, addressed, ignored, and non-hits.
+                                  Matching findings across scans, bookmarks, addressed, ignored, and non-findings.
                                 </p>
                               </div>
                               {searchResultsTruncated && (
@@ -2855,7 +2855,7 @@ export default function BrandDetailPage() {
                                   <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                                     {result.isFalsePositive ? (
                                       <Badge variant="default" className="rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[11px] text-gray-600">
-                                        Non-hit
+                                        Non-finding
                                       </Badge>
                                     ) : (
                                       <Badge
@@ -2959,7 +2959,7 @@ export default function BrandDetailPage() {
                               <div className="flex items-center gap-2 border-b border-gray-100 bg-gray-50 px-4 py-3">
                                 <Bookmark className="w-3.5 h-3.5 text-gray-400" />
                                 <span className="text-sm font-medium text-gray-500">
-                                  Non-hits
+                                  Non-findings
                                   <span className="ml-1.5 text-xs font-normal text-gray-400">
                                     ({bookmarkedNonHits.length})
                                   </span>
@@ -3176,7 +3176,7 @@ export default function BrandDetailPage() {
                                           <div className="flex flex-col items-center justify-center gap-2 py-6">
                                             <Shield className="w-5 h-5 text-brand-300" />
                                             <p className="text-sm text-gray-400">
-                                              Only non-hits detected so far ...
+                                              Only non-findings detected so far ...
                                             </p>
                                           </div>
                                         )
@@ -3227,7 +3227,7 @@ export default function BrandDetailPage() {
                                               ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
                                               : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
                                             <span className="text-sm font-medium text-gray-500">
-                                              Non-hits
+                                              Non-findings
                                               <span className="ml-1.5 text-xs font-normal text-gray-400">
                                                 ({visibleLiveScanNonHits.length})
                                               </span>
@@ -3600,7 +3600,7 @@ export default function BrandDetailPage() {
                                                 ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
                                                 : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
                                               <span className="text-sm font-medium text-gray-500">
-                                                Non-hits
+                                                Non-findings
                                                 <span className="ml-1.5 text-xs font-normal text-gray-400">
                                                   ({nonHits ? nonHits.length : displayedNonHitCount})
                                                 </span>
