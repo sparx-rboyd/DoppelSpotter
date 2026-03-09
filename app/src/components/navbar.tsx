@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ScanEye, LayoutDashboard, Shield } from 'lucide-react';
+import { ScanEye, LayoutDashboard, Shield, CircleHelp } from 'lucide-react';
 import { UserMenu } from '@/components/user-menu';
 import { cn } from '@/lib/utils';
 
@@ -43,7 +43,21 @@ export function Navbar() {
             ))}
           </div>
 
-          <UserMenu />
+          <div className="flex items-center gap-2">
+            <Link
+              href="/help"
+              className={cn(
+                'flex h-8 w-8 items-center justify-center rounded-full transition',
+                pathname === '/help'
+                  ? 'bg-white/20 text-white'
+                  : 'text-white/80 hover:bg-white/10 hover:text-white'
+              )}
+              aria-label="Help"
+            >
+              <CircleHelp className="h-5 w-5" />
+            </Link>
+            <UserMenu />
+          </div>
         </div>
       </div>
     </nav>
