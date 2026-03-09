@@ -60,11 +60,12 @@
                     <i data-lucide="scan-eye" class="text-white w-8 h-8"></i>
                     <span class="font-bold text-xl tracking-tight text-white">DoppelSpotter</span>
                 </div>
-                <div class="hidden md:flex items-center gap-8">
-                    <a href="#problem" class="text-white hover:text-white font-medium transition">The Problem</a>
-                    <a href="#solution" class="text-white hover:text-white font-medium transition">Solution</a>
-                    <a href="#architecture" class="text-white hover:text-white font-medium transition">Architecture</a>
-                    <a href="#alignment" class="text-white hover:text-white font-medium transition">Challenge Alignment</a>
+                <div class="hidden lg:flex items-center gap-8">
+                    <a href="#problem" class="text-white hover:text-brand-100 font-medium transition">The Problem</a>
+                    <a href="#solution" class="text-white hover:text-brand-100 font-medium transition">Solution</a>
+                    <a href="#architecture" class="text-white hover:text-brand-100 font-medium transition">Architecture</a>
+                    <a href="#ai" class="text-white hover:text-brand-100 font-medium transition flex items-center gap-1"><i data-lucide="sparkles" class="w-4 h-4"></i> Generative AI</a>
+                    <a href="#alignment" class="text-white hover:text-brand-100 font-medium transition">Challenge Alignment</a>
                     <a
                         href="https://github.com/sparx-rboyd/DoppelSpotter"
                         target="_blank"
@@ -115,64 +116,87 @@
             </div>
 
             <!-- Dashboard Mockup -->
-            <div class="mt-20 relative mx-auto max-w-5xl overflow-hidden rounded-2xl border border-gray-200/50 bg-white ring-1 ring-gray-900/5">
+            <div class="mt-20 relative mx-auto max-w-5xl overflow-hidden rounded-2xl border border-gray-200/50 bg-white ring-1 ring-gray-900/5 shadow-xl shadow-gray-200/40">
                 <div class="bg-gray-50 border-b border-gray-100 px-4 py-3 flex items-center gap-2">
                     <div class="flex gap-1.5 flex-shrink-0">
                         <div class="w-3 h-3 rounded-full bg-red-400"></div>
                         <div class="w-3 h-3 rounded-full bg-amber-400"></div>
                         <div class="w-3 h-3 rounded-full bg-green-400"></div>
                     </div>
-                    <div class="mx-auto min-w-0 rounded-md border border-gray-100 bg-white px-4 py-1 text-xs text-gray-400 sm:px-12 flex items-center gap-2">
-                        <i data-lucide="lock" class="w-3 h-3 flex-shrink-0"></i>
-                        <span class="truncate">app.doppelspotter.com</span>
+                    <div class="mx-auto min-w-0 rounded-md border border-gray-200 bg-white px-4 py-1.5 text-xs text-gray-500 sm:px-12 flex items-center gap-2 shadow-sm">
+                        <i data-lucide="lock" class="w-3 h-3 flex-shrink-0 text-gray-400"></i>
+                        <span class="truncate font-medium">app.doppelspotter.com</span>
                     </div>
                 </div>
-                <div class="p-4 sm:p-8 bg-gray-50/50">
-                    <div class="flex items-center justify-between mb-6 gap-4">
+                <div class="p-4 sm:p-8 bg-gray-50/30">
+                    <div class="flex items-center justify-between mb-4 gap-4">
                         <div>
                             <h3 class="text-base sm:text-xl font-semibold text-gray-900">Recent Threats Detected</h3>
                             <p class="text-xs sm:text-sm text-gray-500">Live web data retrieved via Apify Actors</p>
                         </div>
-                        <span class="bg-red-50 text-red-700 text-xs font-bold px-3 py-1 rounded-full border border-red-100 flex items-center gap-1 flex-shrink-0">
-                            <i data-lucide="alert-circle" class="w-3 h-3"></i> 2 High Risk
+                        <span class="flex items-center gap-1.5 flex-shrink-0">
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border border-red-300 bg-red-200 text-red-900">
+                                <i data-lucide="alert-circle" class="w-3 h-3"></i> 1 High
+                            </span>
+                            <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border border-amber-300 bg-amber-200 text-amber-900">
+                                <i data-lucide="alert-triangle" class="w-3 h-3"></i> 1 Medium
+                            </span>
                         </span>
+                    </div>
+
+                    <div class="mb-6 rounded-xl border border-brand-100 bg-brand-50/70 px-4 py-4 border-l-2 border-l-brand-500 shadow-sm">
+                        <div class="flex items-start gap-3">
+                            <i data-lucide="sparkles" class="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-500"></i>
+                            <div class="min-w-0">
+                                <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-700/80">
+                                    AI summary
+                                </p>
+                                <p class="mt-1 text-sm leading-6 text-gray-700">
+                                    This scan identified a high-risk lookalike domain that has just been registered and is already resolving to a cloned login portal. Additionally, a suspicious Discord server has been detected offering "cracked" versions of your software. Immediate takedown action is recommended.
+                                </p>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="space-y-4">
                         <!-- Mock Item 1 -->
-                        <div class="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 transition hover:border-brand-500 sm:gap-5 sm:p-5">
-                            <div class="bg-red-50 p-2 sm:p-3 rounded-lg text-red-600 flex-shrink-0">
+                        <div class="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 transition hover:border-brand-300 shadow-sm sm:gap-5 sm:p-5">
+                            <div class="bg-red-50 border border-red-100 p-2 sm:p-3 rounded-lg text-red-600 flex-shrink-0">
                                 <i data-lucide="globe" class="w-5 h-5 sm:w-6 sm:h-6"></i>
                             </div>
                             <div class="flex-1 min-w-0">
                                 <div class="flex flex-wrap items-center gap-2 mb-1">
                                     <h4 class="font-semibold text-gray-900 text-sm sm:text-base">Lookalike Domain Registered</h4>
-                                    <span class="text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-100">High Severity</span>
-                                    <span class="text-xs text-gray-400 font-mono hidden sm:inline">via doppelspotter/whoisxml-brand-alert</span>
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border border-red-300 bg-red-200 text-red-900">High</span>
+                                    <span class="text-[11px] text-gray-400 font-mono hidden sm:inline">via doppelspotter/recent-domain-registrations</span>
                                 </div>
-                                <p class="text-xs sm:text-sm text-gray-500 mb-2"><code>yourbränd-support.com</code> was registered 4 hours ago via Namecheap.</p>
-                                <div class="bg-gray-50 rounded-lg p-2 sm:p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
+                                <p class="text-xs sm:text-sm text-gray-500 mb-3"><code>yourbränd-support.com</code> was registered 4 hours ago via Namecheap.</p>
+                                <div class="bg-gray-50 rounded-lg p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
                                     <i data-lucide="bot" class="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0"></i>
-                                    <p><strong>LLM Analysis:</strong> This domain employs a homoglyph substitution ('ä' instead of 'a') and targets the "support" keyword. Combined with the recent registration date, there is a 98% probability this is being set up for a phishing campaign targeting your customers.</p>
+                                    <div>
+                                        <p><strong>LLM Analysis:</strong> This domain employs a homoglyph substitution ('ä' instead of 'a') and targets the "support" keyword. Combined with the recent registration date and the AI-enriched homepage analysis from the actor showing a cloned login screen, there is a 98% probability this is a live phishing campaign.</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
                         <!-- Mock Item 2 -->
-                        <div class="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 transition hover:border-brand-500 sm:gap-5 sm:p-5">
-                            <div class="bg-amber-50 p-2 sm:p-3 rounded-lg text-amber-600 flex-shrink-0">
-                                <i data-lucide="instagram" class="w-5 h-5 sm:w-6 sm:h-6"></i>
+                        <div class="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 transition hover:border-brand-300 shadow-sm sm:gap-5 sm:p-5">
+                            <div class="bg-amber-50 border border-amber-100 p-2 sm:p-3 rounded-lg text-amber-600 flex-shrink-0">
+                                <i data-lucide="message-square" class="w-5 h-5 sm:w-6 sm:h-6"></i>
                             </div>
                             <div class="flex-1 min-w-0">
                                 <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <h4 class="font-semibold text-gray-900 text-sm sm:text-base">Fake Social Account</h4>
-                                    <span class="text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-100">Medium Severity</span>
-                                    <span class="text-xs text-gray-400 font-mono hidden sm:inline">via apify/instagram-search-scraper</span>
+                                    <h4 class="font-semibold text-gray-900 text-sm sm:text-base">Fake Community Server</h4>
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border border-amber-300 bg-amber-200 text-amber-900">Medium</span>
+                                    <span class="text-[11px] text-gray-400 font-mono hidden sm:inline">via louisdeconinck/discord-server-scraper</span>
                                 </div>
-                                <p class="text-xs sm:text-sm text-gray-500 mb-2">Instagram profile <code>@official_yourbrand_deals</code> using your logo.</p>
-                                <div class="bg-gray-50 rounded-lg p-2 sm:p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
+                                <p class="text-xs sm:text-sm text-gray-500 mb-3">Discord server <code>Official YourBrand Hub</code> with 450 members.</p>
+                                <div class="bg-gray-50 rounded-lg p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
                                     <i data-lucide="bot" class="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0"></i>
-                                    <p><strong>LLM Analysis:</strong> Account is scraping and reposting your official content while embedding a suspicious link tree in the bio. Intent is likely affiliate fraud or counterfeit diversion.</p>
+                                    <div>
+                                        <p><strong>LLM Analysis:</strong> Server is using your official logo and name, but discussions indicate it is being used to distribute unauthorised "cracked" versions of your software. Intent is clearly illicit distribution and brand impersonation.</p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -191,24 +215,24 @@
             </div>
 
             <div class="grid md:grid-cols-3 gap-8">
-                <div class="rounded-2xl border border-gray-100 bg-white p-8 transition hover:border-brand-500">
-                    <div class="w-12 h-12 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center mb-6">
+                <div class="rounded-2xl border border-gray-100 bg-white p-8 transition hover:border-brand-500 shadow-sm">
+                    <div class="w-12 h-12 bg-brand-50 text-brand-600 rounded-xl flex items-center justify-center mb-6 border border-brand-100">
                         <i data-lucide="mouse-pointer-click" class="w-6 h-6"></i>
                     </div>
                     <h3 class="text-xl font-bold text-gray-900 mb-3">Customers Diverted</h3>
                     <p class="text-gray-600 mb-4">Over <a href="https://korlabs.io/documents/1/tma2024-shielding-brands.pdf" target="_blank" class="text-brand-600 hover:underline">2.3 million typosquatting domains</a> have been registered to mimic popular brands, sending buyers to competitors or scam sites.</p>
                 </div>
 
-                <div class="rounded-2xl border border-gray-100 bg-white p-8 transition hover:border-brand-500">
-                    <div class="w-12 h-12 bg-brand-100 text-brand-700 rounded-xl flex items-center justify-center mb-6">
+                <div class="rounded-2xl border border-gray-100 bg-white p-8 transition hover:border-brand-500 shadow-sm">
+                    <div class="w-12 h-12 bg-brand-100 text-brand-700 rounded-xl flex items-center justify-center mb-6 border border-brand-200">
                         <i data-lucide="gavel" class="w-6 h-6"></i>
                     </div>
                     <h3 class="text-xl font-bold text-gray-900 mb-3">Record Domain Disputes</h3>
                     <p class="text-gray-600 mb-4">WIPO handled a record <a href="https://www.wipo.int/export/sites/www/amc/en/docs/2024_domainnamereport.pdf" target="_blank" class="text-brand-600 hover:underline">6,168 domain disputes</a> in 2024. Retail (37%) and finance (13%) are the most targeted sectors.</p>
                 </div>
 
-                <div class="rounded-2xl border border-gray-100 bg-white p-8 transition hover:border-brand-500">
-                    <div class="w-12 h-12 bg-brand-50 text-brand-700 rounded-xl flex items-center justify-center mb-6">
+                <div class="rounded-2xl border border-gray-100 bg-white p-8 transition hover:border-brand-500 shadow-sm">
+                    <div class="w-12 h-12 bg-brand-50 text-brand-700 rounded-xl flex items-center justify-center mb-6 border border-brand-100">
                         <i data-lucide="smartphone" class="w-6 h-6"></i>
                     </div>
                     <h3 class="text-xl font-bold text-gray-900 mb-3">Clone Apps Trade on Trust</h3>
@@ -224,11 +248,11 @@
             <div class="flex flex-col lg:flex-row gap-16 items-center">
                 <div class="lg:w-1/2">
                     <h2 class="text-3xl font-bold text-gray-900 mb-6">The Solution</h2>
-                    <p class="text-lg text-gray-600 mb-10">We continuously monitor the web for potential infringements - and use an LLM via OpenRouter to separate genuine threats from the noise.</p>
+                    <p class="text-lg text-gray-600 mb-10">We continually monitor the web for potential infringements—and use an LLM via OpenRouter to separate genuine threats from the noise.</p>
                     
                     <div class="space-y-8">
                         <div class="flex gap-4">
-                            <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold">1</div>
+                            <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold border border-brand-200">1</div>
                             <div>
                                 <h4 class="text-xl font-semibold text-gray-900 mb-2">Set up your brand profile</h4>
                                 <p class="text-gray-600">Enter brand names, related keywords, and official domains to configure the monitoring scope.</p>
@@ -236,33 +260,33 @@
                         </div>
                         
                         <div class="flex gap-4">
-                            <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold">2</div>
+                            <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold border border-brand-200">2</div>
                             <div>
                                 <h4 class="text-xl font-semibold text-gray-900 mb-2">Apify Actors scan the web</h4>
-                                <p class="text-gray-600">A suite of official and custom Apify actors continuously monitors social media, search results, domain registries, and app stores.</p>
+                                <p class="text-gray-600">A suite of official and custom Apify actors continually monitors social media, search results, domain registries, and code repositories.</p>
                             </div>
                         </div>
                         
                         <div class="flex gap-4">
-                            <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold">3</div>
+                            <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold border border-brand-200">3</div>
                             <div>
                                 <h4 class="text-xl font-semibold text-gray-900 mb-2">AI analyses every finding</h4>
-                                <p class="text-gray-600">An LLM classifies intent and scores severity, filtering out false positives (e.g. distinguishing a fan page from an impersonation).</p>
+                                <p class="text-gray-600">An LLM classifies intent and scores severity, filtering out false positives (e.g., distinguishing a fan page from an impersonation).</p>
                             </div>
                         </div>
 
                         <div class="flex gap-4">
-                            <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold">4</div>
+                            <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold border border-brand-200">4</div>
                             <div>
                                 <h4 class="text-xl font-semibold text-gray-900 mb-2">Ranked Digest</h4>
-                                <p class="text-gray-600">Findings are prioritised automatically, accompanied by plain-language explanations of the concrete business risk.</p>
+                                <p class="text-gray-600">Findings are prioritised automatically, accompanied by plain-English explanations of the concrete business risk.</p>
                             </div>
                         </div>
                     </div>
                 </div>
 
                 <div class="lg:w-1/2 w-full">
-                    <div class="relative h-full overflow-hidden rounded-3xl border border-brand-900/60 bg-gradient-to-br from-brand-950 via-[#0a2540] to-[#07111f] p-8">
+                    <div class="relative h-full overflow-hidden rounded-3xl border border-brand-900/60 bg-gradient-to-br from-brand-950 via-[#0a2540] to-[#07111f] p-8 shadow-2xl">
                         <div class="absolute top-0 right-0 w-64 h-64 bg-brand-500 rounded-full mix-blend-screen filter blur-3xl opacity-20"></div>
                         <h3 class="text-xl font-bold text-white mb-6">Core AI Value</h3>
                         
@@ -272,7 +296,7 @@
                                     <i data-lucide="brain-circuit" class="w-5 h-5 text-white/90"></i>
                                     <h4 class="font-semibold text-white">Classifies Intent</h4>
                                 </div>
-                                <p class="text-sm text-brand-100/70">Goes beyond dumb keyword matching to understand context at scale-separating legitimate mentions from malicious activity.</p>
+                                <p class="text-sm text-brand-100/70">Goes beyond dumb keyword matching to understand context at scale—separating legitimate mentions from malicious activity.</p>
                             </div>
                             
                             <div class="bg-white/5 backdrop-blur-sm p-5 rounded-xl border border-brand-900/70">
@@ -301,67 +325,91 @@
     <section id="architecture" class="py-24 bg-brand-50/30 border-t border-brand-100">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center max-w-3xl mx-auto mb-16">
-                <h2 class="text-3xl font-bold text-gray-900 mb-4">Technical Architecture & Actors</h2>
+                <h2 class="text-3xl font-bold text-gray-900 mb-4">Technical Architecture &amp; Actors</h2>
                 <p class="text-lg text-gray-600">A completely autonomous data pipeline powered by Apify scheduling, webhooks, and the OpenRouter API.</p>
             </div>
 
             <div class="mb-12">
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-12">
-                    <div class="rounded-xl border border-gray-200 bg-white p-5 text-center">
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 text-center shadow-sm">
                         <div class="text-sm font-semibold text-gray-500 mb-1 uppercase tracking-wider">Frontend</div>
-                        <div class="font-bold text-gray-900">Web App</div>
+                        <div class="font-bold text-gray-900">Next.js Web App</div>
                     </div>
-                    <div class="rounded-xl border border-gray-200 bg-white p-5 text-center">
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 text-center shadow-sm">
                         <div class="text-sm font-semibold text-gray-500 mb-1 uppercase tracking-wider">Orchestration</div>
-                        <div class="font-bold text-gray-900">Apify Scheduling</div>
+                        <div class="font-bold text-gray-900">Apify Webhooks</div>
                     </div>
-                    <div class="rounded-xl border border-gray-200 bg-white p-5 text-center">
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 text-center shadow-sm">
                         <div class="text-sm font-semibold text-gray-500 mb-1 uppercase tracking-wider">AI Analysis</div>
                         <div class="font-bold text-gray-900">LLM via OpenRouter</div>
                     </div>
-                    <div class="rounded-xl border border-gray-200 bg-white p-5 text-center">
+                    <div class="rounded-xl border border-gray-200 bg-white p-5 text-center shadow-sm">
                         <div class="text-sm font-semibold text-gray-500 mb-1 uppercase tracking-wider">Alerting</div>
                         <div class="font-bold text-gray-900">Email Digests</div>
                     </div>
                 </div>
 
                 <h3 class="text-2xl font-bold text-gray-900 mb-6">Actor Suite (Core Pipeline)</h3>
-                <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+                <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
                     <table class="w-full text-left border-collapse">
                         <thead>
                             <tr class="bg-brand-50 border-b border-brand-100">
-                                <th class="p-3 sm:p-4 font-semibold text-gray-900 text-sm">Surface</th>
-                                <th class="p-3 sm:p-4 font-semibold text-gray-900 text-sm">Apify Actor</th>
-                                <th class="p-3 sm:p-4 font-semibold text-gray-900 text-sm hidden md:table-cell">Function</th>
+                                <th class="p-4 font-semibold text-gray-900 text-sm">Surface</th>
+                                <th class="p-4 font-semibold text-gray-900 text-sm">Apify Actor</th>
+                                <th class="p-4 font-semibold text-gray-900 text-sm hidden md:table-cell">Function</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200">
                             <tr>
-                                <td class="p-3 sm:p-4 font-medium text-gray-900 whitespace-nowrap text-sm"><i data-lucide="share-2" class="w-4 h-4 inline mr-1 text-brand-500"></i>Social Media</td>
-                                <td class="p-3 sm:p-4 font-mono text-xs text-gray-600">
-                                    apify/instagram-search-scraper<br>
-                                    data-slayer/twitter-search<br>
-                                    apify/facebook-search-scraper
+                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap text-sm align-top">
+                                    <i data-lucide="globe-2" class="w-4 h-4 inline mr-1 text-brand-500"></i>New Domains
                                 </td>
-                                <td class="p-3 sm:p-4 text-sm text-gray-600 hidden md:table-cell">Keyword search across platforms to identify impersonator accounts.</td>
+                                <td class="p-4 align-top">
+                                    <div class="font-mono text-xs text-brand-700 font-semibold">doppelspotter/recent-domain-registrations</div>
+                                    <div class="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded bg-brand-100 border border-brand-200">
+                                        <i data-lucide="star" class="w-3 h-3 text-brand-600"></i>
+                                        <span class="text-[10px] font-sans font-bold uppercase tracking-wide text-brand-700">Custom Built &amp; Published</span>
+                                    </div>
+                                </td>
+                                <td class="p-4 text-sm text-gray-700 hidden md:table-cell align-top">
+                                    Detects recently registered domains containing brand keywords. Uniquely uses Generative AI (<code class="bg-gray-100 px-1 rounded">claude-3.5-haiku</code>) internally to actively visit and analyse the resolving homepage for phishing intent.
+                                </td>
                             </tr>
-                            <tr class="bg-brand-50">
-                                <td class="p-3 sm:p-4 font-medium text-gray-900 whitespace-nowrap text-sm"><i data-lucide="globe-2" class="w-4 h-4 inline mr-1 text-brand-500"></i>New Domains</td>
-                                <td class="p-3 sm:p-4 font-mono text-xs text-brand-700 font-semibold">
-                                    doppelspotter/whoisxml-brand-alert<br>
-                                    <span class="text-xs font-sans font-normal text-brand-600 bg-brand-100 px-2 py-0.5 rounded mt-1 inline-block">Published for Hackathon</span>
+                            <tr class="bg-gray-50/50">
+                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap text-sm align-top">
+                                    <i data-lucide="search" class="w-4 h-4 inline mr-1 text-brand-500"></i>Search &amp; Social
                                 </td>
-                                <td class="p-3 sm:p-4 text-sm text-gray-700 hidden md:table-cell">Wraps WhoisXML Brand Alert API. Detects domains containing brand keywords registered in the past 24 hours.</td>
+                                <td class="p-4 font-mono text-xs text-gray-600 align-top">apify/google-search-scraper</td>
+                                <td class="p-4 text-sm text-gray-600 hidden md:table-cell align-top">
+                                    Powers our Web, Reddit, TikTok, YouTube, Facebook, Instagram, and Telegram specialist scans via targeted search operators.
+                                </td>
                             </tr>
                             <tr>
-                                <td class="p-3 sm:p-4 font-medium text-gray-900 whitespace-nowrap text-sm"><i data-lucide="search" class="w-4 h-4 inline mr-1 text-brand-500"></i>Web / Google</td>
-                                <td class="p-3 sm:p-4 font-mono text-xs text-gray-600">apify/google-search-scraper</td>
-                                <td class="p-3 sm:p-4 text-sm text-gray-600 hidden md:table-cell">Surfaces websites misusing brand names in titles and URLs.</td>
+                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap text-sm align-top">
+                                    <i data-lucide="message-square" class="w-4 h-4 inline mr-1 text-brand-500"></i>Discord
+                                </td>
+                                <td class="p-4 font-mono text-xs text-gray-600 align-top">louisdeconinck/discord-server-scraper</td>
+                                <td class="p-4 text-sm text-gray-600 hidden md:table-cell align-top">
+                                    Discovers public Discord servers misusing brand names and sharing unauthorised content.
+                                </td>
+                            </tr>
+                            <tr class="bg-gray-50/50">
+                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap text-sm align-top">
+                                    <i data-lucide="github" class="w-4 h-4 inline mr-1 text-brand-500"></i>GitHub
+                                </td>
+                                <td class="p-4 font-mono text-xs text-gray-600 align-top">ryanclinton/github-repo-search</td>
+                                <td class="p-4 text-sm text-gray-600 hidden md:table-cell align-top">
+                                    Surfaces public repositories containing leaked credentials, counterfeit code, or impersonating the brand.
+                                </td>
                             </tr>
                             <tr>
-                                <td class="p-3 sm:p-4 font-medium text-gray-900 whitespace-nowrap text-sm"><i data-lucide="smartphone" class="w-4 h-4 inline mr-1 text-brand-500"></i>App Stores</td>
-                                <td class="p-3 sm:p-4 font-mono text-xs text-gray-600">apilab/google-play-scraper</td>
-                                <td class="p-3 sm:p-4 text-sm text-gray-600 hidden md:table-cell">Detects clone apps bypassing store security.</td>
+                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap text-sm align-top">
+                                    <i data-lucide="twitter" class="w-4 h-4 inline mr-1 text-brand-500"></i>X (Twitter)
+                                </td>
+                                <td class="p-4 font-mono text-xs text-gray-600 align-top">apidojo/tweet-scraper</td>
+                                <td class="p-4 text-sm text-gray-600 hidden md:table-cell align-top">
+                                    Monitors X posts for impersonation, counterfeit promotion, and targeted brand abuse.
+                                </td>
                             </tr>
                         </tbody>
                     </table>
@@ -370,59 +418,108 @@
         </div>
     </section>
 
+    <!-- Built with Generative & Agentic AI Section -->
+    <section id="ai" class="py-24 bg-brand-600 text-white relative overflow-hidden">
+        <div class="absolute top-0 right-0 -z-10 transform translate-x-1/3 -translate-y-1/3">
+            <div class="w-[600px] h-[600px] bg-brand-500 rounded-full blur-[100px] opacity-50"></div>
+        </div>
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
+            <div class="text-center max-w-3xl mx-auto mb-16">
+                <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-white/10 text-white mb-6 backdrop-blur-sm border border-white/20 shadow-lg shadow-black/10">
+                    <i data-lucide="sparkles" class="w-8 h-8"></i>
+                </div>
+                <h2 class="text-3xl font-bold mb-4">Built with Generative &amp; Agentic AI</h2>
+                <p class="text-xl text-brand-100/90 leading-relaxed">AI isn't just a feature in DoppelSpotter; it's the foundation of how it was built and how it operates.</p>
+            </div>
+
+            <div class="grid md:grid-cols-3 gap-8">
+                <div class="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 shadow-xl shadow-black/10 hover:bg-white/15 transition-colors">
+                    <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-6 shadow-sm">
+                        <i data-lucide="bot" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Agentic AI Development</h3>
+                    <p class="text-brand-100/80 mb-4 leading-relaxed">We utilised Cursor's agentic AI for end-to-end development. From writing this pitch and building the landing page, to making core architectural decisions, to designing, building, testing, and deploying both the Next.js app and our custom Apify actor.</p>
+                </div>
+
+                <div class="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 shadow-xl shadow-black/10 relative overflow-hidden group hover:bg-white/15 transition-colors">
+                    <div class="absolute -right-6 -top-6 w-32 h-32 bg-brand-400/30 rounded-full blur-2xl group-hover:bg-brand-400/50 transition-colors"></div>
+                    <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-6 relative z-10 shadow-sm">
+                        <i data-lucide="cpu" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 relative z-10">Generative Analysis Engine</h3>
+                    <p class="text-brand-100/80 mb-4 relative z-10 leading-relaxed">The core of our app's pipeline uses <code class="bg-black/20 px-1.5 py-0.5 rounded text-sm font-mono text-white/90">claude-3.5-haiku</code> via OpenRouter. It performs complex intent classification, severity scoring, and generates plain-English, scan-level summaries of all findings—separating real threats from the noise.</p>
+                </div>
+
+                <div class="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 shadow-xl shadow-black/10 hover:bg-white/15 transition-colors">
+                    <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-6 shadow-sm">
+                        <i data-lucide="layers" class="w-6 h-6 text-white"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">AI-Enriched Actor</h3>
+                    <p class="text-brand-100/80 mb-4 leading-relaxed">Our custom published actor, <code class="bg-black/20 px-1.5 py-0.5 rounded text-sm font-mono text-white/90">recent-domain-registrations</code>, isn't a simple API wrapper. It intrinsically uses Generative AI during the scraping process to perform enhanced homepage analysis, actively assessing the visual and textual content of new domains for phishing intent.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- Hackathon Alignment Section -->
-    <section id="alignment" class="py-24 bg-gradient-to-br from-brand-950 via-[#0a2540] to-[#07111f] text-white relative overflow-hidden">
+    <section id="alignment" class="py-24 bg-gradient-to-br from-gray-900 via-[#0a2540] to-gray-950 text-white relative overflow-hidden">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
             <div class="text-center max-w-3xl mx-auto mb-16">
                 <div class="flex items-center justify-center gap-3 sm:gap-4 mb-6">
                     <img src="genai-zurich-logo.png" alt="GenAI Zürich 2026" class="h-9 sm:h-11 w-auto brightness-0 invert opacity-80">
-                    <span class="text-gray-600 text-xl font-light select-none">&times;</span>
+                    <span class="text-gray-500 text-xl font-light select-none">&times;</span>
                     <img src="apify-logo-wordmark-dark.png" alt="Apify" class="h-6 sm:h-7 w-auto brightness-0 invert opacity-80">
                 </div>
                 <h2 class="text-3xl font-bold mb-4">Hackathon Alignment</h2>
-                <p class="text-xl text-brand-100/70">How DoppelSpotter maps to the GenAI Zürich 2026 Apify Challenge.</p>
+                <p class="text-xl text-gray-400">How DoppelSpotter maps to the GenAI Zürich 2026 Apify Challenge.</p>
             </div>
 
             <div class="grid md:grid-cols-2 gap-8 mb-12">
-                <div class="bg-white/5 backdrop-blur-sm p-8 rounded-2xl border border-brand-900/70">
-                    <div class="inline-flex items-center justify-center w-12 h-12 bg-brand-900 text-brand-100 rounded-xl mb-6">
+                <div class="bg-white/5 backdrop-blur-sm p-8 rounded-2xl border border-white/10 shadow-lg">
+                    <div class="inline-flex items-center justify-center w-12 h-12 bg-white/10 text-brand-400 rounded-xl mb-6 shadow-inner">
                         <span class="font-bold text-xl">1</span>
                     </div>
                     <h3 class="text-xl font-bold mb-3">Path 1: AI Agent</h3>
-                    <p class="text-brand-100/70">An autonomous pipeline that scrapes live web data, analyzes findings with an LLM via OpenRouter, and delivers ranked infringement alerts with zero human in the loop.</p>
+                    <p class="text-gray-400 leading-relaxed">An autonomous pipeline that scrapes live web data, analyses findings with an LLM via OpenRouter, and delivers ranked infringement alerts with zero human in the loop.</p>
                 </div>
 
-                <div class="bg-white/5 backdrop-blur-sm p-8 rounded-2xl border border-brand-900/70">
-                    <div class="inline-flex items-center justify-center w-12 h-12 bg-brand-900 text-brand-100 rounded-xl mb-6">
+                <div class="bg-white/5 backdrop-blur-sm p-8 rounded-2xl border border-white/10 shadow-lg">
+                    <div class="inline-flex items-center justify-center w-12 h-12 bg-white/10 text-brand-400 rounded-xl mb-6 shadow-inner">
                         <span class="font-bold text-xl">3</span>
                     </div>
                     <h3 class="text-xl font-bold mb-3">Path 3: Build an Actor</h3>
-                    <p class="text-brand-100/70">The <code>doppelspotter/whoisxml-brand-alert</code> wrapper is published to the Apify Store as a standalone, reusable Actor. Any developer building domain monitoring tools can utilise it.</p>
+                    <p class="text-gray-400 leading-relaxed">The <code class="bg-black/30 px-1.5 py-0.5 rounded text-sm font-mono text-gray-300">doppelspotter/recent-domain-registrations</code> actor is published to the Apify Store as a standalone, reusable Actor. Any developer building domain monitoring tools can utilise it, bringing AI-enriched phishing detection to their own pipelines.</p>
                 </div>
             </div>
 
-            <div class="bg-gradient-to-r from-brand-900/60 to-brand-950/60 rounded-2xl p-8 border border-brand-900/70">
-                <h3 class="text-xl font-bold mb-6 flex items-center gap-2"><i data-lucide="check-circle" class="text-brand-100"></i> Success Metrics Addressed</h3>
-                <ul class="space-y-4">
-                    <li class="flex items-start gap-3">
-                        <i data-lucide="check" class="w-5 h-5 text-brand-100 flex-shrink-0 mt-0.5"></i>
+            <div class="bg-white/5 rounded-2xl p-8 border border-white/10 shadow-lg">
+                <h3 class="text-xl font-bold mb-6 flex items-center gap-2"><i data-lucide="check-circle" class="text-brand-400"></i> Success Metrics Addressed</h3>
+                <ul class="space-y-6">
+                    <li class="flex items-start gap-4">
+                        <div class="bg-brand-500/20 p-2 rounded-lg flex-shrink-0 mt-0.5">
+                            <i data-lucide="check" class="w-5 h-5 text-brand-400"></i>
+                        </div>
                         <div>
-                            <strong class="text-white block">Solves a real business problem with web data</strong>
-                            <span class="text-brand-100/70 text-sm">Brand infringement is a concrete, costly problem for SMEs - and live web scraping is the only way to detect it globally.</span>
+                            <strong class="text-white block text-lg mb-1">Solves a real business problem with web data</strong>
+                            <span class="text-gray-400 text-sm leading-relaxed block">Brand infringement is a concrete, costly problem for SMEs—and live web scraping is the only way to detect it globally.</span>
                         </div>
                     </li>
-                    <li class="flex items-start gap-3">
-                        <i data-lucide="check" class="w-5 h-5 text-brand-100 flex-shrink-0 mt-0.5"></i>
+                    <li class="flex items-start gap-4">
+                        <div class="bg-brand-500/20 p-2 rounded-lg flex-shrink-0 mt-0.5">
+                            <i data-lucide="check" class="w-5 h-5 text-brand-400"></i>
+                        </div>
                         <div>
-                            <strong class="text-white block">Works end-to-end</strong>
-                            <span class="text-brand-100/70 text-sm">Brand profile in, ranked infringement digest out. A complete pipeline from Apify scraping to OpenRouter AI analysis to user notification.</span>
+                            <strong class="text-white block text-lg mb-1">Works end-to-end</strong>
+                            <span class="text-gray-400 text-sm leading-relaxed block">Brand profile in, ranked infringement digest out. A complete pipeline from Apify scraping to OpenRouter AI analysis to user notification.</span>
                         </div>
                     </li>
-                    <li class="flex items-start gap-3">
-                        <i data-lucide="check" class="w-5 h-5 text-brand-100 flex-shrink-0 mt-0.5"></i>
+                    <li class="flex items-start gap-4">
+                        <div class="bg-brand-500/20 p-2 rounded-lg flex-shrink-0 mt-0.5">
+                            <i data-lucide="check" class="w-5 h-5 text-brand-400"></i>
+                        </div>
                         <div>
-                            <strong class="text-white block">Quality and depth of Apify integration</strong>
-                            <span class="text-brand-100/70 text-sm">Multiple actors spanning diverse monitoring surfaces form the backbone of the product, with a newly published Actor contributing back to the Apify ecosystem.</span>
+                            <strong class="text-white block text-lg mb-1">Quality and depth of Apify integration</strong>
+                            <span class="text-gray-400 text-sm leading-relaxed block">Multiple actors spanning diverse monitoring surfaces form the backbone of the product, with a newly custom-built, AI-enriched Actor published back to the Apify ecosystem.</span>
                         </div>
                     </li>
                 </ul>
