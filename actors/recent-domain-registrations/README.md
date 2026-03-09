@@ -36,8 +36,8 @@ You will need an active CodePunch subscription and valid API credentials to use 
 5. Optionally restrict the search to specific TLDs such as `com`, `net`, or `shop`.
 6. Optionally enable `Enhanced analysis` to summarise what appears on each matching domain's homepage.
 7. If enabled, provide your OpenRouter API key and, optionally, a model name.
-  - You will need a funded OpenRouter account to make API calls to most models. [More information]().
-  - This Actor has been tested with - and works well with - DeepSeek 3.2 (deepseek/deepseek-v3.2).
+  - You will need a funded OpenRouter account to make API calls to most models. [More information](https://openrouter.ai/).
+  - This Actor has been tested with - and works well with - [DeepSeek 3.2 (deepseek/deepseek-v3.2)](https://openrouter.ai/deepseek/deepseek-v3.2).
 8. Optionally choose sort field and sort order.
 9. Set a total limit for the maximum number of results to return.
 
