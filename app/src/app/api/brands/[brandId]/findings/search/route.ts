@@ -60,6 +60,7 @@ function parseSearchSource(value?: string | null): FindingSource | null {
     || value === 'facebook'
     || value === 'instagram'
     || value === 'telegram'
+    || value === 'domains'
     || value === 'discord'
     || value === 'github'
     || value === 'x'
