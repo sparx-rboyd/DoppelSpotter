@@ -44,6 +44,8 @@ const POLL_INTERVAL_MS = 5_000;
 const ACTIVE_SCAN_IDLE_POLL_INTERVAL_MS = 20_000;
 const ACTIVE_SCAN_DELETE_TOOLTIP =
   "Scan history can't be changed while a scan is running because current results are compared against previous findings.";
+const RUN_SCAN_DELETION_TOOLTIP =
+  'Scans are still being deleted. You will be able to run a new scan when this is complete. This may take several minutes.';
 const SCAN_RESULT_SET_HASH_PREFIX = 'scan-result-set-';
 const OTHER_FINDING_TAXONOMY_KEY = 'other';
 const DRILLDOWN_CATEGORY_QUERY_PARAM = 'category';
@@ -2763,6 +2765,7 @@ export default function BrandDetailPage() {
     || scansToRender.length > 0
   );
   const clearHistoryDisabledReason = scanning ? ACTIVE_SCAN_DELETE_TOOLTIP : null;
+  const runScanDisabledReason = historyDeletionInProgress ? RUN_SCAN_DELETION_TOOLTIP : null;
   const showClearHistoryAction = activeTab === 'scans' && scans.length > 0 && !isAwaitingClearHistoryConfirmation;
 
   // ---------------------------------------------------------------------------
@@ -2888,21 +2891,39 @@ export default function BrandDetailPage() {
                         )
                       )}
                       <div ref={runScanMenuRef} className="relative">
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          onClick={() => setIsRunScanMenuOpen((current) => !current)}
-                          loading={scanning}
-                          disabled={scanning || clearing || historyDeletionInProgress || isAwaitingClearHistoryConfirmation}
-                          aria-haspopup="menu"
-                          aria-expanded={isRunScanMenuOpen}
-                          className="border-white/15 bg-white !text-brand-700 hover:border-white/30 hover:bg-brand-50 disabled:hover:bg-white"
-                        >
-                          <Play className="w-4 h-4" />
-                          Run scan
-                          <ChevronDown className="h-4 w-4" />
-                        </Button>
+                        {runScanDisabledReason ? (
+                          <Tooltip content={runScanDisabledReason} align="end">
+                            <button
+                              type="button"
+                              aria-disabled="true"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                              }}
+                              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white px-3 py-1.5 text-xs font-medium text-brand-700 opacity-70 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                            >
+                              <Play className="w-4 h-4" />
+                              Run scan
+                              <ChevronDown className="h-4 w-4" />
+                            </button>
+                          </Tooltip>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => setIsRunScanMenuOpen((current) => !current)}
+                            loading={scanning}
+                            disabled={scanning || clearing || historyDeletionInProgress || isAwaitingClearHistoryConfirmation}
+                            aria-haspopup="menu"
+                            aria-expanded={isRunScanMenuOpen}
+                            className="border-white/15 bg-white !text-brand-700 hover:border-white/30 hover:bg-brand-50 disabled:hover:bg-white"
+                          >
+                            <Play className="w-4 h-4" />
+                            Run scan
+                            <ChevronDown className="h-4 w-4" />
+                          </Button>
+                        )}
                         {isRunScanMenuOpen && (
                           <div
                             role="menu"
