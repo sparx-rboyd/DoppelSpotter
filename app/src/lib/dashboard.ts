@@ -25,6 +25,10 @@ export function emptyDashboardMetricTotals(): DashboardMetricTotals {
   };
 }
 
+function getDashboardActionableTotal(row: Pick<DashboardMetricTotals, 'high' | 'medium' | 'low'>): number {
+  return row.high + row.medium + row.low;
+}
+
 export function getDashboardFindingCategory(finding: DashboardFindingRecord): DashboardBreakdownCategory | null {
   if (finding.isFalsePositive) {
     return 'nonHit';
@@ -85,7 +89,9 @@ export function buildDashboardBreakdownRows(
   }
 
   return [...rows.values()].sort((left, right) => (
-    right.total - left.total || left.label.localeCompare(right.label)
+    getDashboardActionableTotal(right) - getDashboardActionableTotal(left)
+    || right.total - left.total
+    || left.label.localeCompare(right.label)
   ));
 }
 
@@ -127,6 +133,8 @@ export function buildDashboardSourceBreakdownRows(
   }
 
   return [...rows.values()].sort((left, right) => (
-    right.total - left.total || left.label.localeCompare(right.label)
+    getDashboardActionableTotal(right) - getDashboardActionableTotal(left)
+    || right.total - left.total
+    || left.label.localeCompare(right.label)
   ));
 }
