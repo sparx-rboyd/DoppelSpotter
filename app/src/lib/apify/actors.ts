@@ -20,6 +20,8 @@ export const CORE_SCANNER_IDS: ScannerId[] = [
   'google-facebook',
   'google-instagram',
   'google-telegram',
+  'google-apple-app-store',
+  'google-play',
   'domain-registrations',
   'discord-servers',
   'github-repos',

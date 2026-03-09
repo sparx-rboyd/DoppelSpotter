@@ -4,7 +4,15 @@ import type { BrandScanSources, FindingSource, GoogleScannerId, ScannerId } from
 export type ScanFindingSource = Exclude<FindingSource, 'unknown'>;
 export type GoogleFindingSource = Extract<
   ScanFindingSource,
-  'google' | 'reddit' | 'tiktok' | 'youtube' | 'facebook' | 'instagram' | 'telegram'
+  | 'google'
+  | 'reddit'
+  | 'tiktok'
+  | 'youtube'
+  | 'facebook'
+  | 'instagram'
+  | 'telegram'
+  | 'apple_app_store'
+  | 'google_play'
 >;
 
 interface BaseScannerConfig {
@@ -68,6 +76,8 @@ export const SCAN_SOURCE_ORDER: ScanFindingSource[] = [
   'facebook',
   'instagram',
   'telegram',
+  'apple_app_store',
+  'google_play',
   'domains',
   'discord',
   'github',
@@ -82,6 +92,8 @@ export const GOOGLE_SCAN_SOURCE_ORDER: GoogleFindingSource[] = [
   'facebook',
   'instagram',
   'telegram',
+  'apple_app_store',
+  'google_play',
 ];
 
 const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
@@ -154,6 +166,26 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     siteHost: 't.me',
     supportsDeepSearch: true,
   },
+  'google-apple-app-store': {
+    id: 'google-apple-app-store',
+    source: 'apple_app_store',
+    actorId: GOOGLE_SEARCH_ACTOR_ID,
+    kind: 'google',
+    displayName: 'Apple App Store',
+    shortLabel: 'App Store',
+    siteHost: 'apps.apple.com',
+    supportsDeepSearch: true,
+  },
+  'google-play': {
+    id: 'google-play',
+    source: 'google_play',
+    actorId: GOOGLE_SEARCH_ACTOR_ID,
+    kind: 'google',
+    displayName: 'Google Play',
+    shortLabel: 'Play',
+    siteHost: 'play.google.com',
+    supportsDeepSearch: true,
+  },
   'domain-registrations': {
     id: 'domain-registrations',
     source: 'domains',
@@ -200,6 +232,8 @@ const SCANNER_ID_BY_SOURCE: Record<ScanFindingSource, ScannerId> = {
   facebook: 'google-facebook',
   instagram: 'google-instagram',
   telegram: 'google-telegram',
+  apple_app_store: 'google-apple-app-store',
+  google_play: 'google-play',
   domains: 'domain-registrations',
   discord: 'discord-servers',
   github: 'github-repos',

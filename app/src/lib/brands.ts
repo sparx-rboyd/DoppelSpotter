@@ -15,6 +15,8 @@ export const DEFAULT_BRAND_SCAN_SOURCES: BrandScanSources = {
   facebook: false,
   instagram: false,
   telegram: false,
+  apple_app_store: false,
+  google_play: false,
   domains: false,
   discord: false,
   github: false,
@@ -108,6 +110,8 @@ export function isValidBrandScanSources(value: unknown): value is BrandScanSourc
     typeof scanSources.facebook === 'boolean' &&
     typeof scanSources.instagram === 'boolean' &&
     typeof scanSources.telegram === 'boolean' &&
+    typeof scanSources.apple_app_store === 'boolean' &&
+    typeof scanSources.google_play === 'boolean' &&
     typeof scanSources.domains === 'boolean' &&
     typeof scanSources.discord === 'boolean' &&
     typeof scanSources.github === 'boolean' &&
@@ -129,6 +133,12 @@ export function normalizeBrandScanSources(value: unknown): BrandScanSources {
     facebook: typeof scanSources.facebook === 'boolean' ? scanSources.facebook : DEFAULT_BRAND_SCAN_SOURCES.facebook,
     instagram: typeof scanSources.instagram === 'boolean' ? scanSources.instagram : DEFAULT_BRAND_SCAN_SOURCES.instagram,
     telegram: typeof scanSources.telegram === 'boolean' ? scanSources.telegram : DEFAULT_BRAND_SCAN_SOURCES.telegram,
+    apple_app_store: typeof scanSources.apple_app_store === 'boolean'
+      ? scanSources.apple_app_store
+      : DEFAULT_BRAND_SCAN_SOURCES.apple_app_store,
+    google_play: typeof scanSources.google_play === 'boolean'
+      ? scanSources.google_play
+      : DEFAULT_BRAND_SCAN_SOURCES.google_play,
     domains: typeof scanSources.domains === 'boolean' ? scanSources.domains : DEFAULT_BRAND_SCAN_SOURCES.domains,
     discord: typeof scanSources.discord === 'boolean' ? scanSources.discord : DEFAULT_BRAND_SCAN_SOURCES.discord,
     github: typeof scanSources.github === 'boolean' ? scanSources.github : DEFAULT_BRAND_SCAN_SOURCES.github,
@@ -146,6 +156,8 @@ export function hasEnabledBrandScanSource(value: unknown): boolean {
     || scanSources.facebook
     || scanSources.instagram
     || scanSources.telegram
+    || scanSources.apple_app_store
+    || scanSources.google_play
     || scanSources.domains
     || scanSources.discord
     || scanSources.github

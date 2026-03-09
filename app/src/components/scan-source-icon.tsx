@@ -53,6 +53,14 @@ export function ScanSourceIcon({ source, className }: ScanSourceIconProps) {
     return <MaskedSvgIcon src="/telegram.svg" className={cn('h-[18px] w-[18px]', className)} />;
   }
 
+  if (source === 'apple_app_store') {
+    return <MaskedSvgIcon src="/appstore.svg" className={cn('h-[18px] w-[18px]', className)} />;
+  }
+
+  if (source === 'google_play') {
+    return <MaskedSvgIcon src="/googleplay.svg" className={cn('h-[18px] w-[18px]', className)} />;
+  }
+
   if (source === 'discord') {
     return <MaskedSvgIcon src="/discord.svg" className={cn('h-[18px] w-[18px]', className)} />;
   }

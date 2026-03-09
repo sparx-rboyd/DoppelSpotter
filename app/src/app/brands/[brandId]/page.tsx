@@ -2447,6 +2447,8 @@ export default function BrandDetailPage() {
         if (source === 'discord') return 'Fetching Discord server results';
         if (source === 'github') return 'Fetching GitHub repositories';
         if (source === 'x') return 'Fetching X posts';
+        if (source === 'apple_app_store') return 'Fetching Apple App Store results';
+        if (source === 'google_play') return 'Fetching Google Play results';
         return `Fetching ${sourceLabel} results`;
       case 'analysing':
         if (source === 'google') {
@@ -2463,6 +2465,12 @@ export default function BrandDetailPage() {
         }
         if (source === 'x') {
           return withAnalysisCounts('Analysing X posts', 'Analysing X posts', activeRun);
+        }
+        if (source === 'apple_app_store') {
+          return withAnalysisCounts('Analysing Apple App Store results', 'Analysing Apple App Store results', activeRun);
+        }
+        if (source === 'google_play') {
+          return withAnalysisCounts('Analysing Google Play results', 'Analysing Google Play results', activeRun);
         }
         return withAnalysisCounts(`Analysing ${sourceLabel} results`, `Analysing ${sourceLabel} results`, activeRun);
       default:

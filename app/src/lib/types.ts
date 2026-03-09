@@ -87,6 +87,8 @@ export interface BrandScanSources {
   facebook: boolean;
   instagram: boolean;
   telegram: boolean;
+  apple_app_store: boolean;
+  google_play: boolean;
   domains: boolean;
   discord: boolean;
   github: boolean;
@@ -224,6 +226,8 @@ export type FindingSource =
   | 'facebook'
   | 'instagram'
   | 'telegram'
+  | 'apple_app_store'
+  | 'google_play'
   | 'domains'
   | 'discord'
   | 'github'
@@ -294,6 +298,8 @@ export type ScannerId =
   | 'google-facebook'
   | 'google-instagram'
   | 'google-telegram'
+  | 'google-apple-app-store'
+  | 'google-play'
   | 'domain-registrations'
   | 'discord-servers'
   | 'github-repos'
@@ -308,6 +314,8 @@ export type GoogleScannerId = Extract<
   | 'google-facebook'
   | 'google-instagram'
   | 'google-telegram'
+  | 'google-apple-app-store'
+  | 'google-play'
 >;
 
 export type ActorRunStatus =

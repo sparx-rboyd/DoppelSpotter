@@ -116,7 +116,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
   if (body.scanSources !== undefined) {
     if (!isValidBrandScanSources(body.scanSources)) {
-      return errorResponse('scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, telegram, domains, discord, github, and x values');
+      return errorResponse('scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, telegram, apple_app_store, google_play, domains, discord, github, and x values');
     }
     if (!hasEnabledBrandScanSource(body.scanSources)) {
       return errorResponse('At least one scan source must be enabled');

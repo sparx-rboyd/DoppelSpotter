@@ -72,7 +72,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 
 ## Actor Registry
 
-The scan pipeline now has ten logical scanner variants backed by four physical Apify actors:
+The scan pipeline now has thirteen logical scanner variants backed by five physical Apify actors:
 
 - `google-web` → normal web search
 - `google-reddit` → Google Search constrained to `site:reddit.com`
@@ -81,12 +81,14 @@ The scan pipeline now has ten logical scanner variants backed by four physical A
 - `google-facebook` → Google Search constrained to `site:facebook.com`
 - `google-instagram` → Google Search constrained to `site:instagram.com`
 - `google-telegram` → Google Search constrained to `site:t.me`
+- `google-apple-app-store` → Google Search constrained to `site:apps.apple.com`
+- `google-play` → Google Search constrained to `site:play.google.com`
 - `discord-servers` → public Discord server discovery via the Apify Discord actor
 - `domain-registrations` → recent domain registration discovery via the CodePunch-backed Apify actor
 - `github-repos` → public GitHub repository discovery via the Apify GitHub repo-search actor
 - `x-search` → public X post discovery via the Apify tweet-search actor
 
-The seven Google logical scanners all reuse the same physical Apify actor
+The nine Google logical scanners all reuse the same physical Apify actor
 `apify/google-search-scraper`. `domain-registrations` uses
 `doppelspotter/recent-domain-registrations`, `discord-servers` uses
 `louisdeconinck/discord-server-scraper`, `github-repos` uses
@@ -95,7 +97,8 @@ The seven Google logical scanners all reuse the same physical Apify actor
 `actorId`.
 
 The generic web scanner automatically appends `-site:` exclusions for every specialist scanner
-domain (`reddit.com`, `tiktok.com`, `youtube.com`, `facebook.com`, `instagram.com`, `t.me`) even
+domain (`reddit.com`, `tiktok.com`, `youtube.com`, `facebook.com`, `instagram.com`, `t.me`,
+`apps.apple.com`, `play.google.com`) even
 when those specialist scans are disabled on the brand, so the main web search and its
 deep-search follow-ups never surface those platform-specific results. Specialist scanners apply
 platform-specific query scoping, while source identity lives on the finding itself and the only
@@ -136,7 +139,7 @@ Brand add/edit pages
  └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Domain registrations map it to requested domain volume (`100..500`), Discord maps it to an Apify spend cap (`$0.20..$0.60` per run), GitHub maps it to requested repo volume (`50..250`), and X maps it to requested tweet volume (`50..250`)
  └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches on supported Google-backed scan types
  └─ persist `brands.maxAiDeepSearches` as the user-facing `Google deep search breadth` setting; it caps AI-requested follow-up searches from 1-5 on supported Google-backed scan types
- └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|telegram|domains|discord|github|x` so each scan surface can be enabled or disabled per brand
+ └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|telegram|apple_app_store|google_play|domains|discord|github|x` so each scan surface can be enabled or disabled per brand
  └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
  └─ scheduling is anchored from the chosen local start date/time and stored timezone
 
@@ -157,7 +160,7 @@ POST /api/scan
  └─ manual runs may include optional one-off custom scan settings (depth, deep-search toggle/breadth, scan sources) without mutating the brand defaults
  └─ snapshots the resolved per-run `scans.effectiveSettings` onto the scan so later webhook processing stays deterministic even if brand settings change mid-scan
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
- └─ resolves the scan's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `domain-registrations`, `discord-servers`, `github-repos`, `x-search`) from `scans.effectiveSettings.scanSources`
+ └─ resolves the scan's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `google-apple-app-store`, `google-play`, `domain-registrations`, `discord-servers`, `github-repos`, `x-search`) from `scans.effectiveSettings.scanSources`
  └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Domain registrations map the same setting to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to `maxResults = 50..250`; X maps it to `maxItems = 50..250`
  └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
  └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
@@ -382,7 +385,8 @@ setting, which defaults to 3 and is constrained to 1-5.
 
 `ActorRunInfo` now carries `scannerId`, `searchDepth`, raw `searchQuery`, and operator-free
 `displayQuery`. The brand page progress indicator groups active work by source (`Web search`,
-`Reddit`, `TikTok`, `YouTube`, `Facebook`, `Instagram`, `Telegram channels`, `Discord servers`, `GitHub repos`, `X`),
+`Reddit`, `TikTok`, `YouTube`, `Facebook`, `Instagram`, `Telegram channels`, `Apple App Store`,
+`Google Play`, `Discord servers`, `GitHub repos`, `X`),
 lets the user switch between those source-specific progress bars, and only ever surfaces
 `displayQuery` so internal Google `site:` / `-site:` operators are never shown to users.
 
@@ -547,9 +551,9 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | `users` | id, email, passwordHash, **sessionVersion?**, **passwordChangedAt?**, **dashboardPreferences?** (`selectedBrandId?`), createdAt |
 | `inviteCodes` | id (`sha256(code)`), codeHash, createdAt, **usedAt?**, **usedByEmail?**, **usedByUserId?** |
 | `authRateLimits` | id (`<scope>:<sha256(client-identifier)>`), scope, keyHash, attemptCount, windowStartedAt, lastAttemptAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), createdAt, updatedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `apple_app_store`, `google_play`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), **deletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), actorIds[], actorRuns{} (`scannerId`, `source`, `status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`, `displayQuery?`, `deepSearchSuggestionsProcessed?`, `suggestedSearches?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`domains`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
+| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`apple_app_store`\|`google_play`\|`domains`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 
 ---
 

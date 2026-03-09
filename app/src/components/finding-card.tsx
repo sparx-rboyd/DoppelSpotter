@@ -195,6 +195,16 @@ const sourceConfig: Record<
     textClass: 'text-brand-600',
     label: getFindingSourceLabel('telegram'),
   },
+  apple_app_store: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('apple_app_store'),
+  },
+  google_play: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('google_play'),
+  },
   domains: {
     bgClass: 'bg-brand-50',
     textClass: 'text-brand-600',
