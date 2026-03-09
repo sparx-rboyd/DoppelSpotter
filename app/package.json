@@ -12,6 +12,7 @@
     "lint": "next lint",
     "type-check": "tsc --noEmit",
     "add-user": "tsx scripts/add-user.ts",
+    "add-invite-code": "tsx scripts/add-invite-code.ts",
     "backfill-scan-counts": "tsx scripts/backfill-scan-counts.ts"
   },
   "dependencies": {

@@ -18,6 +18,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
+  signUp: (email: string, password: string, inviteCode: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -88,6 +89,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     broadcastAuthSyncEvent('signed-in');
   }
 
+  async function signUp(email: string, password: string, inviteCode: string) {
+    const res = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ email, password, inviteCode }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error ?? 'Sign up failed');
+    }
+    const data = await res.json();
+    setUser({ userId: data.userId, email: data.email });
+    broadcastAuthSyncEvent('signed-in');
+  }
+
   async function signOut() {
     await fetch('/api/auth/logout', {
       method: 'POST',
@@ -98,7 +115,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
       {children}
     </AuthContext.Provider>
   );

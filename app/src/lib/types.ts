@@ -20,6 +20,22 @@ export interface DashboardPreferences {
   selectedBrandId?: string;
 }
 
+export interface InviteCodeRecord {
+  codeHash: string;
+  usedAt?: Timestamp;
+  usedByEmail?: string;
+  usedByUserId?: string;
+  createdAt: Timestamp;
+}
+
+export interface SignupRateLimitRecord {
+  scope: string;
+  keyHash: string;
+  attemptCount: number;
+  windowStartedAt: Timestamp;
+  lastAttemptAt: Timestamp;
+}
+
 // ─── Scheduling ─────────────────────────────────────────────────────────────
 
 export type ScanScheduleFrequency = 'daily' | 'weekly' | 'fortnightly' | 'monthly';
