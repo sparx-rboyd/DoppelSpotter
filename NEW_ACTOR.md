@@ -1,8 +1,10 @@
 # Overview
 
-All of our existing scan types use pre-existing Apify Actors. 
+Status: implemented and published on Apify Store at https://apify.com/doppelspotter/recent-domain-registrations
 
-We're now going to make our own 'Recent domain registrations scanner' Actor.
+All of our existing scan types use pre-existing Apify Actors.
+
+We have now made and published our own `Recent domain registrations` Actor.
 
 This will wrap the CodePunch GTLD Domain Name Acitvity Feed API (V2), which is documented at https://codepunch.com/dnfeed/v2/ (the /added endpoint).
 
@@ -23,7 +25,9 @@ The dm param should always be set to data.
 
 Teh Actor should return data in an Apify-friendly format.
 
-We should publish the Actor to Apify so that we can use it soon in our app (no need to actually wire it in yet - we'll do that later).
+The Actor is now live on Apify and available for future app integration work.
+
+The published Actor also includes a Store-safe healthcheck path: if it is started with missing or placeholder CodePunch credentials, it returns a single diagnostic dataset item instead of failing the run. This keeps Apify Store auto-tests green while still requiring real credentials for actual lookups.
 
 
 

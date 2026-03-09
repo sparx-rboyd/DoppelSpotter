@@ -28,11 +28,11 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 ├── AGENTS.md                     # This file
 ├── REVIEW.md                     # Ongoing scan quality review notes
 ├── PITCH.md                      # Product pitch / spec
-├── NEW_ACTOR.md                  # Draft specification for the recent-domain-registrations Apify actor
+├── NEW_ACTOR.md                  # Spec + publication notes for the recent-domain-registrations Apify actor
 ├── cloudbuild.yaml               # GCP Cloud Build CI/CD pipeline
 ├── wrangler.toml                 # Cloudflare Workers config (landing page)
 ├── actors/                       # Standalone Apify actors and prototypes
-│   └── recent-domain-registrations/ # CodePunch-backed recent-domain-registrations actor
+│   └── recent-domain-registrations/ # CodePunch-backed recent-domain-registrations actor (published at apify.com/doppelspotter/recent-domain-registrations)
 ├── landing-page/                 # Static marketing site
 ├── app/                          # Next.js 15 application
 │   └── src/

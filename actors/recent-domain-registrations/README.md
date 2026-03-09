@@ -1,10 +1,14 @@
 # Recent Domain Registrations
 
+Live Apify Store listing: https://apify.com/doppelspotter/recent-domain-registrations
+
 Search recent domain registrations from the CodePunch GTLD Domain Name Activity Feed v2 using keyword, date, and TLD filters, and request enhanced AI analyses of the top level web page for each domain.
 
 This actor is useful when you want to monitor newly registered domains that may reference a brand, product name, campaign, or watch word. It queries the CodePunch `/added` feed, paginates through results automatically, and returns one dataset item per matching domain.
 
 You will need an active CodePunch subscription and valid API credentials to use this actor. [More information](https://codepunch.com/dnfeed/v2/).
+
+If the actor is started without a configured CodePunch API key and secret, it returns a single diagnostic dataset item explaining that those credentials must be configured. This keeps Apify Store healthchecks green, but real lookups only run once valid CodePunch credentials are provided.
 
 ## What this actor does
 

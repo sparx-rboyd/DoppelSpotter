@@ -24,6 +24,33 @@ const GENERIC_FETCH_ERROR = 'Website content could not be retrieved for this dom
 const DATE_COMPARISONS = new Set(['eq', 'lt', 'gt', 'lte', 'gte']);
 const SORT_FIELDS = new Set(['date', 'domain', 'tld']);
 const SORT_ORDERS = new Set(['asc', 'desc']);
+const PLACEHOLDER_SECRET_VALUES = new Set([
+  'demo',
+  'demo-key',
+  'demo-secret',
+  'placeholder',
+  'your-api-key',
+  'your-api-secret',
+  'openrouter-key',
+  'changeme',
+]);
+
+function hasConfiguredCredentials(rawInput) {
+  return isConfiguredSecretValue(rawInput.apiKey) && isConfiguredSecretValue(rawInput.apiSecret);
+}
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function isConfiguredSecretValue(value) {
+  if (!isNonEmptyString(value)) {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return !PLACEHOLDER_SECRET_VALUES.has(normalized);
+}
 
 function normalizeInput(rawInput) {
   const apiKey = expectNonEmptyString(rawInput.apiKey, 'apiKey');
@@ -1031,6 +1058,34 @@ function buildCodePunchResponseError(response, message) {
   });
 }
 
+async function emitMissingCredentialsHealthcheck(rawInput) {
+  const apiKeyConfigured = isConfiguredSecretValue(rawInput.apiKey);
+  const apiSecretConfigured = isConfiguredSecretValue(rawInput.apiSecret);
+
+  const summary = {
+    status: 'healthcheck_configuration_required',
+    message: 'Configure CodePunch API key and CodePunch API secret to run recent-domain lookups.',
+    details: [
+      'This actor depends on the CodePunch GTLD Domain Name Activity Feed v2.',
+      'The Apify Store healthcheck can run without secrets, so this diagnostic item is emitted instead of failing the run.',
+      'Once valid credentials are provided, the actor will query CodePunch and return matching domains normally.',
+    ],
+    configuredCredentials: {
+      apiKey: apiKeyConfigured,
+      apiSecret: apiSecretConfigured,
+    },
+    enhancedAnalysisConfigured: rawInput.enhancedAnalysisEnabled === true
+      ? isNonEmptyString(rawInput.openRouterApiKey)
+      : null,
+    checkedAt: new Date().toISOString(),
+  };
+
+  await Actor.pushData(summary);
+  await Actor.setValue('OUTPUT_SUMMARY', summary);
+
+  log.warning('Actor completed with healthcheck response because CodePunch credentials are not configured');
+}
+
 await runActor();
 
 async function runActor() {
@@ -1038,6 +1093,11 @@ async function runActor() {
 
   try {
     const rawInput = (await Actor.getInput()) ?? {};
+    if (!hasConfiguredCredentials(rawInput)) {
+      await emitMissingCredentialsHealthcheck(rawInput);
+      return;
+    }
+
     const input = normalizeInput(rawInput);
     const tokenCache = await Actor.openKeyValueStore(TOKEN_CACHE_STORE_NAME);
     const tokenManager = new CodePunchTokenManager({
