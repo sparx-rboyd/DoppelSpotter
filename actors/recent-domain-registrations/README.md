@@ -1,6 +1,6 @@
 # Recent Domain Registrations
 
-Search recent domain registrations from the CodePunch GTLD Domain Name Activity Feed v2 using keyword, date, and TLD filters.
+Search recent domain registrations from the CodePunch GTLD Domain Name Activity Feed v2 using keyword, date, and TLD filters, and request enhanced AI analyses of the top level web page for each domain.
 
 This actor is useful when you want to monitor newly registered domains that may reference a brand, product name, campaign, or watch word. It queries the CodePunch `/added` feed, paginates through results automatically, and returns one dataset item per matching domain.
 
@@ -13,7 +13,7 @@ You will need an active CodePunch subscription and valid API credentials to use 
 - Lets you filter by date comparison and optional TLDs
 - Auto-paginates until all matches are retrieved or your selected limit is reached
 - Outputs one Apify dataset item per matching domain
-- Optionally fetches homepage content from each matching domain and asks an LLM to summarize what appears there
+- Optionally fetches homepage content from each matching domain and asks the LLM of your choice to summarise what appears there
 
 ## Typical use cases
 
@@ -34,8 +34,10 @@ You will need an active CodePunch subscription and valid API credentials to use 
    - `Greater than or equal to`
 4. Add one or more keywords.
 5. Optionally restrict the search to specific TLDs such as `com`, `net`, or `shop`.
-6. Optionally enable `Enhanced analysis` to summarize what appears on each matching domain's homepage.
+6. Optionally enable `Enhanced analysis` to summarise what appears on each matching domain's homepage.
 7. If enabled, provide your OpenRouter API key and, optionally, a model name.
+  - You will need a funded OpenRouter account to make API calls to most models. [More information]().
+  - This Actor has been tested with - and works well with - DeepSeek 3.2 (deepseek/deepseek-v3.2).
 8. Optionally choose sort field and sort order.
 9. Set a total limit for the maximum number of results to return.
 
@@ -49,7 +51,7 @@ You will need an active CodePunch subscription and valid API credentials to use 
 | `Date comparison` | Yes | How the selected date should be applied to the query. |
 | `Keywords` | Yes | One or more terms to search for in recent registrations. |
 | `TLDs` | No | Optional list of top-level domains to include. |
-| `Enhanced analysis` | No | If enabled, the actor fetches the homepage content for each matching domain and asks an LLM to summarize it. |
+| `Enhanced analysis` | No | If enabled, the actor fetches the homepage content for each matching domain and asks an LLM to summarise it. |
 | `OpenRouter API key` | No | Required only when Enhanced analysis is enabled. |
 | `OpenRouter model` | No | Optional model name for Enhanced analysis. Default: `deepseek/deepseek-v3.2`. |
 | `Sort field` | No | Sort by `Date`, `Domain`, or `Top-level domain`. |
