@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/auth/auth-context';
 import { resolveSafeReturnTo } from '@/lib/auth/redirects';
 
 export default function SignupClient() {
-  const { user, loading: authLoading, signUp } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -37,8 +37,21 @@ export default function SignupClient() {
     setLoading(true);
 
     try {
-      await signUp(email, password, inviteCode);
-      router.replace(returnTo);
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email, password, inviteCode }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error ?? 'Sign up failed');
+      }
+
+      const data = await res.json();
+      const params = new URLSearchParams({ email: data.email ?? email });
+      router.replace(`/verify-email?${params.toString()}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred.');
     } finally {

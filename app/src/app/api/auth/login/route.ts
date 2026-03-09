@@ -33,12 +33,23 @@ export async function POST(request: NextRequest) {
   }
 
   const userDoc = snapshot.docs[0];
-  const user = userDoc.data() as Pick<UserRecord, 'email' | 'passwordHash' | 'sessionVersion'>;
+  const user = userDoc.data() as Pick<UserRecord, 'email' | 'passwordHash' | 'sessionVersion' | 'emailVerified'>;
   const { passwordHash } = user;
 
   const valid = await bcrypt.compare(password, passwordHash);
   if (!valid) {
     return errorResponse('Invalid email or password', 401);
+  }
+
+  if (user.emailVerified === false) {
+    return NextResponse.json(
+      {
+        error: 'Please verify your email address before signing in.',
+        errorCode: 'EMAIL_NOT_VERIFIED',
+        email: normalizedEmail,
+      },
+      { status: 403 },
+    );
   }
 
   const sessionVersion = user.sessionVersion ?? 0;

@@ -4,11 +4,11 @@ import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ScanEye } from 'lucide-react';
-import { useAuth } from '@/lib/auth/auth-context';
+import { useAuth, broadcastAuthSyncEvent } from '@/lib/auth/auth-context';
 import { resolveSafeReturnTo } from '@/lib/auth/redirects';
 
 export default function LoginClient() {
-  const { user, loading: authLoading, signIn } = useAuth();
+  const { user, loading: authLoading, refreshSession } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -29,7 +29,26 @@ export default function LoginClient() {
     setLoading(true);
 
     try {
-      await signIn(email, password);
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        if (data.errorCode === 'EMAIL_NOT_VERIFIED') {
+          const params = new URLSearchParams({ email: data.email ?? email });
+          router.replace(`/verify-email?${params.toString()}`);
+          return;
+        }
+        throw new Error(data.error ?? 'Sign in failed');
+      }
+
+      await refreshSession();
+      broadcastAuthSyncEvent('signed-in');
       router.replace(returnTo);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'An error occurred.');

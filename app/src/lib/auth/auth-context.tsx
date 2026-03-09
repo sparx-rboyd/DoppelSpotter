@@ -20,6 +20,7 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, inviteCode: string) => Promise<void>;
   signOut: () => Promise<void>;
+  refreshSession: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -100,9 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.error ?? 'Sign up failed');
     }
-    const data = await res.json();
-    setUser({ userId: data.userId, email: data.email });
-    broadcastAuthSyncEvent('signed-in');
+    // No session is issued at signup — the user must verify their email first
   }
 
   async function signOut() {
@@ -115,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, signIn, signUp, signOut, refreshSession }}>
       {children}
     </AuthContext.Provider>
   );

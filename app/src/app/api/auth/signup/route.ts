@@ -2,10 +2,17 @@ import { NextResponse, type NextRequest } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { FieldValue } from '@google-cloud/firestore';
 import { errorResponse } from '@/lib/api-utils';
-import { signToken, AUTH_COOKIE_NAME } from '@/lib/auth/jwt';
-import { normaliseEmail } from '@/lib/email-branding';
+import { signEmailVerificationToken } from '@/lib/auth/jwt';
+import {
+  MAILERSEND_FROM_EMAIL,
+  MAILERSEND_FROM_NAME,
+  normaliseEmail,
+  normalizeEmailErrorMessage,
+} from '@/lib/email-branding';
+import { buildEmailVerificationContent, buildEmailVerificationLink } from '@/lib/email-verification';
 import { db } from '@/lib/firestore';
 import { hashInviteCode, normalizeInviteCode } from '@/lib/invite-codes';
+import { sendMailerSendEmail } from '@/lib/mailersend';
 import { consumeSignupRateLimit } from '@/lib/signup-rate-limit';
 import type { InviteCodeRecord } from '@/lib/types';
 
@@ -89,6 +96,7 @@ export async function POST(request: NextRequest) {
         email: normalizedEmail,
         passwordHash,
         sessionVersion: 0,
+        emailVerified: false,
         createdAt: FieldValue.serverTimestamp(),
       });
       tx.update(inviteRef, {
@@ -100,17 +108,25 @@ export async function POST(request: NextRequest) {
       return { userId: userRef.id };
     });
 
-    const token = signToken(result.userId, normalizedEmail, 0);
-    const response = NextResponse.json({ userId: result.userId, email: normalizedEmail });
-    response.cookies.set(AUTH_COOKIE_NAME, token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24 * 7,
-      path: '/',
-    });
+    const verificationToken = signEmailVerificationToken(result.userId, normalizedEmail);
+    const verificationLink = buildEmailVerificationLink(verificationToken);
+    const content = buildEmailVerificationContent(verificationLink);
 
-    return response;
+    try {
+      await sendMailerSendEmail({
+        from: { email: MAILERSEND_FROM_EMAIL, name: MAILERSEND_FROM_NAME },
+        to: [{ email: normalizedEmail }],
+        subject: content.subject,
+        html: content.html,
+        text: content.text,
+      });
+    } catch (emailError) {
+      // Non-fatal: the user doc exists and they can request a new link via the resend flow
+      const message = normalizeEmailErrorMessage(emailError);
+      console.error(`[signup] Failed to send verification email for ${normalizedEmail}: ${message}`, emailError);
+    }
+
+    return NextResponse.json({ email: normalizedEmail });
   } catch (error) {
     if (error instanceof SignupError) {
       return errorResponse(error.message, error.status);

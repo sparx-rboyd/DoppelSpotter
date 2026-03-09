@@ -12,6 +12,13 @@ export interface UserRecord {
   passwordChangedAt?: Timestamp;
   /** Optional per-user dashboard state persisted across devices. */
   dashboardPreferences?: DashboardPreferences;
+  /**
+   * Explicitly false for new users until they click their verification link.
+   * undefined / missing means verified (backwards-compat for existing accounts).
+   */
+  emailVerified?: boolean;
+  /** Set the first time emailVerified is flipped to true. */
+  emailVerifiedAt?: Timestamp;
   createdAt: Timestamp;
 }
 
