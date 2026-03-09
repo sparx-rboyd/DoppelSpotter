@@ -97,7 +97,7 @@ export function BrandScanTuningFields({
         <SliderField
           id="search-result-pages"
           label="Search depth"
-          tooltip="Controls how extensively DoppelSpotter searches for potential matches. Google-backed scan types like Web search, Reddit, TikTok, YouTube, Facebook, Instagram, and Telegram channels use this as search-result depth, GitHub repos and X map it to result volume from 50 to 250 items, and Discord servers map it to an Apify spend cap from $0.20 to $0.60 per run."
+          tooltip="Controls how extensively DoppelSpotter searches for potential matches. Google-backed scan types like Web search, Reddit, TikTok, YouTube, Facebook, Instagram, and Telegram channels use this as search-result depth, Domain registrations map it to result volume from 100 to 500 domains, GitHub repos and X map it to result volume from 50 to 250 items, and Discord servers map it to an Apify spend cap from $0.20 to $0.60 per run."
           value={searchResultPages}
           min={MIN_SEARCH_RESULT_PAGES}
           max={MAX_SEARCH_RESULT_PAGES}
@@ -113,7 +113,7 @@ export function BrandScanTuningFields({
         <div className="flex min-w-0 flex-col gap-1">
           <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
             Allow AI analysis to request deeper Google-backed searches
-            <InfoTooltip content="Allows AI analysis to request follow-up searches when it spots something concerning on Google-backed scan types such as Web search, Reddit, TikTok, YouTube, Facebook, Instagram, and Telegram channels. Discord servers, GitHub repos, and X do not support deep search." />
+            <InfoTooltip content="Allows AI analysis to request follow-up searches when it spots something concerning on Google-backed scan types such as Web search, Reddit, TikTok, YouTube, Facebook, Instagram, and Telegram channels. Domain registrations, Discord servers, GitHub repos, and X do not support deep search." />
           </div>
         </div>
         <button

@@ -1,5 +1,6 @@
 import {
   getEnabledScannerConfigs,
+  DOMAIN_REGISTRATIONS_ACTOR_ID,
   getScannerConfigById,
   GOOGLE_SEARCH_ACTOR_ID,
   X_TWEET_SCRAPER_ACTOR_ID,
@@ -19,6 +20,7 @@ export const CORE_SCANNER_IDS: ScannerId[] = [
   'google-facebook',
   'google-instagram',
   'google-telegram',
+  'domain-registrations',
   'discord-servers',
   'github-repos',
   'x-search',
@@ -34,6 +36,7 @@ export function getTargetActorConfigs(brand: BrandProfile): ActorConfig[] {
 
 export {
   DISCORD_SERVER_SCRAPER_ACTOR_ID,
+  DOMAIN_REGISTRATIONS_ACTOR_ID,
   GITHUB_REPO_SEARCH_ACTOR_ID,
   GOOGLE_SEARCH_ACTOR_ID,
   X_TWEET_SCRAPER_ACTOR_ID,

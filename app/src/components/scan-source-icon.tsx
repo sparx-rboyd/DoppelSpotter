@@ -1,6 +1,6 @@
 'use client';
 
-import { Globe } from 'lucide-react';
+import { Globe, Router } from 'lucide-react';
 import type { FindingSource } from '@/lib/types';
 import { cn } from '@/lib/utils';
 
@@ -55,6 +55,10 @@ export function ScanSourceIcon({ source, className }: ScanSourceIconProps) {
 
   if (source === 'discord') {
     return <MaskedSvgIcon src="/discord.svg" className={cn('h-[18px] w-[18px]', className)} />;
+  }
+
+  if (source === 'domains') {
+    return <Router className={cn('h-[18px] w-[18px]', className)} aria-hidden="true" />;
   }
 
   if (source === 'github') {

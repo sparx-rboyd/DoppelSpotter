@@ -2160,6 +2160,7 @@ export default function BrandDetailPage() {
       case 'waiting_for_preference_hints': return 'Preparing analysis context';
       case 'fetching_dataset':
         if (source === 'google') return 'Fetching search results';
+        if (source === 'domains') return 'Fetching recent domain registrations';
         if (source === 'discord') return 'Fetching Discord server results';
         if (source === 'github') return 'Fetching GitHub repositories';
         if (source === 'x') return 'Fetching X posts';
@@ -2167,6 +2168,9 @@ export default function BrandDetailPage() {
       case 'analysing':
         if (source === 'google') {
           return withAnalysisCounts('Analysing search results', 'Analysing search results', activeRun);
+        }
+        if (source === 'domains') {
+          return withAnalysisCounts('Analysing recent domain registrations', 'Analysing recent domain registrations', activeRun);
         }
         if (source === 'discord') {
           return withAnalysisCounts('Analysing Discord server results', 'Analysing Discord server results', activeRun);

@@ -80,6 +80,7 @@ export interface BrandScanSources {
   facebook: boolean;
   instagram: boolean;
   telegram: boolean;
+  domains: boolean;
   discord: boolean;
   github: boolean;
   x: boolean;
@@ -202,6 +203,7 @@ export type FindingSource =
   | 'facebook'
   | 'instagram'
   | 'telegram'
+  | 'domains'
   | 'discord'
   | 'github'
   | 'x'
@@ -271,6 +273,7 @@ export type ScannerId =
   | 'google-facebook'
   | 'google-instagram'
   | 'google-telegram'
+  | 'domain-registrations'
   | 'discord-servers'
   | 'github-repos'
   | 'x-search';

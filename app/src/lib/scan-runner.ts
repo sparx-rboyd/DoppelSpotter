@@ -61,7 +61,7 @@ type PreparedScanStart = {
 
 export async function startScanForBrand(params: StartScanForBrandParams): Promise<StartScanForBrandResult> {
   const { getTargetActorConfigs } = await import('@/lib/apify/actors');
-  const { startActorRun } = await import('@/lib/apify/client');
+  const { startActorRuns } = await import('@/lib/apify/client');
   const { prepareUserPreferenceHintsForScan } = await import('@/lib/analysis/user-preference-hints');
   const brandRef = db.collection('brands').doc(params.brandId);
   const scanRef = db.collection('scans').doc();
@@ -201,10 +201,13 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
   const actorStartPromise = (async () => {
     const results = await Promise.all(readyScan.targetActors.map(async (actorConfig) => {
       try {
-        const { runId, query, displayQuery } = await startActorRun(actorConfig, readyScan.brand, webhookUrl);
-        await readyScan.scanRef.update({
-          actorRunIds: FieldValue.arrayUnion(runId),
-          [`actorRuns.${runId}`]: {
+        const { runs, failedCount } = await startActorRuns(actorConfig, readyScan.brand, webhookUrl);
+        const updates: Record<string, unknown> = {
+          actorRunIds: FieldValue.arrayUnion(...runs.map((run) => run.runId)),
+        };
+
+        for (const { runId, query, displayQuery } of runs) {
+          updates[`actorRuns.${runId}`] = {
             scannerId: actorConfig.id,
             actorId: actorConfig.actorId,
             source: actorConfig.source,
@@ -213,17 +216,29 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
             searchDepth: 0,
             searchQuery: query,
             displayQuery,
-          } satisfies ActorRunInfo,
-        });
-        console.log(`[scan] Started scanner ${actorConfig.id} (${actorConfig.actorId}) → runId=${runId}`);
-        return true;
+          } satisfies ActorRunInfo;
+        }
+
+        await readyScan.scanRef.update(updates);
+
+        if (failedCount > 0) {
+          console.error(
+            `[scan] Started scanner ${actorConfig.id} (${actorConfig.actorId}) with ${runs.length} run(s); ${failedCount} batched run(s) failed to start`,
+          );
+        } else {
+          console.log(
+            `[scan] Started scanner ${actorConfig.id} (${actorConfig.actorId}) with ${runs.length} run(s): ${runs.map((run) => run.runId).join(', ')}`,
+          );
+        }
+
+        return runs.length;
       } catch (error) {
         console.error(`[scan] Failed to start scanner ${actorConfig.id}:`, error);
-        return false;
+        return 0;
       }
     }));
 
-    const successCount = results.filter(Boolean).length;
+    const successCount = results.reduce((sum, count) => sum + count, 0);
     return { successCount };
   })();
 

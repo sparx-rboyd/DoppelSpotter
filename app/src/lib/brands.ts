@@ -15,6 +15,7 @@ export const DEFAULT_BRAND_SCAN_SOURCES: BrandScanSources = {
   facebook: false,
   instagram: false,
   telegram: false,
+  domains: false,
   discord: false,
   github: false,
   x: false,
@@ -64,6 +65,10 @@ export function getInitialXMaxItems(searchResultPages?: unknown): number {
   return normalizeSearchResultPages(searchResultPages) * 50;
 }
 
+export function getInitialDomainRegistrationLimit(searchResultPages?: unknown): number {
+  return normalizeSearchResultPages(searchResultPages) * 100;
+}
+
 export function getInitialDiscordMaxTotalChargeUsd(searchResultPages?: unknown): number {
   const depth = normalizeSearchResultPages(searchResultPages);
   const minUsd = 0.2;
@@ -103,6 +108,7 @@ export function isValidBrandScanSources(value: unknown): value is BrandScanSourc
     typeof scanSources.facebook === 'boolean' &&
     typeof scanSources.instagram === 'boolean' &&
     typeof scanSources.telegram === 'boolean' &&
+    typeof scanSources.domains === 'boolean' &&
     typeof scanSources.discord === 'boolean' &&
     typeof scanSources.github === 'boolean' &&
     typeof scanSources.x === 'boolean'
@@ -123,6 +129,7 @@ export function normalizeBrandScanSources(value: unknown): BrandScanSources {
     facebook: typeof scanSources.facebook === 'boolean' ? scanSources.facebook : DEFAULT_BRAND_SCAN_SOURCES.facebook,
     instagram: typeof scanSources.instagram === 'boolean' ? scanSources.instagram : DEFAULT_BRAND_SCAN_SOURCES.instagram,
     telegram: typeof scanSources.telegram === 'boolean' ? scanSources.telegram : DEFAULT_BRAND_SCAN_SOURCES.telegram,
+    domains: typeof scanSources.domains === 'boolean' ? scanSources.domains : DEFAULT_BRAND_SCAN_SOURCES.domains,
     discord: typeof scanSources.discord === 'boolean' ? scanSources.discord : DEFAULT_BRAND_SCAN_SOURCES.discord,
     github: typeof scanSources.github === 'boolean' ? scanSources.github : DEFAULT_BRAND_SCAN_SOURCES.github,
     x: typeof scanSources.x === 'boolean' ? scanSources.x : DEFAULT_BRAND_SCAN_SOURCES.x,
@@ -139,6 +146,7 @@ export function hasEnabledBrandScanSource(value: unknown): boolean {
     || scanSources.facebook
     || scanSources.instagram
     || scanSources.telegram
+    || scanSources.domains
     || scanSources.discord
     || scanSources.github
     || scanSources.x

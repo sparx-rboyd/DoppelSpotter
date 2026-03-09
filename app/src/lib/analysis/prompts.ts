@@ -9,6 +9,8 @@ import {
 import type {
   DiscordRunContext,
   DiscordServerCandidate,
+  DomainRegistrationCandidate,
+  DomainRegistrationRunContext,
   GitHubRepoCandidate,
   GitHubRunContext,
   GoogleRunContext,
@@ -119,6 +121,56 @@ Treat servers with less caution when ...
 - The server clearly does not claim to represent the brand nor entice users into harmful activity
 
 Set isFalsePositive: true if the server is clearly legitimate use of the brand name, such as an official community, an obviously benign discussion group, or a community with no sign of deception.`;
+
+/**
+ * System prompt for chunked recent domain-registration classification.
+ */
+export const DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive a compact list of recently registered domain candidates for a brand, plus supporting registration metadata such as TLDs, registration dates, search terms, and optional homepage summaries generated from each domain.
+
+Your task is to assess ONLY the provided domain candidates for potential brand infringement, typo-squatting, phishing risk, fake official sites, scam infrastructure, or other suspicious brand misuse.
+Do not invent extra domains. Do not assume a domain is malicious purely because it is newly registered, but do treat recent registrations containing the brand as potentially higher risk when other signals support that conclusion.
+Use British English spelling and phrasing in all human-readable output fields.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "items": [
+    {
+      "resultId": "the exact resultId from the input candidate",
+      "title": "Short, descriptive title of the finding (max 10 words)",
+      "severity": "high" | "medium" | "low",
+      "theme": "Short theme label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
+      "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
+      "isFalsePositive": boolean
+    }
+  ]
+}
+
+Rules for "items":
+- Include exactly one item for every input domain candidate and reuse the exact same resultId.
+- Assess only the provided domain candidates. Do not add extra items and do not omit any candidate.
+- Each item must have all six fields: resultId, title, severity, theme, analysis, isFalsePositive.
+- Each individual analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
+- This applies to both the title and the analysis text.
+- Always return a concise "theme" label. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case.
+- If the user prompt includes existing theme labels that fit, reuse one of them exactly.
+- If none fit well, create a new short label rather than forcing a poor match.
+- Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
+- Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
+- If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current domain metadata.
+
+Severity guidelines:
+- "high": Clear phishing, fake official site signals, credential-harvesting risk, or highly deceptive typo-squatting posing immediate customer or brand risk
+- "medium": Suspicious recent registration that strongly references the brand and warrants investigation, but with incomplete evidence of harmful use
+- "low": Likely benign or inactive registration worth logging because it references the brand, but with limited evidence of abuse
+
+Counter signals:
+Treat domains with less caution when ...
+- The domain appears to be a legitimate unrelated use of the same term in a clearly different commercial or descriptive context
+- The homepage summary and metadata strongly suggest an ordinary benign site with no claim to represent the brand
+
+Set isFalsePositive: true if the domain is clearly legitimate use of the brand name, such as the brand's own property, a clearly unrelated legitimate site, or a benign registration with no realistic infringement signal.`;
 
 /**
  * System prompt for chunked GitHub repository classification.
@@ -446,6 +498,80 @@ Use British English in any human-readable text you generate.
 Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
 
 Discord server candidates (${compactCandidates.length}):
+${JSON.stringify(compactCandidates, null, 2)}`;
+}
+
+export function buildDomainRegistrationChunkAnalysisPrompt(params: {
+  brandName: string;
+  keywords: string[];
+  officialDomains: string[];
+  watchWords?: string[];
+  safeWords?: string[];
+  userPreferenceHints?: UserPreferenceHints;
+  existingThemes?: string[];
+  source: FindingSource;
+  candidates: DomainRegistrationCandidate[];
+  runContext: DomainRegistrationRunContext;
+}): string {
+  const {
+    brandName,
+    keywords,
+    officialDomains,
+    watchWords,
+    safeWords,
+    userPreferenceHints,
+    existingThemes,
+    source,
+    candidates,
+    runContext,
+  } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that domain): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with — if present in a domain or homepage summary, treat it with reduced caution in the individual "analysis" field unless there are strong warning signs elsewhere): ${safeWords.join(', ')}`
+    : null;
+
+  const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
+  const existingThemesLine = `Existing theme labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingThemes && existingThemes.length > 0 ? existingThemes.join(', ') : 'none'}`;
+  const compactCandidates = candidates.map((candidate) => ({
+    resultId: candidate.resultId,
+    domain: candidate.domain,
+    url: candidate.url,
+    name: candidate.name,
+    tld: candidate.tld,
+    registrationDate: candidate.registrationDate,
+    length: candidate.length,
+    idn: candidate.idn,
+    ipv4: candidate.ipv4,
+    ipv6: candidate.ipv6,
+    ipAsNumber: candidate.ipAsNumber,
+    ipAsName: candidate.ipAsName,
+    ipChecked: candidate.ipChecked,
+    enhancedAnalysis: candidate.enhancedAnalysis,
+  }));
+
+  return `Brand being protected: "${brandName}"
+Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
+Monitoring surface: Domain registrations
+
+Supporting domain-registration context:
+- Search terms used: ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.join(' | ') : 'none'}
+- Reference date: ${runContext.selectedDate ?? 'unknown'}
+- Date comparison: ${runContext.dateComparison ?? 'unknown'}
+- Observed TLDs: ${runContext.observedTlds.length > 0 ? runContext.observedTlds.join(' | ') : 'none'}
+- Enhanced analysis enabled: ${runContext.enhancedAnalysisEnabled ? 'yes' : 'no'}
+- Enhanced analysis model: ${runContext.enhancedAnalysisModel ?? 'none'}
+
+Assess every domain candidate below and return one item in the "items" array per resultId.
+Use British English in any human-readable text you generate.
+Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
+
+Domain candidates (${compactCandidates.length}):
 ${JSON.stringify(compactCandidates, null, 2)}`;
 }
 

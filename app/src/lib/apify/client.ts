@@ -1,6 +1,7 @@
 import { ApifyClient } from 'apify-client';
 import type { BrandProfile } from '@/lib/types';
 import {
+  getInitialDomainRegistrationLimit,
   getInitialDiscordMaxTotalChargeUsd,
   getDeepSearchGooglePageCount,
   getInitialGitHubMaxResults,
@@ -28,6 +29,26 @@ export interface ActorRunResult {
   items: Record<string, unknown>[];
 }
 
+export interface ActorRunStart {
+  runId: string;
+  query: string;
+  displayQuery: string;
+}
+
+export interface StartActorRunsResult {
+  runs: ActorRunStart[];
+  failedCount: number;
+}
+
+type PreparedActorInput = {
+  input: Record<string, unknown>;
+  query: string;
+  displayQuery: string;
+};
+
+const GITHUB_MAX_BOOLEAN_OPERATORS = 5;
+const GITHUB_MAX_OR_TERMS_PER_QUERY = GITHUB_MAX_BOOLEAN_OPERATORS + 1;
+
 /**
  * Build a source-specific actor input payload for a brand profile.
  */
@@ -35,20 +56,48 @@ export function buildActorInput(
   actor: ActorConfig,
   brand: BrandProfile,
 ): { input: Record<string, unknown>; query: string; displayQuery: string } {
+  const actorInputs = buildActorInputs(actor, brand);
+  if (actorInputs.length !== 1) {
+    throw new Error(`buildActorInput does not support batched inputs for ${actor.id}; use buildActorInputs instead`);
+  }
+  return actorInputs[0];
+}
+
+function buildActorInputs(
+  actor: ActorConfig,
+  brand: BrandProfile,
+): PreparedActorInput[] {
   const searchTerms = normalizeSearchTerms([brand.name, ...brand.keywords]);
+
+  if (actor.kind === 'domains') {
+    return [{
+      input: {
+        apiKey: getRequiredEnvVar('CODEPUNCH_API_KEY'),
+        apiSecret: getRequiredEnvVar('CODEPUNCH_API_SECRET'),
+        date: getRecentDomainRegistrationDateUtc(),
+        dateComparison: 'gte',
+        keywords: searchTerms,
+        enhancedAnalysisEnabled: true,
+        openRouterApiKey: getRequiredEnvVar('OPENROUTER_API_KEY'),
+        totalLimit: getInitialDomainRegistrationLimit(brand.searchResultPages),
+      },
+      query: joinSearchTermsForDisplay(searchTerms),
+      displayQuery: joinSearchTermsForDisplay(searchTerms),
+    }];
+  }
 
   if (actor.kind === 'discord') {
     const query = joinSearchTermsForDisplay(searchTerms);
-    return {
+    return [{
       input: { keywords: searchTerms },
       query,
       displayQuery: query,
-    };
+    }];
   }
 
   if (actor.kind === 'x') {
     const query = joinSearchTermsForDisplay(searchTerms);
-    return {
+    return [{
       input: {
         searchTerms,
         maxItems: getInitialXMaxItems(brand.searchResultPages),
@@ -57,32 +106,40 @@ export function buildActorInput(
       },
       query,
       displayQuery: query,
-    };
+    }];
   }
 
   if (actor.kind === 'github') {
-    const displayQuery = joinSearchTermsForDisplay(searchTerms);
-    const query = buildGitHubRepoSearchQuery(searchTerms);
-    return {
-      input: {
+    const searchTermGroups = chunkValues(searchTerms, GITHUB_MAX_OR_TERMS_PER_QUERY);
+    const maxResultsByGroup = splitResultBudget(
+      getInitialGitHubMaxResults(brand.searchResultPages),
+      searchTermGroups.length,
+    );
+
+    return searchTermGroups.map((group, index) => {
+      const displayQuery = joinSearchTermsForDisplay(group);
+      const query = buildGitHubRepoSearchQuery(group);
+      return {
+        input: {
+          query,
+          sortBy: 'best-match',
+          maxResults: maxResultsByGroup[index],
+        },
         query,
-        sortBy: 'best-match',
-        maxResults: getInitialGitHubMaxResults(brand.searchResultPages),
-      },
-      query,
-      displayQuery,
-    };
+        displayQuery,
+      };
+    });
   }
 
   const primaryQuery = searchTerms.join(' OR ');
   const query = buildGoogleScannerQuery(actor.source, primaryQuery);
   const googlePageCount = getInitialGooglePageCount(brand.searchResultPages);
 
-  return {
+  return [{
     input: { queries: query, maxPagesPerQuery: googlePageCount },
     query,
     displayQuery: sanitizeGoogleQueryForDisplay(query),
-  };
+  }];
 }
 
 /**
@@ -95,25 +152,42 @@ export async function startActorRun(
   brand: BrandProfile,
   webhookUrl: string,
 ): Promise<{ runId: string; query: string; displayQuery: string }> {
-  const client = getClient();
-  const { input, query, displayQuery } = buildActorInput(actor, brand);
-  const startOptions: Record<string, unknown> = {
-    webhooks: [
-      {
-        eventTypes: ['ACTOR.RUN.SUCCEEDED', 'ACTOR.RUN.FAILED', 'ACTOR.RUN.ABORTED'],
-        requestUrl: webhookUrl,
-        headersTemplate: `{"X-Apify-Webhook-Secret": "${process.env.APIFY_WEBHOOK_SECRET}"}`,
-      },
-    ],
-  };
-
-  if (actor.kind === 'discord') {
-    startOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(brand.searchResultPages);
+  const actorInputs = buildActorInputs(actor, brand);
+  if (actorInputs.length !== 1) {
+    throw new Error(`startActorRun does not support batched inputs for ${actor.id}; use startActorRuns instead`);
   }
 
-  const run = await client.actor(actor.actorId).start(input, startOptions);
-
+  const client = getClient();
+  const { input, query, displayQuery } = actorInputs[0];
+  const run = await client.actor(actor.actorId).start(input, buildActorStartOptions(actor, brand, webhookUrl));
   return { runId: run.id, query, displayQuery };
+}
+
+export async function startActorRuns(
+  actor: ActorConfig,
+  brand: BrandProfile,
+  webhookUrl: string,
+): Promise<StartActorRunsResult> {
+  const client = getClient();
+  const actorInputs = buildActorInputs(actor, brand);
+  let failedCount = 0;
+  const runs: ActorRunStart[] = [];
+
+  for (const { input, query, displayQuery } of actorInputs) {
+    try {
+      const run = await client.actor(actor.actorId).start(input, buildActorStartOptions(actor, brand, webhookUrl));
+      runs.push({ runId: run.id, query, displayQuery });
+    } catch (error) {
+      failedCount += 1;
+      console.error(`[apify] Failed to start ${actor.id} run for query "${displayQuery}":`, error);
+    }
+  }
+
+  if (runs.length === 0) {
+    throw new Error(`Failed to start any ${actor.displayName} runs`);
+  }
+
+  return { runs, failedCount };
 }
 
 /**
@@ -201,7 +275,12 @@ export async function runActor(
   webhookUrl?: string,
 ): Promise<ActorRunResult> {
   const client = getClient();
-  const { input } = buildActorInput(actor, brand);
+  const actorInputs = buildActorInputs(actor, brand);
+  if (actorInputs.length !== 1) {
+    throw new Error(`runActor does not support batched inputs for ${actor.id}; use startActorRuns instead`);
+  }
+
+  const { input } = actorInputs[0];
 
   const runOptions: Record<string, unknown> = { input };
   if (actor.kind === 'discord') {
@@ -254,4 +333,69 @@ function buildGitHubRepoSearchQuery(values: string[]): string {
   return values
     .map((value) => `"${value.replace(/"/g, '\\"')}"`)
     .join(' OR ');
+}
+
+function buildActorStartOptions(
+  actor: ActorConfig,
+  brand: BrandProfile,
+  webhookUrl: string,
+): Record<string, unknown> {
+  const startOptions: Record<string, unknown> = {
+    webhooks: [
+      {
+        eventTypes: ['ACTOR.RUN.SUCCEEDED', 'ACTOR.RUN.FAILED', 'ACTOR.RUN.ABORTED'],
+        requestUrl: webhookUrl,
+        headersTemplate: `{"X-Apify-Webhook-Secret": "${process.env.APIFY_WEBHOOK_SECRET}"}`,
+      },
+    ],
+  };
+
+  if (actor.kind === 'discord') {
+    startOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(brand.searchResultPages);
+  }
+
+  return startOptions;
+}
+
+function splitResultBudget(total: number, partCount: number): number[] {
+  const safeTotal = Math.max(1, Math.floor(total));
+  const safePartCount = Math.max(1, Math.floor(partCount));
+  const base = Math.floor(safeTotal / safePartCount);
+  let remainder = safeTotal % safePartCount;
+
+  return Array.from({ length: safePartCount }, () => {
+    const next = base + (remainder > 0 ? 1 : 0);
+    if (remainder > 0) {
+      remainder -= 1;
+    }
+    return Math.max(1, next);
+  });
+}
+
+function chunkValues<T>(values: T[], chunkSize: number): T[][] {
+  if (chunkSize <= 0) {
+    throw new Error(`chunkSize must be positive, received ${chunkSize}`);
+  }
+
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += chunkSize) {
+    chunks.push(values.slice(index, index + chunkSize));
+  }
+  return chunks;
+}
+
+function getRequiredEnvVar(name: 'CODEPUNCH_API_KEY' | 'CODEPUNCH_API_SECRET' | 'OPENROUTER_API_KEY'): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is not set`);
+  }
+  return value;
+}
+
+function getRecentDomainRegistrationDateUtc(now = new Date()): string {
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const day = now.getUTCDate();
+  const oneMonthAgo = new Date(Date.UTC(year, month - 1, day));
+  return oneMonthAgo.toISOString().slice(0, 10);
 }

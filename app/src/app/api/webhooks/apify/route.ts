@@ -7,11 +7,13 @@ import { chatCompletion } from '@/lib/analysis/openrouter';
 import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-hints';
 import {
   DISCORD_CLASSIFICATION_SYSTEM_PROMPT,
+  DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT,
   GITHUB_CLASSIFICATION_SYSTEM_PROMPT,
   GOOGLE_CLASSIFICATION_SYSTEM_PROMPT,
   SCAN_SUMMARY_SYSTEM_PROMPT,
   X_CLASSIFICATION_SYSTEM_PROMPT,
   buildDiscordChunkAnalysisPrompt,
+  buildDomainRegistrationChunkAnalysisPrompt,
   buildGitHubChunkAnalysisPrompt,
   buildGoogleFinalSelectionSystemPrompt,
   buildGoogleFinalSelectionPrompt,
@@ -22,6 +24,7 @@ import {
 } from '@/lib/analysis/prompts';
 import {
   parseDiscordChunkAnalysisOutput,
+  parseDomainRegistrationChunkAnalysisOutput,
   parseGitHubChunkAnalysisOutput,
   parseGoogleChunkAnalysisOutput,
   parseXChunkAnalysisOutput,
@@ -31,6 +34,10 @@ import {
   type DiscordRunContext,
   type DiscordServerCandidate,
   type DiscordStoredFindingRawData,
+  type DomainRegistrationCandidate,
+  type DomainRegistrationChunkAnalysisItem,
+  type DomainRegistrationRunContext,
+  type DomainRegistrationStoredFindingRawData,
   type GitHubChunkAnalysisItem,
   type GitHubRepoCandidate,
   type GitHubRunContext,
@@ -67,6 +74,8 @@ const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
 const GOOGLE_ANALYSIS_CONCURRENCY = 6;
 const DISCORD_ANALYSIS_CHUNK_SIZE = 10;
 const DISCORD_ANALYSIS_CONCURRENCY = 6;
+const DOMAIN_REGISTRATION_ANALYSIS_CHUNK_SIZE = 10;
+const DOMAIN_REGISTRATION_ANALYSIS_CONCURRENCY = 6;
 const GITHUB_ANALYSIS_CHUNK_SIZE = 10;
 const GITHUB_ANALYSIS_CONCURRENCY = 6;
 const X_ANALYSIS_CHUNK_SIZE = 10;
@@ -76,6 +85,8 @@ const GOOGLE_FINDING_ID_PREFIX = 'google';
 const GOOGLE_RAW_DATA_VERSION = 2;
 const DISCORD_FINDING_ID_PREFIX = 'discord';
 const DISCORD_RAW_DATA_VERSION = 1;
+const DOMAIN_REGISTRATION_FINDING_ID_PREFIX = 'domains';
+const DOMAIN_REGISTRATION_RAW_DATA_VERSION = 1;
 const GITHUB_FINDING_ID_PREFIX = 'github';
 const GITHUB_RAW_DATA_VERSION = 1;
 const X_FINDING_ID_PREFIX = 'x';
@@ -354,6 +365,13 @@ async function handleSucceededRun({
       currentScanId: scan.id ?? scanDoc.id,
     })
     : undefined;
+  const previousDomainRegistrationDomains = scannerConfig.kind === 'domains'
+    ? await loadPreviousDomainRegistrationDomains({
+      brandId: scan.brandId,
+      userId: scan.userId,
+      currentScanId: scan.id ?? scanDoc.id,
+    })
+    : undefined;
   const previousGitHubRepoFullNames = scannerConfig.kind === 'github'
     ? await loadPreviousGitHubRepoFullNames({
       brandId: scan.brandId,
@@ -441,6 +459,24 @@ async function handleSucceededRun({
         existingTaxonomy,
         scannerConfig,
       })
+      : scannerConfig.kind === 'domains'
+        ? await analyseAndWriteDomainRegistrationBatch({
+          scanDoc,
+          scan,
+          brand,
+          source,
+          actorId,
+          datasetId,
+          runId,
+          items,
+          searchDepth,
+          searchQuery,
+          displayQuery,
+          userPreferenceHints,
+          previousDomains: previousDomainRegistrationDomains,
+          existingTaxonomy,
+          scannerConfig,
+        })
       : scannerConfig.kind === 'github'
         ? await analyseAndWriteGitHubBatch({
           scanDoc,
@@ -603,6 +639,38 @@ async function loadPreviousDiscordServerIds({
   }
 
   return serverIds;
+}
+
+async function loadPreviousDomainRegistrationDomains({
+  brandId,
+  userId,
+  currentScanId,
+}: {
+  brandId: string;
+  userId: string;
+  currentScanId: string;
+}): Promise<Set<string>> {
+  const previousFindingsSnap = await db
+    .collection('findings')
+    .where('brandId', '==', brandId)
+    .where('userId', '==', userId)
+    .select('scanId', 'rawData')
+    .get();
+
+  const domains = new Set<string>();
+  for (const doc of previousFindingsSnap.docs) {
+    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown> };
+    if (data.scanId === currentScanId) {
+      continue;
+    }
+
+    const domain = readDomainRegistrationStoredFindingRawData(data.rawData)?.domainRecord.domain;
+    if (typeof domain === 'string' && domain.trim().length > 0) {
+      domains.add(domain.trim().toLowerCase());
+    }
+  }
+
+  return domains;
 }
 
 async function loadPreviousGitHubRepoFullNames({
@@ -983,6 +1051,151 @@ async function analyseAndWriteDiscordBatch({
   return { findingCount, counts, skippedDuplicateCount };
 }
 
+async function analyseAndWriteDomainRegistrationBatch({
+  scanDoc,
+  scan,
+  brand,
+  source,
+  scannerConfig,
+  actorId,
+  datasetId,
+  runId,
+  items,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  userPreferenceHints,
+  previousDomains,
+  existingTaxonomy,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  brand: BrandProfile;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  datasetId: string;
+  runId: string;
+  items: Record<string, unknown>[];
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  userPreferenceHints?: Scan['userPreferenceHints'];
+  previousDomains?: ReadonlySet<string>;
+  existingTaxonomy: { themes: string[] };
+}): Promise<{
+  findingCount: number;
+  suggestedSearches?: string[];
+  counts: { high: number; medium: number; low: number; nonHit: number };
+  skippedDuplicateCount: number;
+}> {
+  let findingCount = 0;
+  const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+
+  const normalizedRun = normalizeDomainRegistrationRun({
+    searchQuery,
+    displayQuery,
+    items,
+  });
+  const candidatesToAnalyse = normalizedRun.candidates.filter(
+    (candidate) => !previousDomains?.has(candidate.domain.toLowerCase()),
+  );
+  const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
+
+  await scanDoc.ref.update({
+    [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
+    [`actorRuns.${runId}.analysedCount`]: 0,
+    [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
+  });
+
+  if (candidatesToAnalyse.length === 0) {
+    return { findingCount, counts, skippedDuplicateCount };
+  }
+
+  const outcomes = new Map<string, { candidate: DomainRegistrationCandidate; outcome: DomainRegistrationFindingOutcome }>();
+  const chunks = chunkArray(candidatesToAnalyse, DOMAIN_REGISTRATION_ANALYSIS_CHUNK_SIZE);
+  const chunkResults = await mapWithConcurrency(
+    chunks,
+    DOMAIN_REGISTRATION_ANALYSIS_CONCURRENCY,
+    async (chunk, chunkIndex): Promise<DomainRegistrationChunkAnalysisResult> => {
+      const prompt = buildDomainRegistrationChunkAnalysisPrompt({
+        brandName: brand.name,
+        keywords: brand.keywords,
+        officialDomains: brand.officialDomains,
+        watchWords: brand.watchWords,
+        safeWords: brand.safeWords,
+        userPreferenceHints,
+        existingThemes: existingTaxonomy.themes,
+        source,
+        candidates: chunk,
+        runContext: normalizedRun.runContext,
+      });
+      const llmAnalysisPrompt = formatLlmPromptForDebug(DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT, prompt);
+
+      try {
+        return await analyseDomainRegistrationChunk({
+          candidates: chunk,
+          prompt,
+          llmAnalysisPrompt,
+        });
+      } catch (err) {
+        console.error(`[webhook] Domain-registration chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
+
+        const fallbackOutcomes = new Map<string, { candidate: DomainRegistrationCandidate; outcome: DomainRegistrationFindingOutcome }>();
+        for (const candidate of chunk) {
+          fallbackOutcomes.set(candidate.domain, {
+            candidate,
+            outcome: buildDomainRegistrationFallbackOutcome(
+              'AI analysis failed for this chunk. Raw data is preserved for manual review.',
+              undefined,
+              llmAnalysisPrompt,
+            ),
+          });
+        }
+
+        return {
+          outcomes: fallbackOutcomes,
+        };
+      } finally {
+        await scanDoc.ref.update({
+          [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
+        });
+      }
+    },
+  );
+
+  for (const chunkResult of chunkResults) {
+    for (const [domain, value] of chunkResult.outcomes.entries()) {
+      outcomes.set(domain, value);
+    }
+  }
+
+  for (const { candidate, outcome } of outcomes.values()) {
+    const delta = await upsertDomainRegistrationFinding({
+      scanDoc,
+      scan,
+      source,
+      actorId,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      candidate,
+      runContext: normalizedRun.runContext,
+      outcome,
+      scannerConfig,
+    });
+
+    findingCount += delta.findingCount;
+    counts.high += delta.counts.high;
+    counts.medium += delta.counts.medium;
+    counts.low += delta.counts.low;
+    counts.nonHit += delta.counts.nonHit;
+  }
+
+  return { findingCount, counts, skippedDuplicateCount };
+}
+
 async function analyseAndWriteXBatch({
   scanDoc,
   scan,
@@ -1301,6 +1514,21 @@ type DiscordChunkAnalysisResult = {
   outcomes: Map<string, { candidate: DiscordServerCandidate; outcome: DiscordFindingOutcome }>;
 };
 
+type DomainRegistrationFindingOutcome = {
+  severity: Finding['severity'];
+  title: string;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+  llmAnalysisPrompt?: string;
+  rawLlmResponse?: string;
+  classificationSource: 'llm' | 'fallback';
+};
+
+type DomainRegistrationChunkAnalysisResult = {
+  outcomes: Map<string, { candidate: DomainRegistrationCandidate; outcome: DomainRegistrationFindingOutcome }>;
+};
+
 type GitHubFindingOutcome = {
   severity: Finding['severity'];
   title: string;
@@ -1563,6 +1791,103 @@ function normalizeDiscordServerRun({
   };
 }
 
+function normalizeDomainRegistrationRun({
+  searchQuery,
+  displayQuery,
+  items,
+}: {
+  searchQuery?: string;
+  displayQuery?: string;
+  items: Record<string, unknown>[];
+}): { candidates: DomainRegistrationCandidate[]; runContext: DomainRegistrationRunContext } {
+  const candidateMap = new Map<string, DomainRegistrationCandidate>();
+  const sourceQueries = new Set<string>();
+  const observedTlds = new Set<string>();
+  const sampleDomains = new Set<string>();
+  let selectedDate: string | undefined;
+  let dateComparison: string | undefined;
+  let totalLimit: number | undefined;
+  let sortField: string | undefined;
+  let sortOrder: string | undefined;
+  let enhancedAnalysisEnabled = false;
+  let enhancedAnalysisModel: string | undefined;
+  let nextResultId = 1;
+
+  for (const sourceQuery of readDelimitedQueries(displayQuery ?? searchQuery)) {
+    sourceQueries.add(sourceQuery);
+  }
+
+  for (const item of items) {
+    const domain = readDomainRegistrationDomain(item);
+    if (!domain) continue;
+
+    const name = readOptionalTrimmedString(item.name) ?? domain.split('.')[0] ?? domain;
+    const tld = readOptionalTrimmedString(item.tld)?.toLowerCase() ?? extractTldFromDomain(domain);
+    const registrationDate = readOptionalTrimmedString(item.date);
+    const length = readOptionalFiniteNumber(item.length);
+    const idn = readOptionalFiniteNumber(item.idn);
+    const ipv4 = readOptionalTrimmedString(item.ipv4);
+    const ipv6 = readOptionalTrimmedString(item.ipv6);
+    const ipAsNumber = readOptionalFiniteNumber(item.ipasnumber);
+    const ipAsName = readOptionalTrimmedString(item.ipasname);
+    const ipChecked = readOptionalTrimmedString(item.ipchecked);
+    const requestMetadata = readDomainRegistrationRequestMetadata(item.requestMetadata);
+    const responseMetadata = readDomainRegistrationResponseMetadata(item.responseMetadata);
+    const enhancedAnalysis = readDomainRegistrationEnhancedAnalysis(item.enhancedAnalysis);
+
+    if (!selectedDate && requestMetadata?.selectedDate) selectedDate = requestMetadata.selectedDate;
+    if (!dateComparison && requestMetadata?.dateComparison) dateComparison = requestMetadata.dateComparison;
+    if (totalLimit === undefined && requestMetadata?.totalLimit !== undefined) totalLimit = requestMetadata.totalLimit;
+    if (!sortField) sortField = requestMetadata?.sortField ?? responseMetadata?.sortField;
+    if (!sortOrder) sortOrder = requestMetadata?.sortOrder ?? responseMetadata?.sortOrder;
+    if (tld) observedTlds.add(tld);
+    sampleDomains.add(domain);
+    if (enhancedAnalysis) {
+      enhancedAnalysisEnabled = true;
+      if (!enhancedAnalysisModel && enhancedAnalysis.model) {
+        enhancedAnalysisModel = enhancedAnalysis.model;
+      }
+    }
+
+    if (candidateMap.has(domain)) {
+      continue;
+    }
+
+    candidateMap.set(domain, {
+      resultId: `dr${nextResultId++}`,
+      domain,
+      url: buildDomainRegistrationUrl(domain),
+      name,
+      tld,
+      ...(registrationDate ? { registrationDate } : {}),
+      ...(length !== undefined ? { length } : {}),
+      ...(idn !== undefined ? { idn } : {}),
+      ...(ipv4 ? { ipv4 } : {}),
+      ...(ipv6 ? { ipv6 } : {}),
+      ...(ipAsNumber !== undefined ? { ipAsNumber } : {}),
+      ...(ipAsName ? { ipAsName } : {}),
+      ...(ipChecked ? { ipChecked } : {}),
+      ...(enhancedAnalysis ? { enhancedAnalysis } : {}),
+    });
+  }
+
+  return {
+    candidates: Array.from(candidateMap.values()),
+    runContext: {
+      sourceQueries: uniqueStrings(Array.from(sourceQueries)),
+      ...(selectedDate ? { selectedDate } : {}),
+      ...(dateComparison ? { dateComparison } : {}),
+      ...(totalLimit !== undefined ? { totalLimit } : {}),
+      ...(sortField ? { sortField } : {}),
+      ...(sortOrder ? { sortOrder } : {}),
+      observedTlds: uniqueStrings(Array.from(observedTlds)),
+      sampleDomains: uniqueStrings(Array.from(sampleDomains)).slice(0, 12),
+      enhancedAnalysisEnabled,
+      ...(enhancedAnalysisModel ? { enhancedAnalysisModel } : {}),
+    },
+  };
+}
+
 function normalizeXRun({
   searchQuery,
   displayQuery,
@@ -1782,6 +2107,45 @@ async function analyseDiscordChunk({
         ? buildDiscordFindingOutcome(item, raw, llmAnalysisPrompt)
         : buildDiscordFallbackOutcome(
             'AI analysis returned no assessment for this server. Raw data is preserved for manual review.',
+            raw,
+            llmAnalysisPrompt,
+          ),
+    });
+  }
+
+  return { outcomes };
+}
+
+async function analyseDomainRegistrationChunk({
+  candidates,
+  prompt,
+  llmAnalysisPrompt,
+}: {
+  candidates: DomainRegistrationCandidate[];
+  prompt: string;
+  llmAnalysisPrompt: string;
+}): Promise<DomainRegistrationChunkAnalysisResult> {
+  const raw = await chatCompletion([
+    { role: 'system', content: DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseDomainRegistrationChunkAnalysisOutput(raw, new Set(candidates.map((candidate) => candidate.resultId)));
+  if (!parsed) {
+    throw new Error(`Failed to parse domain-registration chunk analysis output: ${raw.slice(0, 200)}`);
+  }
+
+  const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  const outcomes = new Map<string, { candidate: DomainRegistrationCandidate; outcome: DomainRegistrationFindingOutcome }>();
+
+  for (const candidate of candidates) {
+    const item = byResultId.get(candidate.resultId);
+    outcomes.set(candidate.domain, {
+      candidate,
+      outcome: item
+        ? buildDomainRegistrationFindingOutcome(item, raw, llmAnalysisPrompt)
+        : buildDomainRegistrationFallbackOutcome(
+            'AI analysis returned no assessment for this domain. Raw data is preserved for manual review.',
             raw,
             llmAnalysisPrompt,
           ),
@@ -2164,6 +2528,132 @@ async function upsertDiscordFinding({
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.inviteUrl,
+      rawData: mergedRawData,
+      isFalsePositive: preferredOutcome.isFalsePositive,
+    };
+
+    const llmAnalysisPrompt = preferredOutcome.llmAnalysisPrompt ?? existing.llmAnalysisPrompt;
+    if (typeof llmAnalysisPrompt === 'string') {
+      updates.llmAnalysisPrompt = llmAnalysisPrompt;
+    }
+
+    const rawLlmResponse = preferredOutcome.rawLlmResponse ?? existing.rawLlmResponse;
+    if (typeof rawLlmResponse === 'string') {
+      updates.rawLlmResponse = rawLlmResponse;
+    }
+
+    if (preferredOutcome.isFalsePositive) {
+      updates.isIgnored = true;
+      if (existing.isIgnored !== true) {
+        updates.ignoredAt = FieldValue.serverTimestamp();
+      }
+      updates.isAddressed = false;
+      if (existing.addressedAt) {
+        updates.addressedAt = FieldValue.delete();
+      }
+    } else {
+      updates.isIgnored = false;
+      if (existing.ignoredAt) {
+        updates.ignoredAt = FieldValue.delete();
+      }
+    }
+
+    tx.update(findingRef, updates);
+    return diffFindingStates(previousState, nextState);
+  });
+}
+
+async function upsertDomainRegistrationFinding({
+  scanDoc,
+  scan,
+  source,
+  scannerConfig,
+  actorId,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  candidate,
+  runContext,
+  outcome,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  candidate: DomainRegistrationCandidate;
+  runContext: DomainRegistrationRunContext;
+  outcome: DomainRegistrationFindingOutcome;
+}): Promise<FindingDelta> {
+  const scanId = scan.id ?? scanDoc.id;
+  const findingRef = db.collection('findings').doc(buildDomainRegistrationFindingId(scanId, candidate.domain));
+
+  return db.runTransaction(async (tx) => {
+    const existingSnap = await tx.get(findingRef);
+    const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
+    const preferredOutcome = choosePreferredDomainRegistrationOutcome(existing, outcome);
+    const mergedRawData = buildDomainRegistrationStoredFindingRawData({
+      existingRawData: existing?.rawData,
+      candidate,
+      runContext,
+      source,
+      scannerConfig,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      classificationSource: preferredOutcome.classificationSource,
+    });
+    const preferredSource = choosePreferredFindingSource(existing?.source, source);
+
+    const previousState = existing ? getFindingCountState(existing) : emptyFindingCountState();
+    const nextState = getOutcomeCountState(preferredOutcome);
+
+    if (!existing) {
+      const finding: Omit<Finding, 'id'> = {
+        scanId,
+        brandId: scan.brandId,
+        userId: scan.userId,
+        source: preferredSource,
+        actorId,
+        severity: preferredOutcome.severity,
+        title: preferredOutcome.title,
+        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        description: preferredOutcome.analysis,
+        llmAnalysis: preferredOutcome.analysis,
+        url: candidate.url,
+        rawData: mergedRawData,
+        isFalsePositive: preferredOutcome.isFalsePositive,
+        ...(preferredOutcome.isFalsePositive && {
+          isIgnored: true,
+          ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+        }),
+        ...(typeof preferredOutcome.llmAnalysisPrompt === 'string' && {
+          llmAnalysisPrompt: preferredOutcome.llmAnalysisPrompt,
+        }),
+        ...(typeof preferredOutcome.rawLlmResponse === 'string' && {
+          rawLlmResponse: preferredOutcome.rawLlmResponse,
+        }),
+        createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+      };
+      tx.set(findingRef, finding);
+      return diffFindingStates(previousState, nextState);
+    }
+
+    const updates: Record<string, unknown> = {
+      source: preferredSource,
+      severity: preferredOutcome.severity,
+      title: preferredOutcome.title,
+      platform: FieldValue.delete(),
+      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      description: preferredOutcome.analysis,
+      llmAnalysis: preferredOutcome.analysis,
+      url: candidate.url,
       rawData: mergedRawData,
       isFalsePositive: preferredOutcome.isFalsePositive,
     };
@@ -2627,6 +3117,23 @@ function buildDiscordFindingOutcome(
   };
 }
 
+function buildDomainRegistrationFindingOutcome(
+  item: DomainRegistrationChunkAnalysisItem,
+  rawLlmResponse: string,
+  llmAnalysisPrompt: string,
+): DomainRegistrationFindingOutcome {
+  return {
+    severity: item.severity,
+    title: item.title,
+    theme: item.theme,
+    analysis: item.analysis,
+    isFalsePositive: item.isFalsePositive,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'llm',
+  };
+}
+
 function buildXFindingOutcome(
   item: XChunkAnalysisItem,
   rawLlmResponse: string,
@@ -2685,6 +3192,22 @@ function buildDiscordFallbackOutcome(
   return {
     severity: 'medium',
     title: 'Unanalysed server - review manually',
+    analysis: message,
+    isFalsePositive: false,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'fallback',
+  };
+}
+
+function buildDomainRegistrationFallbackOutcome(
+  message: string,
+  rawLlmResponse?: string,
+  llmAnalysisPrompt?: string,
+): DomainRegistrationFindingOutcome {
+  return {
+    severity: 'medium',
+    title: 'Unanalysed domain - review manually',
     analysis: message,
     isFalsePositive: false,
     llmAnalysisPrompt,
@@ -2958,6 +3481,133 @@ function readDiscordStoredFindingRawData(rawData?: Record<string, unknown>): Dis
       runId: typeof analysis.runId === 'string' ? analysis.runId : '',
       findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'discord',
       scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'discord-servers',
+      searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
+      searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
+      displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
+    },
+  };
+}
+
+function buildDomainRegistrationStoredFindingRawData({
+  existingRawData,
+  candidate,
+  runContext,
+  source,
+  scannerConfig,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  classificationSource,
+}: {
+  existingRawData?: Record<string, unknown>;
+  candidate: DomainRegistrationCandidate;
+  runContext: DomainRegistrationRunContext;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  classificationSource: 'llm' | 'fallback';
+}): DomainRegistrationStoredFindingRawData {
+  const existing = readDomainRegistrationStoredFindingRawData(existingRawData);
+  return stripUndefinedDeep({
+    kind: 'domain-registration-normalized',
+    version: DOMAIN_REGISTRATION_RAW_DATA_VERSION,
+    domainRecord: {
+      domain: candidate.domain,
+      url: candidate.url,
+      name: candidate.name,
+      tld: candidate.tld,
+      ...(candidate.registrationDate ? { registrationDate: candidate.registrationDate } : {}),
+      ...(candidate.length !== undefined ? { length: candidate.length } : {}),
+      ...(candidate.idn !== undefined ? { idn: candidate.idn } : {}),
+      ...(candidate.ipv4 ? { ipv4: candidate.ipv4 } : {}),
+      ...(candidate.ipv6 ? { ipv6: candidate.ipv6 } : {}),
+      ...(candidate.ipAsNumber !== undefined ? { ipAsNumber: candidate.ipAsNumber } : {}),
+      ...(candidate.ipAsName ? { ipAsName: candidate.ipAsName } : {}),
+      ...(candidate.ipChecked ? { ipChecked: candidate.ipChecked } : {}),
+      ...(candidate.enhancedAnalysis ? { enhancedAnalysis: candidate.enhancedAnalysis } : {}),
+    },
+    context: {
+      sourceQueries: uniqueStrings([...(existing?.context.sourceQueries ?? []), ...runContext.sourceQueries]),
+      selectedDate: runContext.selectedDate ?? existing?.context.selectedDate,
+      dateComparison: runContext.dateComparison ?? existing?.context.dateComparison,
+      totalLimit: runContext.totalLimit ?? existing?.context.totalLimit,
+      sortField: runContext.sortField ?? existing?.context.sortField,
+      sortOrder: runContext.sortOrder ?? existing?.context.sortOrder,
+      observedTlds: uniqueStrings([...(existing?.context.observedTlds ?? []), ...runContext.observedTlds]),
+      sampleDomains: uniqueStrings([...(existing?.context.sampleDomains ?? []), ...runContext.sampleDomains]).slice(0, 12),
+      enhancedAnalysisEnabled: runContext.enhancedAnalysisEnabled || existing?.context.enhancedAnalysisEnabled === true,
+      enhancedAnalysisModel: runContext.enhancedAnalysisModel ?? existing?.context.enhancedAnalysisModel,
+    },
+    analysis: {
+      source: classificationSource,
+      runId,
+      findingSource: source,
+      scannerId: scannerConfig.id,
+      searchDepth,
+      ...(searchQuery ? { searchQuery } : {}),
+      ...(displayQuery ? { displayQuery } : {}),
+    },
+  }) as DomainRegistrationStoredFindingRawData;
+}
+
+function readDomainRegistrationStoredFindingRawData(
+  rawData?: Record<string, unknown>,
+): DomainRegistrationStoredFindingRawData | null {
+  if (!rawData || rawData.kind !== 'domain-registration-normalized' || rawData.version !== DOMAIN_REGISTRATION_RAW_DATA_VERSION) {
+    return null;
+  }
+
+  const domainRecord = typeof rawData.domainRecord === 'object' && rawData.domainRecord !== null
+    ? rawData.domainRecord as Record<string, unknown>
+    : {};
+  const context = typeof rawData.context === 'object' && rawData.context !== null ? rawData.context as Record<string, unknown> : {};
+  const analysis = typeof rawData.analysis === 'object' && rawData.analysis !== null ? rawData.analysis as Record<string, unknown> : {};
+
+  return {
+    kind: 'domain-registration-normalized',
+    version: DOMAIN_REGISTRATION_RAW_DATA_VERSION,
+    domainRecord: {
+      domain: typeof domainRecord.domain === 'string' ? domainRecord.domain : '',
+      url: typeof domainRecord.url === 'string' ? domainRecord.url : '',
+      name: typeof domainRecord.name === 'string' ? domainRecord.name : '',
+      tld: typeof domainRecord.tld === 'string' ? domainRecord.tld : '',
+      registrationDate: typeof domainRecord.registrationDate === 'string' ? domainRecord.registrationDate : undefined,
+      length: typeof domainRecord.length === 'number' ? domainRecord.length : undefined,
+      idn: typeof domainRecord.idn === 'number' ? domainRecord.idn : undefined,
+      ipv4: typeof domainRecord.ipv4 === 'string' ? domainRecord.ipv4 : undefined,
+      ipv6: typeof domainRecord.ipv6 === 'string' ? domainRecord.ipv6 : undefined,
+      ipAsNumber: typeof domainRecord.ipAsNumber === 'number' ? domainRecord.ipAsNumber : undefined,
+      ipAsName: typeof domainRecord.ipAsName === 'string' ? domainRecord.ipAsName : undefined,
+      ipChecked: typeof domainRecord.ipChecked === 'string' ? domainRecord.ipChecked : undefined,
+      enhancedAnalysis: readDomainRegistrationEnhancedAnalysis(domainRecord.enhancedAnalysis),
+    },
+    context: {
+      sourceQueries: Array.isArray(context.sourceQueries)
+        ? context.sourceQueries.filter((value): value is string => typeof value === 'string')
+        : [],
+      selectedDate: typeof context.selectedDate === 'string' ? context.selectedDate : undefined,
+      dateComparison: typeof context.dateComparison === 'string' ? context.dateComparison : undefined,
+      totalLimit: typeof context.totalLimit === 'number' ? context.totalLimit : undefined,
+      sortField: typeof context.sortField === 'string' ? context.sortField : undefined,
+      sortOrder: typeof context.sortOrder === 'string' ? context.sortOrder : undefined,
+      observedTlds: Array.isArray(context.observedTlds)
+        ? context.observedTlds.filter((value): value is string => typeof value === 'string')
+        : [],
+      sampleDomains: Array.isArray(context.sampleDomains)
+        ? context.sampleDomains.filter((value): value is string => typeof value === 'string')
+        : [],
+      enhancedAnalysisEnabled: context.enhancedAnalysisEnabled === true,
+      enhancedAnalysisModel: typeof context.enhancedAnalysisModel === 'string' ? context.enhancedAnalysisModel : undefined,
+    },
+    analysis: {
+      source: analysis.source === 'fallback' ? 'fallback' : 'llm',
+      runId: typeof analysis.runId === 'string' ? analysis.runId : '',
+      findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'domains',
+      scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'domain-registrations',
       searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
       searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
       displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
@@ -3258,6 +3908,7 @@ function isKnownFindingSource(value: unknown): value is Finding['source'] {
     || value === 'facebook'
     || value === 'instagram'
     || value === 'telegram'
+    || value === 'domains'
     || value === 'discord'
     || value === 'github'
     || value === 'x'
@@ -3274,6 +3925,7 @@ function isKnownScannerId(value: unknown): value is ActorRunInfo['scannerId'] {
     || value === 'google-facebook'
     || value === 'google-instagram'
     || value === 'google-telegram'
+    || value === 'domain-registrations'
     || value === 'discord-servers'
     || value === 'github-repos'
     || value === 'x-search'
@@ -3304,6 +3956,7 @@ function resolveScannerConfig(actorRunInfo?: Partial<ActorRunInfo>): ScannerConf
     || actorRunInfo?.source === 'facebook'
     || actorRunInfo?.source === 'instagram'
     || actorRunInfo?.source === 'telegram'
+    || actorRunInfo?.source === 'domains'
     || actorRunInfo?.source === 'google'
     || actorRunInfo?.source === 'discord'
     || actorRunInfo?.source === 'github'
@@ -3327,6 +3980,7 @@ function choosePreferredFindingSource(
       || source === 'facebook'
       || source === 'instagram'
       || source === 'telegram'
+      || source === 'domains'
       || source === 'discord'
       || source === 'github'
       || source === 'x'
@@ -3386,6 +4040,40 @@ function choosePreferredDiscordOutcome(existing: Finding | null, next: DiscordFi
 
   const existingSource = readDiscordStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
   const existingOutcome: DiscordFindingOutcome = {
+    severity: existing.severity,
+    title: existing.title,
+    theme: existing.theme,
+    analysis: existing.llmAnalysis,
+    isFalsePositive: existing.isFalsePositive === true,
+    llmAnalysisPrompt: existing.llmAnalysisPrompt,
+    rawLlmResponse: existing.rawLlmResponse,
+    classificationSource: existingSource,
+  };
+
+  if (existingOutcome.classificationSource !== next.classificationSource) {
+    return next.classificationSource === 'llm' ? next : existingOutcome;
+  }
+  if (existingOutcome.isFalsePositive !== next.isFalsePositive) {
+    return existingOutcome.isFalsePositive ? next : existingOutcome;
+  }
+
+  const existingRank = getSeverityRank(existingOutcome.severity);
+  const nextRank = getSeverityRank(next.severity);
+  if (nextRank !== existingRank) {
+    return nextRank > existingRank ? next : existingOutcome;
+  }
+
+  return next;
+}
+
+function choosePreferredDomainRegistrationOutcome(
+  existing: Finding | null,
+  next: DomainRegistrationFindingOutcome,
+): DomainRegistrationFindingOutcome {
+  if (!existing) return next;
+
+  const existingSource = readDomainRegistrationStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
+  const existingOutcome: DomainRegistrationFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
     theme: existing.theme,
@@ -3769,6 +4457,10 @@ function buildDiscordFindingId(scanId: string, serverId: string): string {
   return `${DISCORD_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${serverId}`).digest('hex')}`;
 }
 
+function buildDomainRegistrationFindingId(scanId: string, domain: string): string {
+  return `${DOMAIN_REGISTRATION_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${domain.toLowerCase()}`).digest('hex')}`;
+}
+
 function buildXFindingId(scanId: string, tweetId: string): string {
   return `${X_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${tweetId}`).digest('hex')}`;
 }
@@ -3897,6 +4589,82 @@ function readDiscordStringArray(value: unknown): string[] {
       .filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
       .map((entry) => entry.trim()),
   );
+}
+
+function readDomainRegistrationDomain(item: Record<string, unknown>): string | null {
+  const value = readOptionalTrimmedString(item.domain);
+  if (!value) return null;
+  return normalizeDomainRegistrationDomain(value);
+}
+
+function normalizeDomainRegistrationDomain(value: string): string | null {
+  const normalized = value.trim().replace(/\.+$/, '').toLowerCase();
+  if (!normalized || normalized.includes('/') || normalized.includes(' ')) {
+    return null;
+  }
+  return normalized;
+}
+
+function extractTldFromDomain(domain: string): string {
+  const parts = domain.split('.');
+  return parts.length > 1 ? parts[parts.length - 1].toLowerCase() : '';
+}
+
+function buildDomainRegistrationUrl(domain: string): string {
+  return `https://${domain}/`;
+}
+
+function readDomainRegistrationRequestMetadata(value: unknown): {
+  selectedDate?: string;
+  dateComparison?: string;
+  totalLimit?: number;
+  sortField?: string;
+  sortOrder?: string;
+} | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const metadata = value as Record<string, unknown>;
+  return {
+    selectedDate: readOptionalTrimmedString(metadata.selectedDate),
+    dateComparison: readOptionalTrimmedString(metadata.dateComparison),
+    totalLimit: readOptionalFiniteNumber(metadata.totalLimit),
+    sortField: readOptionalTrimmedString(metadata.sortField),
+    sortOrder: readOptionalTrimmedString(metadata.sortOrder),
+  };
+}
+
+function readDomainRegistrationResponseMetadata(value: unknown): {
+  sortField?: string;
+  sortOrder?: string;
+} | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const metadata = value as Record<string, unknown>;
+  return {
+    sortField: readOptionalTrimmedString(metadata.sortField),
+    sortOrder: readOptionalTrimmedString(metadata.sortOrder),
+  };
+}
+
+function readDomainRegistrationEnhancedAnalysis(
+  value: unknown,
+): DomainRegistrationCandidate['enhancedAnalysis'] | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const analysis = value as Record<string, unknown>;
+  const status = readOptionalTrimmedString(analysis.status);
+  if (!status) return undefined;
+
+  return {
+    status,
+    ...(readOptionalTrimmedString(analysis.model) ? { model: readOptionalTrimmedString(analysis.model) } : {}),
+    ...(readOptionalTrimmedString(analysis.sourceUrl) ? { sourceUrl: readOptionalTrimmedString(analysis.sourceUrl) } : {}),
+    ...(readOptionalTrimmedString(analysis.finalUrl) ? { finalUrl: readOptionalTrimmedString(analysis.finalUrl) } : {}),
+    ...(readOptionalTrimmedString(analysis.summary) ? { summary: readOptionalTrimmedString(analysis.summary) } : {}),
+    ...(readOptionalFiniteNumber(analysis.extractedTextLength) !== undefined
+      ? { extractedTextLength: readOptionalFiniteNumber(analysis.extractedTextLength) }
+      : {}),
+    ...(readOptionalTrimmedString(analysis.failureReason) ? { failureReason: readOptionalTrimmedString(analysis.failureReason) } : {}),
+    ...(readOptionalTrimmedString(analysis.errorMessage) ? { errorMessage: readOptionalTrimmedString(analysis.errorMessage) } : {}),
+    ...(readOptionalTrimmedString(analysis.contentType) ? { contentType: readOptionalTrimmedString(analysis.contentType) } : {}),
+  };
 }
 
 function readGitHubRepoFullName(item: Record<string, unknown>): string | null {
@@ -4182,4 +4950,3 @@ async function markActorRunComplete(
     await generateAndPersistScanSummary(scanDoc.ref);
   }
 }
-

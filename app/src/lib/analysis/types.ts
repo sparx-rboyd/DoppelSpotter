@@ -197,6 +197,104 @@ export interface DiscordStoredFindingRawData extends Record<string, unknown> {
 }
 
 /**
+ * One recent-domain-registration candidate returned by the CodePunch-backed actor.
+ */
+export interface DomainRegistrationCandidate {
+  resultId: string;
+  domain: string;
+  url: string;
+  name: string;
+  tld: string;
+  registrationDate?: string;
+  length?: number;
+  idn?: number;
+  ipv4?: string;
+  ipv6?: string;
+  ipAsNumber?: number;
+  ipAsName?: string;
+  ipChecked?: string;
+  enhancedAnalysis?: {
+    status: string;
+    model?: string;
+    sourceUrl?: string;
+    finalUrl?: string;
+    summary?: string;
+    extractedTextLength?: number;
+    failureReason?: string;
+    errorMessage?: string;
+    contentType?: string;
+  };
+}
+
+/**
+ * Run-level recent-domain-registration context shared across chunked analysis calls.
+ */
+export interface DomainRegistrationRunContext {
+  sourceQueries: string[];
+  selectedDate?: string;
+  dateComparison?: string;
+  totalLimit?: number;
+  sortField?: string;
+  sortOrder?: string;
+  observedTlds: string[];
+  sampleDomains: string[];
+  enhancedAnalysisEnabled: boolean;
+  enhancedAnalysisModel?: string;
+}
+
+/**
+ * One assessed domain registration returned by chunked AI analysis.
+ */
+export interface DomainRegistrationChunkAnalysisItem {
+  resultId: string;
+  title: string;
+  severity: Severity;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+}
+
+/**
+ * The structured JSON output expected from chunked domain-registration analysis.
+ */
+export interface DomainRegistrationChunkAnalysisOutput {
+  items: DomainRegistrationChunkAnalysisItem[];
+}
+
+/**
+ * Compact stored debug payload for domain-registration findings.
+ */
+export interface DomainRegistrationStoredFindingRawData extends Record<string, unknown> {
+  kind: 'domain-registration-normalized';
+  version: 1;
+  domainRecord: {
+    domain: string;
+    url: string;
+    name: string;
+    tld: string;
+    registrationDate?: string;
+    length?: number;
+    idn?: number;
+    ipv4?: string;
+    ipv6?: string;
+    ipAsNumber?: number;
+    ipAsName?: string;
+    ipChecked?: string;
+    enhancedAnalysis?: DomainRegistrationCandidate['enhancedAnalysis'];
+  };
+  context: DomainRegistrationRunContext;
+  analysis: {
+    source: 'llm' | 'fallback';
+    runId: string;
+    findingSource: FindingSource;
+    scannerId: ScannerId;
+    searchDepth: number;
+    searchQuery?: string;
+    displayQuery?: string;
+  };
+}
+
+/**
  * One GitHub repository candidate returned by the GitHub repo search actor.
  */
 export interface GitHubRepoCandidate {
@@ -404,6 +502,17 @@ export function parseDiscordChunkAnalysisOutput(
   raw: string,
   validResultIds: Set<string>,
 ): DiscordChunkAnalysisOutput | null {
+  const items = parseChunkAnalysisItems(raw, validResultIds);
+  return items ? { items } : null;
+}
+
+/**
+ * Parse and validate the raw JSON string returned by chunked domain-registration analysis.
+ */
+export function parseDomainRegistrationChunkAnalysisOutput(
+  raw: string,
+  validResultIds: Set<string>,
+): DomainRegistrationChunkAnalysisOutput | null {
   const items = parseChunkAnalysisItems(raw, validResultIds);
   return items ? { items } : null;
 }

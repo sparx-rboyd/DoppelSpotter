@@ -29,6 +29,12 @@ export interface DiscordScannerConfig extends BaseScannerConfig {
   kind: 'discord';
 }
 
+export interface DomainRegistrationsScannerConfig extends BaseScannerConfig {
+  id: 'domain-registrations';
+  source: 'domains';
+  kind: 'domains';
+}
+
 export interface GitHubScannerConfig extends BaseScannerConfig {
   id: 'github-repos';
   source: 'github';
@@ -43,11 +49,13 @@ export interface XScannerConfig extends BaseScannerConfig {
 
 export type ScannerConfig =
   | GoogleScannerConfig
+  | DomainRegistrationsScannerConfig
   | DiscordScannerConfig
   | GitHubScannerConfig
   | XScannerConfig;
 
 export const GOOGLE_SEARCH_ACTOR_ID = 'apify/google-search-scraper';
+export const DOMAIN_REGISTRATIONS_ACTOR_ID = 'doppelspotter/recent-domain-registrations';
 export const DISCORD_SERVER_SCRAPER_ACTOR_ID = 'louisdeconinck/discord-server-scraper';
 export const GITHUB_REPO_SEARCH_ACTOR_ID = 'ryanclinton/github-repo-search';
 export const X_TWEET_SCRAPER_ACTOR_ID = 'apidojo/tweet-scraper';
@@ -60,6 +68,7 @@ export const SCAN_SOURCE_ORDER: ScanFindingSource[] = [
   'facebook',
   'instagram',
   'telegram',
+  'domains',
   'discord',
   'github',
   'x',
@@ -145,6 +154,15 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     siteHost: 't.me',
     supportsDeepSearch: true,
   },
+  'domain-registrations': {
+    id: 'domain-registrations',
+    source: 'domains',
+    actorId: DOMAIN_REGISTRATIONS_ACTOR_ID,
+    kind: 'domains',
+    displayName: 'Domain registrations',
+    shortLabel: 'Domains',
+    supportsDeepSearch: false,
+  },
   'discord-servers': {
     id: 'discord-servers',
     source: 'discord',
@@ -182,6 +200,7 @@ const SCANNER_ID_BY_SOURCE: Record<ScanFindingSource, ScannerId> = {
   facebook: 'google-facebook',
   instagram: 'google-instagram',
   telegram: 'google-telegram',
+  domains: 'domain-registrations',
   discord: 'discord-servers',
   github: 'github-repos',
   x: 'x-search',

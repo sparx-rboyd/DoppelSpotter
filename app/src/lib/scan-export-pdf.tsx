@@ -101,6 +101,11 @@ const SOURCE_BADGE_STYLES: Record<FindingSource, { bg: string; border: string; t
     border: BRAND.blue100,
     text: BRAND.blue700,
   },
+  domains: {
+    bg: BRAND.blue50,
+    border: BRAND.blue100,
+    text: BRAND.blue700,
+  },
   discord: {
     bg: BRAND.blue50,
     border: BRAND.blue100,

@@ -121,6 +121,11 @@ const sourceConfig: Record<
     textClass: 'text-brand-600',
     label: getFindingSourceLabel('telegram'),
   },
+  domains: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('domains'),
+  },
   discord: {
     bgClass: 'bg-brand-50',
     textClass: 'text-brand-600',
