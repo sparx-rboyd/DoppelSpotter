@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowRight,
   BarChart3,
   Building2,
   Info,
@@ -291,7 +292,8 @@ export default function DashboardPage() {
             <div className="space-y-6">
               <Card className="overflow-hidden border-brand-100">
                 <div className="border-b border-brand-100 bg-brand-50/70 px-5 py-4">
-                  <div className="w-full max-w-md">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
+                    <div className="w-full max-w-md flex-none">
                       <SelectDropdown
                         id="dashboard-brand-selector"
                         label={<span className="font-medium text-brand-700">Focused brand</span>}
@@ -303,6 +305,14 @@ export default function DashboardPage() {
                         searchPlaceholder="Search brands"
                         buttonIcon={<Building2 className="h-4 w-4 text-brand-600" />}
                       />
+                    </div>
+                    <Link
+                      href={selectedBrandHref}
+                      className="inline-flex items-center gap-1.5 self-start whitespace-nowrap text-sm font-medium text-brand-700 transition hover:text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 sm:mb-2 sm:self-auto"
+                    >
+                      Go to brand page
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
                   </div>
                 </div>
                 <CardContent className="flex flex-wrap gap-2 p-5">
@@ -470,21 +480,6 @@ export default function DashboardPage() {
                         />
                       </CardContent>
                     </Card>
-                  </div>
-
-                  <div className="flex items-center justify-between rounded-2xl border border-gray-200 bg-white px-5 py-4">
-                    <div>
-                      <h3 className="text-sm font-semibold text-gray-900">Need the raw findings?</h3>
-                      <p className="mt-1 text-sm text-gray-500">
-                        Open the brand page to review scan results, live progress, and finding details.
-                      </p>
-                    </div>
-                    <Link
-                      href={selectedBrandHref}
-                      className="inline-flex items-center justify-center rounded-full border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition hover:border-brand-200 hover:bg-brand-50 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
-                    >
-                      Open brand
-                    </Link>
                   </div>
                 </section>
               )}
