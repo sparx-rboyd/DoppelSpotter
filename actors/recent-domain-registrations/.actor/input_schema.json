@@ -69,6 +69,27 @@
         "type": "string"
       }
     },
+    "enhancedAnalysisEnabled": {
+      "title": "Enhanced analysis",
+      "type": "boolean",
+      "editor": "checkbox",
+      "default": false,
+      "description": "Optionally fetch the homepage content for each matching domain and ask an LLM to summarize what appears there."
+    },
+    "openRouterApiKey": {
+      "title": "OpenRouter API key",
+      "type": "string",
+      "editor": "textfield",
+      "isSecret": true,
+      "description": "Required only when Enhanced analysis is enabled."
+    },
+    "openRouterModel": {
+      "title": "OpenRouter model",
+      "type": "string",
+      "editor": "textfield",
+      "default": "deepseek/deepseek-v3.2",
+      "description": "Required only when Enhanced analysis is enabled. Default: deepseek/deepseek-v3.2"
+    },
     "sortField": {
       "title": "Sort field",
       "type": "string",

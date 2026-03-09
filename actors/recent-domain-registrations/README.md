@@ -13,6 +13,7 @@ You will need an active CodePunch subscription and valid API credentials to use 
 - Lets you filter by date comparison and optional TLDs
 - Auto-paginates until all matches are retrieved or your selected limit is reached
 - Outputs one Apify dataset item per matching domain
+- Optionally fetches homepage content from each matching domain and asks an LLM to summarize what appears there
 
 ## Typical use cases
 
@@ -33,8 +34,10 @@ You will need an active CodePunch subscription and valid API credentials to use 
    - `Greater than or equal to`
 4. Add one or more keywords.
 5. Optionally restrict the search to specific TLDs such as `com`, `net`, or `shop`.
-6. Optionally choose sort field and sort order.
-7. Set a total limit for the maximum number of results to return.
+6. Optionally enable `Enhanced analysis` to summarize what appears on each matching domain's homepage.
+7. If enabled, provide your OpenRouter API key and, optionally, a model name.
+8. Optionally choose sort field and sort order.
+9. Set a total limit for the maximum number of results to return.
 
 ## Input fields
 
@@ -46,6 +49,9 @@ You will need an active CodePunch subscription and valid API credentials to use 
 | `Date comparison` | Yes | How the selected date should be applied to the query. |
 | `Keywords` | Yes | One or more terms to search for in recent registrations. |
 | `TLDs` | No | Optional list of top-level domains to include. |
+| `Enhanced analysis` | No | If enabled, the actor fetches the homepage content for each matching domain and asks an LLM to summarize it. |
+| `OpenRouter API key` | No | Required only when Enhanced analysis is enabled. |
+| `OpenRouter model` | No | Optional model name for Enhanced analysis. Default: `deepseek/deepseek-v3.2`. |
 | `Sort field` | No | Sort by `Date`, `Domain`, or `Top-level domain`. |
 | `Sort order` | No | Sort ascending or descending. |
 | `Total limit` | No | Maximum number of matching domains to return. Default: `100`. |
@@ -82,6 +88,7 @@ Each item also includes:
 
 - `requestMetadata`: the filters used for the run
 - `responseMetadata`: useful paging and upstream response context
+- `enhancedAnalysis`: optional homepage summary or a friendly message if AI analysis could not be completed
 
 ### Example output item
 
@@ -121,6 +128,14 @@ Each item also includes:
     "upstreamTlds": "com,app,store",
     "sortField": "date",
     "sortOrder": "asc"
+  },
+  "enhancedAnalysis": {
+    "status": "completed",
+    "model": "deepseek/deepseek-v3.2",
+    "sourceUrl": "https://storysparx.app/",
+    "finalUrl": "https://storysparx.app/",
+    "summary": "The homepage appears to present a branded website or landing page related to StorySparx. It contains real website copy rather than a parked-domain placeholder.",
+    "extractedTextLength": 1842
   }
 }
 ```
@@ -131,9 +146,21 @@ The actor uses your CodePunch API key and secret to obtain an access token, then
 
 If a cached token is rejected by CodePunch, the actor automatically requests a fresh token and retries the query.
 
+## Enhanced analysis
+
+When `Enhanced analysis` is enabled, the actor:
+
+1. Fetches the top-level homepage for each matching domain
+2. Extracts visible text from the HTML
+3. Sends domains to OpenRouter in batches of 10
+4. Stores a short summary for each domain in `enhancedAnalysis`
+
+If a homepage cannot be fetched, or if an AI analysis batch fails, the actor does not fail the run. Instead, the individual item receives a friendly fallback message in `enhancedAnalysis`.
+
 ## Notes
 
 - The actor always requests JSON output from CodePunch.
 - The actor always uses CodePunch data mode `data`.
 - The date you select in the form is converted to the format required by CodePunch before the request is made.
+- Enhanced analysis fetches only the top-level homepage content for each domain, not a full crawl.
 - Results depend on your CodePunch subscription and API access.

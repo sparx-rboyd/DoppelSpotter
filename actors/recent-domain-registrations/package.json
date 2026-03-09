@@ -11,6 +11,7 @@
     "node": ">=20"
   },
   "dependencies": {
-    "apify": "^3.4.0"
+    "apify": "^3.4.0",
+    "cheerio": "^1.2.0"
   }
 }

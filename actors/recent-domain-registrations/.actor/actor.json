@@ -7,7 +7,7 @@
   "buildTag": "latest",
   "defaultMemoryMbytes": 512,
   "minMemoryMbytes": 256,
-  "maxMemoryMbytes": 1024,
+  "maxMemoryMbytes": 515,
   "meta": {
     "templateId": "project_empty"
   },
