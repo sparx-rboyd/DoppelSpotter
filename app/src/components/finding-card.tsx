@@ -40,6 +40,8 @@ interface FindingCardProps {
   finding: FindingSummary;
   className?: string;
   highlightQuery?: string;
+  isSelected?: boolean;
+  onSelectionChange?: (finding: FindingSummary, selected: boolean) => void;
   /** Called when the user toggles the ignored state for a real finding. */
   onIgnoreToggle?: (finding: FindingSummary, isIgnored: boolean) => Promise<void>;
   /** Called when the user toggles the addressed state for a real finding. */
@@ -107,6 +109,47 @@ function truncateMiddle(value: string, maxLength = 44, headLength = 18, tailLeng
   }
 
   return `${value.slice(0, headLength)}...${value.slice(-tailLength)}`;
+}
+
+function SelectionCheckbox({
+  checked,
+  onToggle,
+}: {
+  checked: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={checked ? 'Deselect finding' : 'Select finding'}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle();
+      }}
+      className={cn(
+        'inline-flex h-[18px] w-[18px] items-center justify-center rounded-[5px] border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+        checked
+          ? 'border-slate-500 bg-slate-500 text-white'
+          : 'border-gray-300 bg-gray-50 text-transparent hover:border-gray-400 hover:bg-gray-100',
+      )}
+    >
+      <Check className="h-3 w-3" />
+    </button>
+  );
+}
+
+function shouldIgnoreCardSelectionClick(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(
+    target.closest(
+      'a, button, input, textarea, select, label, summary, [role="button"], [role="checkbox"], [data-prevent-selection-toggle="true"]',
+    ),
+  );
 }
 
 const sourceConfig: Record<
@@ -292,6 +335,8 @@ export function FindingCard({
   finding,
   className,
   highlightQuery,
+  isSelected = false,
+  onSelectionChange,
   onIgnoreToggle,
   onAddressToggle,
   onReclassify,
@@ -537,11 +582,23 @@ export function FindingCard({
     }
   }
 
+  function handleSelectionToggle() {
+    onSelectionChange?.(finding, !isSelected);
+  }
+
+  function handleCardClick(event: React.MouseEvent<HTMLDivElement>) {
+    if (!onSelectionChange) return;
+    if (shouldIgnoreCardSelectionClick(event.target)) return;
+    handleSelectionToggle();
+  }
+
   return (
     <>
       <div
+        onClick={handleCardClick}
         className={cn(
           'bg-white p-4 sm:p-5 rounded-xl border',
+          onSelectionChange ? 'cursor-pointer' : undefined,
           muted
             ? 'border-gray-200 opacity-75'
             : 'border-gray-200 hover:border-gray-300 transition-colors duration-200',
@@ -550,18 +607,26 @@ export function FindingCard({
       >
         {/* Source icon */}
         <div className="flex items-start gap-3 sm:gap-5">
-          <Tooltip content={src.label}>
-            <span
-              role="img"
-              aria-label={src.label}
-              className={cn(
-                'inline-flex p-2 sm:p-3 rounded-lg flex-shrink-0',
-                muted ? 'bg-gray-100 text-gray-400' : cn(src.bgClass, src.textClass),
-              )}
-            >
-              <ScanSourceIcon source={finding.source} className="h-5 w-5 sm:h-6 sm:w-6" />
-            </span>
-          </Tooltip>
+          <div className="flex flex-col items-center gap-2 flex-shrink-0">
+            <Tooltip content={src.label}>
+              <span
+                role="img"
+                aria-label={src.label}
+                className={cn(
+                  'inline-flex p-2 sm:p-3 rounded-lg',
+                  muted ? 'bg-gray-100 text-gray-400' : cn(src.bgClass, src.textClass),
+                )}
+              >
+                <ScanSourceIcon source={finding.source} className="h-5 w-5 sm:h-6 sm:w-6" />
+              </span>
+            </Tooltip>
+            {onSelectionChange && (
+              <SelectionCheckbox
+                checked={isSelected}
+                onToggle={handleSelectionToggle}
+              />
+            )}
+          </div>
 
           {/* Content */}
           <div className="flex-1 min-w-0">

@@ -3,10 +3,11 @@
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { createPortal } from 'react-dom';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
   ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check, Download, RotateCcw,
-  Sparkles,
+  Sparkles, Crosshair,
 } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
@@ -150,6 +151,8 @@ const SEVERITY_GROUP_CONFIG = {
 function SeverityGroup({
   severity,
   findings,
+  selectedFindingIds,
+  onSelectionChange,
   onIgnoreToggle,
   onAddressToggle,
   onReclassify,
@@ -162,6 +165,8 @@ function SeverityGroup({
 }: {
   severity: 'high' | 'medium' | 'low';
   findings: FindingSummary[];
+  selectedFindingIds?: Set<string>;
+  onSelectionChange?: (finding: FindingSummary, selected: boolean) => void;
   onIgnoreToggle?: (finding: FindingSummary, isIgnored: boolean) => Promise<void>;
   onAddressToggle?: (finding: FindingSummary, isAddressed: boolean) => Promise<void>;
   onReclassify?: (finding: FindingSummary, category: FindingCategory) => Promise<void>;
@@ -239,7 +244,9 @@ function SeverityGroup({
             <FindingCard
               key={finding.id}
               finding={finding}
+              isSelected={selectedFindingIds?.has(finding.id) === true}
               highlightQuery={highlightQuery}
+              onSelectionChange={onSelectionChange}
               onIgnoreToggle={onIgnoreToggle}
               onAddressToggle={onAddressToggle}
               onReclassify={onReclassify}
@@ -417,6 +424,37 @@ function scrollToScanCategorySection(scanId: string, category: FindingCategory, 
   });
 }
 
+function BulkActionButton({
+  icon: Icon,
+  label,
+  onClick,
+  disabled = false,
+  emphasis = 'default',
+}: {
+  icon: typeof Crosshair;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  emphasis?: 'default' | 'muted';
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={cn(
+        'inline-flex min-h-10 items-center justify-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40',
+        emphasis === 'muted'
+          ? 'border-white/20 bg-white/8 text-white/90 hover:border-white/35 hover:bg-white/14'
+          : 'border-white/22 bg-white/14 text-white hover:border-white/40 hover:bg-white/20',
+      )}
+    >
+      <Icon className="h-3.5 w-3.5" />
+      {label}
+    </button>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
@@ -466,6 +504,10 @@ export default function BrandDetailPage() {
   const [selectedFindingCategory, setSelectedFindingCategory] = useState<FindingCategory | null>(initialFindingCategory);
   const [selectedFindingSource, setSelectedFindingSource] = useState<FindingSourceFilter | null>(initialFindingSource);
   const [selectedFindingTheme, setSelectedFindingTheme] = useState(initialFindingTheme);
+  const [selectedFindingIds, setSelectedFindingIds] = useState<string[]>([]);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
+  const [isBulkReclassifyDialogOpen, setIsBulkReclassifyDialogOpen] = useState(false);
+  const [selectedBulkReclassificationCategory, setSelectedBulkReclassificationCategory] = useState<FindingCategory | null>(null);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
   const [exportingCsvScanId, setExportingCsvScanId] = useState<string | null>(null);
@@ -549,6 +591,26 @@ export default function BrandDetailPage() {
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [isRunScanMenuOpen]);
+
+  useEffect(() => {
+    if (!isBulkReclassifyDialogOpen) return undefined;
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !bulkActionLoading) {
+        setIsBulkReclassifyDialogOpen(false);
+        setSelectedBulkReclassificationCategory(null);
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [bulkActionLoading, isBulkReclassifyDialogOpen]);
 
   function stopPolling() {
     if (pollRef.current) {
@@ -1006,6 +1068,66 @@ export default function BrandDetailPage() {
   // ---------------------------------------------------------------------------
   // Finding actions — bookmark, note, ignore, address, and reclassify
   // ---------------------------------------------------------------------------
+
+  function handleFindingSelectionChange(finding: FindingSummary, selected: boolean) {
+    setSelectedFindingIds((prev) => {
+      if (selected) {
+        return prev.includes(finding.id) ? prev : [...prev, finding.id];
+      }
+      return prev.filter((findingId) => findingId !== finding.id);
+    });
+  }
+
+  function clearSelectedFindings() {
+    setSelectedFindingIds([]);
+    setIsBulkReclassifyDialogOpen(false);
+    setSelectedBulkReclassificationCategory(null);
+  }
+
+  function isIgnoreCompatible(finding: FindingSummary) {
+    return !finding.isFalsePositive && !finding.isIgnored && !finding.isAddressed;
+  }
+
+  function isAddressCompatible(finding: FindingSummary) {
+    return !finding.isFalsePositive && !finding.isIgnored && !finding.isAddressed;
+  }
+
+  function isBookmarkCompatible(finding: FindingSummary) {
+    return finding.isBookmarked !== true;
+  }
+
+  function isUnignoreCompatible(finding: FindingSummary) {
+    return finding.isIgnored === true && !finding.isFalsePositive;
+  }
+
+  function isUnaddressCompatible(finding: FindingSummary) {
+    return finding.isAddressed === true;
+  }
+
+  function isUnbookmarkCompatible(finding: FindingSummary) {
+    return finding.isBookmarked === true;
+  }
+
+  function isReclassifyCompatible(finding: FindingSummary) {
+    return finding.isAddressed !== true;
+  }
+
+  async function runBulkFindingAction(findings: FindingSummary[], action: (finding: FindingSummary) => Promise<void>) {
+    if (findings.length === 0 || bulkActionLoading) return;
+
+    setBulkActionLoading(true);
+    setError('');
+    try {
+      for (const finding of findings) {
+        await action(finding);
+      }
+      clearSelectedFindings();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update selected findings');
+    } finally {
+      setBulkActionLoading(false);
+    }
+  }
 
   function applyFindingMetadataUpdate(
     triggerFinding: FindingSummary,
@@ -1524,6 +1646,28 @@ export default function BrandDetailPage() {
     );
   }
 
+  function openBulkReclassifyDialog() {
+    if (bulkReclassifyCompatibleFindings.length === 0 || bulkActionLoading) return;
+    setSelectedBulkReclassificationCategory(null);
+    setIsBulkReclassifyDialogOpen(true);
+  }
+
+  async function confirmBulkReclassification() {
+    if (!selectedBulkReclassificationCategory) return;
+    const compatibleFindings = bulkReclassifyCompatibleFindings.filter((finding) => {
+      if (selectedBulkReclassificationCategory === 'non-hit') {
+        return finding.isFalsePositive !== true;
+      }
+      return finding.isFalsePositive === true || finding.severity !== selectedBulkReclassificationCategory;
+    });
+
+    setIsBulkReclassifyDialogOpen(false);
+    await runBulkFindingAction(
+      compatibleFindings,
+      async (finding) => handleReclassifyFinding(finding, selectedBulkReclassificationCategory),
+    );
+  }
+
   // ---------------------------------------------------------------------------
   // On mount: fetch brand + scans; restore in-flight scan if present
   // ---------------------------------------------------------------------------
@@ -1756,6 +1900,48 @@ export default function BrandDetailPage() {
     scanIgnored,
   ]);
 
+  const selectedFindingIdSet = useMemo(() => new Set(selectedFindingIds), [selectedFindingIds]);
+  const selectableFindingMap = useMemo(() => {
+    const next = new Map<string, FindingSummary>();
+    for (const finding of [
+      ...searchResults,
+      ...allBookmarkedFindings,
+      ...allAddressedFindings,
+      ...allIgnoredFindings,
+      ...liveScanFindings,
+      ...liveScanNonHits,
+      ...Object.values(scanFindings).flat(),
+      ...Object.values(scanNonHits).flat(),
+      ...Object.values(scanIgnored).flat(),
+    ]) {
+      next.set(finding.id, finding);
+    }
+    return next;
+  }, [
+    allAddressedFindings,
+    allBookmarkedFindings,
+    allIgnoredFindings,
+    liveScanFindings,
+    liveScanNonHits,
+    scanFindings,
+    scanIgnored,
+    scanNonHits,
+    searchResults,
+  ]);
+  const selectedFindings = useMemo(
+    () => selectedFindingIds
+      .map((findingId) => selectableFindingMap.get(findingId))
+      .filter((finding): finding is FindingSummary => Boolean(finding)),
+    [selectedFindingIds, selectableFindingMap],
+  );
+  const bulkIgnoreCompatibleFindings = selectedFindings.filter(isIgnoreCompatible);
+  const bulkAddressCompatibleFindings = selectedFindings.filter(isAddressCompatible);
+  const bulkBookmarkCompatibleFindings = selectedFindings.filter(isBookmarkCompatible);
+  const bulkUnignoreCompatibleFindings = selectedFindings.filter(isUnignoreCompatible);
+  const bulkUnaddressCompatibleFindings = selectedFindings.filter(isUnaddressCompatible);
+  const bulkUnbookmarkCompatibleFindings = selectedFindings.filter(isUnbookmarkCompatible);
+  const bulkReclassifyCompatibleFindings = selectedFindings.filter(isReclassifyCompatible);
+
   useEffect(() => {
     if (!hasLoadedFindingTaxonomyOptions) return;
     if (availableFindingThemes.length === 0) return;
@@ -1768,6 +1954,19 @@ export default function BrandDetailPage() {
       setSelectedFindingTheme('');
     }
   }, [availableFindingThemes, hasLoadedFindingTaxonomyOptions, normalizedSelectedFindingTheme]);
+
+  useEffect(() => {
+    setSelectedFindingIds((prev) => {
+      const next = prev.filter((findingId) => selectableFindingMap.has(findingId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectableFindingMap]);
+
+  useEffect(() => {
+    if (selectedFindings.length > 0) return;
+    setIsBulkReclassifyDialogOpen(false);
+    setSelectedBulkReclassificationCategory(null);
+  }, [selectedFindings.length]);
 
   useEffect(() => {
     return () => {
@@ -3022,7 +3221,9 @@ export default function BrandDetailPage() {
 
                                   <FindingCard
                                     finding={result}
+                                    isSelected={selectedFindingIdSet.has(result.id)}
                                     highlightQuery={activeHighlightQuery}
+                                    onSelectionChange={handleFindingSelectionChange}
                                     onIgnoreToggle={result.displayBucket === 'ignored' || result.displayBucket === 'hit' ? handleIgnoreToggle : undefined}
                                     onAddressToggle={result.displayBucket !== 'non-hit' && result.displayBucket !== 'ignored' ? handleAddressedToggle : undefined}
                                     onReclassify={handleReclassifyFinding}
@@ -3077,6 +3278,8 @@ export default function BrandDetailPage() {
                                 key={`bookmarked-${sev}`}
                                 severity={sev}
                                 findings={bookmarkedHits.filter((finding) => finding.severity === sev)}
+                                selectedFindingIds={selectedFindingIdSet}
+                                onSelectionChange={handleFindingSelectionChange}
                                 onAddressToggle={handleAddressedToggle}
                                 onReclassify={handleReclassifyFinding}
                                 onBookmarkUpdate={handleBookmarkUpdate}
@@ -3103,7 +3306,9 @@ export default function BrandDetailPage() {
                                   <FindingCard
                                     key={finding.id}
                                     finding={finding}
+                                    isSelected={selectedFindingIdSet.has(finding.id)}
                                     highlightQuery={activeHighlightQuery}
+                                    onSelectionChange={handleFindingSelectionChange}
                                     onReclassify={handleReclassifyFinding}
                                     onBookmarkUpdate={handleBookmarkUpdate}
                                     onNoteUpdate={handleFindingNoteUpdate}
@@ -3135,6 +3340,8 @@ export default function BrandDetailPage() {
                                 key={`addressed-${sev}`}
                                 severity={sev}
                                 findings={visibleAddressedFindings.filter((finding) => finding.severity === sev)}
+                                selectedFindingIds={selectedFindingIdSet}
+                                onSelectionChange={handleFindingSelectionChange}
                                 onAddressToggle={handleAddressedToggle}
                                 onBookmarkUpdate={handleBookmarkUpdate}
                                 onNoteUpdate={handleFindingNoteUpdate}
@@ -3162,7 +3369,9 @@ export default function BrandDetailPage() {
                             <FindingCard
                               key={finding.id}
                               finding={finding}
+                              isSelected={selectedFindingIdSet.has(finding.id)}
                               highlightQuery={activeHighlightQuery}
+                              onSelectionChange={handleFindingSelectionChange}
                               onIgnoreToggle={handleIgnoreToggle}
                               onReclassify={handleReclassifyFinding}
                               onBookmarkUpdate={handleBookmarkUpdate}
@@ -3321,6 +3530,8 @@ export default function BrandDetailPage() {
                                                 key={`live-${sev}`}
                                                 severity={sev}
                                                 findings={visibleLiveScanFindings.filter((f) => f.severity === sev)}
+                                                selectedFindingIds={selectedFindingIdSet}
+                                                onSelectionChange={handleFindingSelectionChange}
                                                 onReclassify={handleReclassifyFinding}
                                                 onBookmarkUpdate={handleBookmarkUpdate}
                                                 onNoteUpdate={handleFindingNoteUpdate}
@@ -3372,7 +3583,9 @@ export default function BrandDetailPage() {
                                                 <FindingCard
                                                   key={finding.id}
                                                   finding={finding}
+                                                  isSelected={selectedFindingIdSet.has(finding.id)}
                                                   highlightQuery={activeHighlightQuery}
+                                                  onSelectionChange={handleFindingSelectionChange}
                                                   onReclassify={handleReclassifyFinding}
                                                   onBookmarkUpdate={handleBookmarkUpdate}
                                                   onNoteUpdate={handleFindingNoteUpdate}
@@ -3716,6 +3929,8 @@ export default function BrandDetailPage() {
                                                   key={`${scan.id}-${sev}`}
                                                   severity={sev}
                                                   findings={hits.filter((f) => f.severity === sev)}
+                                                  selectedFindingIds={selectedFindingIdSet}
+                                                  onSelectionChange={handleFindingSelectionChange}
                                                   onIgnoreToggle={handleIgnoreToggle}
                                                   onAddressToggle={handleAddressedToggle}
                                                   onReclassify={handleReclassifyFinding}
@@ -3775,7 +3990,9 @@ export default function BrandDetailPage() {
                                                     <FindingCard
                                                       key={finding.id}
                                                       finding={finding}
+                                                      isSelected={selectedFindingIdSet.has(finding.id)}
                                                       highlightQuery={activeHighlightQuery}
+                                                      onSelectionChange={handleFindingSelectionChange}
                                                       onReclassify={handleReclassifyFinding}
                                                       onBookmarkUpdate={handleBookmarkUpdate}
                                                       onNoteUpdate={handleFindingNoteUpdate}
@@ -3826,7 +4043,9 @@ export default function BrandDetailPage() {
                                                     <FindingCard
                                                       key={finding.id}
                                                       finding={finding}
+                                                      isSelected={selectedFindingIdSet.has(finding.id)}
                                                       highlightQuery={activeHighlightQuery}
+                                                      onSelectionChange={handleFindingSelectionChange}
                                                       onIgnoreToggle={handleIgnoreToggle}
                                                       onReclassify={handleReclassifyFinding}
                                                       onBookmarkUpdate={handleBookmarkUpdate}
@@ -3856,6 +4075,190 @@ export default function BrandDetailPage() {
             </>
           )}
         </div>
+
+        {selectedFindings.length > 0 && (
+          <div className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
+            <div className="w-full max-w-5xl overflow-hidden rounded-[18px] border border-brand-700/60 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.18),_transparent_34%),linear-gradient(135deg,_rgba(2,132,199,0.97),_rgba(3,105,161,0.96))] shadow-[0_24px_70px_rgba(3,105,161,0.32)] backdrop-blur">
+              <div className="flex flex-col gap-4 px-5 py-4 sm:px-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-white">
+                      {selectedFindings.length} finding{selectedFindings.length !== 1 ? 's' : ''} selected
+                    </p>
+                    <p className="mt-1 text-xs text-slate-300">
+                      Bulk actions only apply to compatible selected findings.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearSelectedFindings}
+                    disabled={bulkActionLoading}
+                    className="inline-flex items-center gap-2 self-start rounded-md border border-white/18 bg-white/10 px-3 py-1.5 text-xs font-medium text-white/90 transition hover:border-white/34 hover:bg-white/16 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                    Clear selection
+                  </button>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+                  <div className="rounded-[14px] border border-white/14 bg-white/8 p-3">
+                    <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                      Apply
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <BulkActionButton
+                        icon={Crosshair}
+                        label="Reclassify"
+                        onClick={openBulkReclassifyDialog}
+                        disabled={bulkActionLoading || bulkReclassifyCompatibleFindings.length === 0}
+                      />
+                      <BulkActionButton
+                        icon={EyeOff}
+                        label="Ignore"
+                        onClick={() => void runBulkFindingAction(bulkIgnoreCompatibleFindings, async (finding) => handleIgnoreToggle(finding, true))}
+                        disabled={bulkActionLoading || bulkIgnoreCompatibleFindings.length === 0}
+                      />
+                      <BulkActionButton
+                        icon={Check}
+                        label="Mark as addressed"
+                        onClick={() => void runBulkFindingAction(bulkAddressCompatibleFindings, async (finding) => handleAddressedToggle(finding, true))}
+                        disabled={bulkActionLoading || bulkAddressCompatibleFindings.length === 0}
+                      />
+                      <BulkActionButton
+                        icon={Bookmark}
+                        label="Bookmark"
+                        onClick={() => void runBulkFindingAction(bulkBookmarkCompatibleFindings, async (finding) => handleBookmarkUpdate(finding, { isBookmarked: true }))}
+                        disabled={bulkActionLoading || bulkBookmarkCompatibleFindings.length === 0}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="rounded-[14px] border border-white/14 bg-white/8 p-3">
+                    <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
+                      Reverse
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      <BulkActionButton
+                        icon={EyeOff}
+                        label="Un-ignore"
+                        onClick={() => void runBulkFindingAction(bulkUnignoreCompatibleFindings, async (finding) => handleIgnoreToggle(finding, false))}
+                        disabled={bulkActionLoading || bulkUnignoreCompatibleFindings.length === 0}
+                        emphasis="muted"
+                      />
+                      <BulkActionButton
+                        icon={X}
+                        label="Mark as not addressed"
+                        onClick={() => void runBulkFindingAction(bulkUnaddressCompatibleFindings, async (finding) => handleAddressedToggle(finding, false))}
+                        disabled={bulkActionLoading || bulkUnaddressCompatibleFindings.length === 0}
+                        emphasis="muted"
+                      />
+                      <BulkActionButton
+                        icon={Bookmark}
+                        label="Un-bookmark"
+                        onClick={() => void runBulkFindingAction(bulkUnbookmarkCompatibleFindings, async (finding) => handleBookmarkUpdate(finding, { isBookmarked: false }))}
+                        disabled={bulkActionLoading || bulkUnbookmarkCompatibleFindings.length === 0}
+                        emphasis="muted"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isBulkReclassifyDialogOpen && createPortal(
+          <div
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/60 px-4"
+            onClick={() => {
+              if (!bulkActionLoading) {
+                setIsBulkReclassifyDialogOpen(false);
+                setSelectedBulkReclassificationCategory(null);
+              }
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="bulk-reclassify-title"
+              aria-describedby="bulk-reclassify-description"
+              className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start gap-4">
+                <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand-100">
+                  <Crosshair className="h-5 w-5 text-brand-700" />
+                </div>
+                <div className="min-w-0">
+                  <h2 id="bulk-reclassify-title" className="text-lg font-semibold text-gray-900">
+                    Reclassify selected findings
+                  </h2>
+                  <p id="bulk-reclassify-description" className="mt-2 text-sm leading-6 text-gray-600">
+                    Only selected findings that can be reclassified will be updated.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2">
+                {([
+                  { category: 'high' as const, label: 'High', description: 'Move compatible selections into the high findings section.', tone: 'text-red-600' },
+                  { category: 'medium' as const, label: 'Medium', description: 'Move compatible selections into the medium findings section.', tone: 'text-amber-600' },
+                  { category: 'low' as const, label: 'Low', description: 'Move compatible selections into the low findings section.', tone: 'text-emerald-600' },
+                  { category: 'non-hit' as const, label: 'Non-finding', description: 'Move compatible selections into the non-findings section.', tone: 'text-gray-600' },
+                ]).map((option) => {
+                  const isSelected = selectedBulkReclassificationCategory === option.category;
+
+                  return (
+                    <button
+                      key={option.category}
+                      type="button"
+                      onClick={() => setSelectedBulkReclassificationCategory(option.category)}
+                      className={cn(
+                        'rounded-xl border px-4 py-3 text-left transition',
+                        isSelected
+                          ? 'border-brand-500 bg-brand-50 ring-2 ring-brand-100'
+                          : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50',
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className={cn('text-sm font-semibold', option.tone)}>
+                          {option.label}
+                        </span>
+                        {isSelected && <Check className="w-4 h-4 text-brand-600" />}
+                      </div>
+                      <p className="mt-2 text-xs text-gray-500">
+                        {option.description}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={() => {
+                    setIsBulkReclassifyDialogOpen(false);
+                    setSelectedBulkReclassificationCategory(null);
+                  }}
+                  disabled={bulkActionLoading}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void confirmBulkReclassification()}
+                  disabled={!selectedBulkReclassificationCategory || bulkActionLoading}
+                  loading={bulkActionLoading}
+                >
+                  Save category
+                </Button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
 
         {isCustomScanDialogOpen && (
           <div
