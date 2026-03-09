@@ -3516,8 +3516,32 @@ export default function BrandDetailPage() {
                                         ? <ChevronDown className="mt-0.5 w-4 h-4 text-gray-400 flex-shrink-0" />
                                         : <ChevronRight className="mt-0.5 w-4 h-4 text-gray-400 flex-shrink-0" />}
                                       <span className="flex min-w-0 flex-1 flex-col gap-2.5">
-                                        <span className="text-sm font-semibold text-gray-500">
-                                          {formatScanDate(scan.startedAt)}
+                                        <span className="flex flex-wrap items-center gap-2">
+                                          <span className="text-sm font-semibold text-gray-500">
+                                            {formatScanDate(scan.startedAt)}
+                                          </span>
+                                          {(scan.sources?.length ?? 0) > 0 && (
+                                            <span className="flex flex-wrap items-center gap-2 text-gray-300">
+                                              <span
+                                                aria-hidden="true"
+                                                className="h-3.5 w-px rounded-full bg-gray-200"
+                                              />
+                                              <span
+                                                className="flex flex-wrap items-center gap-1.5"
+                                                aria-label={`Scan types: ${scan.sources?.map((source) => getFindingSourceLabel(source)).join(', ')}`}
+                                              >
+                                                {scan.sources?.map((source) => (
+                                                  <span
+                                                    key={source}
+                                                    title={getFindingSourceLabel(source)}
+                                                    className="inline-flex items-center"
+                                                  >
+                                                    <ScanSourceIcon source={source} className="h-[14px] w-[14px]" />
+                                                  </span>
+                                                ))}
+                                              </span>
+                                            </span>
+                                          )}
                                         </span>
                                         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                                           {hasFindings ? (

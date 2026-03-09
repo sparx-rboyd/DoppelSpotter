@@ -9,11 +9,32 @@ import {
   isBrandHistoryDeletionActive,
   isScanDeletionActive,
 } from '@/lib/async-deletions';
+import { normalizeBrandScanSources } from '@/lib/brands';
+import { SCAN_SOURCE_ORDER } from '@/lib/scan-sources';
 import type { BrandProfile, Scan, ScanSummary, ScanStatus } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
 
 const TERMINAL_STATUSES: ScanStatus[] = ['completed', 'cancelled', 'failed'];
+
+function getScanSummarySources(scan: Scan): ScanSummary['sources'] {
+  const runSources = new Set(
+    Object.values(scan.actorRuns ?? {})
+      .map((run) => run.source)
+      .filter((source): source is Exclude<NonNullable<ScanSummary['sources']>[number], 'unknown'> => source !== 'unknown'),
+  );
+
+  if (runSources.size > 0) {
+    return SCAN_SOURCE_ORDER.filter((source) => runSources.has(source));
+  }
+
+  if (scan.effectiveSettings?.scanSources) {
+    const normalized = normalizeBrandScanSources(scan.effectiveSettings.scanSources);
+    return SCAN_SOURCE_ORDER.filter((source) => normalized[source]);
+  }
+
+  return [];
+}
 
 // GET /api/brands/[brandId]/scans
 // Returns all terminal scans for the brand, newest first, using denormalized counts stored
@@ -80,6 +101,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     addressedCount: scan.addressedCount ?? 0,
     skippedCount: scan.skippedCount ?? 0,
     aiSummary: scan.aiSummary,
+    sources: getScanSummarySources(scan),
   }));
 
   return NextResponse.json({ data: summaries });

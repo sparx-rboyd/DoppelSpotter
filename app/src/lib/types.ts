@@ -429,6 +429,7 @@ export interface ScanSummary {
   addressedCount: number;
   skippedCount: number;
   aiSummary?: string;
+  sources?: Exclude<FindingSource, 'unknown'>[];
 }
 
 export interface DashboardMetricTotals {
