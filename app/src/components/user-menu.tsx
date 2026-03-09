@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { ChevronDown, KeyRound, LogOut, User } from 'lucide-react';
+import { ChevronDown, LogOut, Settings, User } from 'lucide-react';
 import { useAuth } from '@/lib/auth/auth-context';
 import { cn } from '@/lib/utils';
 
@@ -92,15 +92,15 @@ export function UserMenu() {
 
           <div className="p-2">
             <Link
-              href="/account/password"
+              href="/settings"
               role="menuitem"
               className={cn(
                 'flex w-full items-center gap-3 rounded-xl px-3 py-2 text-sm text-gray-700 transition hover:bg-gray-50 hover:text-gray-900',
-                pathname === '/account/password' && 'bg-brand-50 text-brand-700',
+                pathname.startsWith('/settings') && 'bg-brand-50 text-brand-700',
               )}
             >
-              <KeyRound className="h-4 w-4" />
-              Change password
+              <Settings className="h-4 w-4" />
+              Settings
             </Link>
 
             <button

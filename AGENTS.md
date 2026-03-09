@@ -36,16 +36,19 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │       ├── app/                  # Pages + API routes (App Router)
 │       │   └── api/
 │       │       ├── auth/         # login, logout, me, forgot/reset password, change-password (signup disabled — use add-user CLI)
+│       │       │                 # delete-account removes the user and all owned Firestore data
 │       │       ├── brands/       # CRUD + findings + scans per brand
 │       │       ├── dashboard/    # Dashboard bootstrap, persisted selection, and analytics metrics
 │       │       ├── findings/     # Cross-brand findings query
 │       │       ├── internal/     # Internal service-to-service routes (scheduled scan dispatch)
 │       │       ├── scan/         # Trigger scan + poll status
 │       │       └── webhooks/apify/  # Apify webhook receiver → AI analysis pipeline
+│       ├── settings/             # Authenticated account settings page (password + account deletion)
 │       └── lib/
 │           ├── apify/
 │           │   ├── actors.ts     # Logical scanner registry (Google + Discord + GitHub + X) + Apify actor lookup helpers
 │           │   └── client.ts     # Apify client: source-specific actor input builders, run start helpers, dataset fetch
+│           ├── account-deletion.ts # Account-wide cleanup helper: cancel active runs, delete owned data
 │           ├── dashboard.ts      # Dashboard metrics helpers: terminal-scan totals + source/theme rollups
 │           ├── mailersend.ts     # MailerSend email client for transactional emails
 │           ├── scan-runner.ts    # Shared manual + scheduled scan reservation and actor startup
