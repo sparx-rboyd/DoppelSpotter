@@ -28,8 +28,11 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 ├── AGENTS.md                     # This file
 ├── REVIEW.md                     # Ongoing scan quality review notes
 ├── PITCH.md                      # Product pitch / spec
+├── NEW_ACTOR.md                  # Draft specification for the recent-domain-registrations Apify actor
 ├── cloudbuild.yaml               # GCP Cloud Build CI/CD pipeline
 ├── wrangler.toml                 # Cloudflare Workers config (landing page)
+├── actors/                       # Standalone Apify actors and prototypes
+│   └── recent-domain-registrations/ # CodePunch-backed recent-domain-registrations actor
 ├── landing-page/                 # Static marketing site
 ├── app/                          # Next.js 15 application
 │   └── src/

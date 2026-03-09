@@ -1,0 +1,28 @@
+{
+  "actorSpecification": 1,
+  "views": {
+    "overview": {
+      "title": "Recent domain registrations",
+      "transformation": {
+        "fields": [
+          "domain",
+          "name",
+          "tld",
+          "date",
+          "length",
+          "idn",
+          "ipv4",
+          "ipv6",
+          "ipasnumber",
+          "ipasname",
+          "ipchecked",
+          "requestMetadata",
+          "responseMetadata"
+        ]
+      },
+      "display": {
+        "component": "table"
+      }
+    }
+  }
+}

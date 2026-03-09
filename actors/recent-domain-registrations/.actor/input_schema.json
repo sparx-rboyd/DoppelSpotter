@@ -1,0 +1,118 @@
+{
+  "title": "Recent Domain Registrations Scanner input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "apiKey": {
+      "title": "CodePunch API key",
+      "type": "string",
+      "editor": "textfield",
+      "isSecret": true,
+      "description": "Your CodePunch API key. This is used only to obtain an access token."
+    },
+    "apiSecret": {
+      "title": "CodePunch API secret",
+      "type": "string",
+      "editor": "textfield",
+      "isSecret": true,
+      "description": "Your CodePunch API secret. This is used only to obtain an access token."
+    },
+    "date": {
+      "title": "Date",
+      "type": "string",
+      "editor": "datepicker",
+      "dateType": "absolute",
+      "pattern": "^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$",
+      "prefill": "2026-03-01",
+      "description": "Select the reference date. The actor converts it to the yyyymmdd format required by the CodePunch v2 API."
+    },
+    "dateComparison": {
+      "title": "Date comparison",
+      "type": "string",
+      "editor": "select",
+      "enum": [
+        "eq",
+        "lt",
+        "gt",
+        "lte",
+        "gte"
+      ],
+      "enumTitles": [
+        "Equal to",
+        "Less than",
+        "Greater than",
+        "Less than or equal to",
+        "Greater than or equal to"
+      ],
+      "default": "gte",
+      "description": "Comparison operator applied to the date filter."
+    },
+    "keywords": {
+      "title": "Keywords",
+      "type": "array",
+      "description": "Keywords to search for. Values are joined with the CodePunch pipe syntax. If a keyword does not include %, the actor wraps it as %keyword%.",
+      "prefill": [
+        "sparx"
+      ],
+      "editor": "stringList",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "tlds": {
+      "title": "TLDs",
+      "type": "array",
+      "description": "Optional TLD allow-list. Values are lowercased, deduplicated, and joined with commas before calling CodePunch.",
+      "editor": "stringList",
+      "items": {
+        "type": "string"
+      }
+    },
+    "sortField": {
+      "title": "Sort field",
+      "type": "string",
+      "editor": "select",
+      "enum": [
+        "date",
+        "domain",
+        "tld"
+      ],
+      "enumTitles": [
+        "Date",
+        "Domain",
+        "Top-level domain"
+      ],
+      "description": "Optional sort field passed through to the upstream API."
+    },
+    "sortOrder": {
+      "title": "Sort order",
+      "type": "string",
+      "editor": "select",
+      "enum": [
+        "asc",
+        "desc"
+      ],
+      "enumTitles": [
+        "Ascending",
+        "Descending"
+      ],
+      "description": "Optional sort order passed through to the upstream API."
+    },
+    "totalLimit": {
+      "title": "Total limit",
+      "type": "integer",
+      "editor": "number",
+      "minimum": 1,
+      "default": 100,
+      "description": "Maximum number of matching domains to emit across all paginated requests."
+    }
+  },
+  "required": [
+    "apiKey",
+    "apiSecret",
+    "date",
+    "dateComparison",
+    "keywords"
+  ]
+}

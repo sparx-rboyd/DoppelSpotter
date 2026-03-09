@@ -1,0 +1,22 @@
+{
+  "actorSpecification": 1,
+  "name": "recent-domain-registrations",
+  "title": "Recent Domain Registrations Scanner",
+  "description": "Searches the CodePunch GTLD Domain Name Activity Feed v2 /added endpoint and emits one dataset item per matching domain.",
+  "version": "0.1",
+  "buildTag": "latest",
+  "defaultMemoryMbytes": 512,
+  "minMemoryMbytes": 256,
+  "maxMemoryMbytes": 1024,
+  "meta": {
+    "templateId": "project_empty"
+  },
+  "input": "./input_schema.json",
+  "output": "./output_schema.json",
+  "dockerfile": "../Dockerfile",
+  "dockerContextDir": "..",
+  "readme": "../README.md",
+  "storages": {
+    "dataset": "./dataset_schema.json"
+  }
+}

@@ -2,7 +2,8 @@
   "name": "doppelspotter",
   "private": true,
   "scripts": {
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "actor:recent-domain-registrations:run": "npm --prefix actors/recent-domain-registrations start"
   },
   "devDependencies": {
     "wrangler": "^4.70.0"
