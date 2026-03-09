@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
-import { KeyRound, Trash2 } from 'lucide-react';
+import { AlertTriangle, KeyRound, Trash2 } from 'lucide-react';
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { broadcastAuthSyncEvent, useAuth } from '@/lib/auth/auth-context';
 import { buildLoginRedirectHref } from '@/lib/auth/redirects';
 
 export default function SettingsPage() {
-  const { signOut, user } = useAuth();
+  const { signOut, user, refreshSession } = useAuth();
   const router = useRouter();
 
   const [currentPassword, setCurrentPassword] = useState('');
@@ -24,6 +24,14 @@ export default function SettingsPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [deleting, setDeleting] = useState(false);
+  const [skipDomainVisitWarning, setSkipDomainVisitWarning] = useState(false);
+  const [savingDomainVisitWarning, setSavingDomainVisitWarning] = useState(false);
+  const [domainVisitWarningError, setDomainVisitWarningError] = useState('');
+  const [domainVisitWarningSuccess, setDomainVisitWarningSuccess] = useState('');
+
+  useEffect(() => {
+    setSkipDomainVisitWarning(user?.preferences?.skipDomainRegistrationVisitWarning === true);
+  }, [user?.preferences?.skipDomainRegistrationVisitWarning]);
 
   useEffect(() => {
     if (!isDeleteDialogOpen || deleting) {
@@ -131,6 +139,48 @@ export default function SettingsPage() {
     }
   }
 
+  async function handleDomainVisitWarningToggle(nextValue: boolean) {
+    if (savingDomainVisitWarning) return;
+
+    setSavingDomainVisitWarning(true);
+    setDomainVisitWarningError('');
+    setDomainVisitWarningSuccess('');
+
+    try {
+      const response = await fetch('/api/settings/preferences', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          skipDomainRegistrationVisitWarning: nextValue,
+        }),
+      });
+
+      if (response.status === 401) {
+        await signOut().catch(() => null);
+        router.replace(buildLoginRedirectHref('/settings'));
+        return;
+      }
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error ?? 'Failed to update setting');
+      }
+
+      setSkipDomainVisitWarning(nextValue);
+      setDomainVisitWarningSuccess(
+        nextValue
+          ? 'Domain visit warning disabled'
+          : 'Domain visit warning enabled',
+      );
+      await refreshSession();
+    } catch (error) {
+      setDomainVisitWarningError(error instanceof Error ? error.message : 'An unexpected error occurred.');
+    } finally {
+      setSavingDomainVisitWarning(false);
+    }
+  }
+
   return (
     <AuthGuard>
       <Navbar />
@@ -226,6 +276,58 @@ export default function SettingsPage() {
                     </Button>
                   </div>
                 </form>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="px-6 py-5">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-amber-50">
+                    <AlertTriangle className="h-5 w-5 text-amber-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-semibold text-gray-900">Domain visit warning</h2>
+                    <p className="mt-1 text-sm leading-6 text-gray-600">
+                      Control whether DoppelSpotter warns you before opening domain registration findings, which can sometimes host inappropriate content.
+                    </p>
+                  </div>
+                </div>
+              </CardHeader>
+
+              <CardContent className="p-6">
+                <div className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="space-y-1">
+                    <p className="font-medium text-gray-900">Warn before opening domain registration findings</p>
+                    <p className="text-sm text-gray-500">
+                      Turn this back on at any time if you previously chose “Don&apos;t show me this again”.
+                    </p>
+                  </div>
+
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={!skipDomainVisitWarning}
+                    disabled={savingDomainVisitWarning}
+                    onClick={() => void handleDomainVisitWarningToggle(!skipDomainVisitWarning)}
+                    className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:opacity-60 ${!skipDomainVisitWarning ? 'bg-brand-600' : 'bg-gray-300'}`}
+                  >
+                    <span
+                      className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${!skipDomainVisitWarning ? 'translate-x-6' : 'translate-x-1'}`}
+                    />
+                  </button>
+                </div>
+
+                {domainVisitWarningError && (
+                  <p className="mt-4 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-600">
+                    {domainVisitWarningError}
+                  </p>
+                )}
+
+                {domainVisitWarningSuccess && (
+                  <p className="mt-4 rounded-lg border border-green-100 bg-green-50 px-3 py-2 text-sm text-green-700">
+                    {domainVisitWarningSuccess}
+                  </p>
+                )}
               </CardContent>
             </Card>
 

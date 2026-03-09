@@ -54,8 +54,7 @@ import {
 } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo, GoogleScannerId } from '@/lib/types';
 import {
-  normalizeAllowAiDeepSearches,
-  normalizeMaxAiDeepSearches,
+  getEffectiveScanSettings,
 } from '@/lib/brands';
 import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
 import {
@@ -336,6 +335,7 @@ async function handleSucceededRun({
     return;
   }
   const brand = brandDoc.data() as BrandProfile;
+  const effectiveSettings = getEffectiveScanSettings(brand, scan.effectiveSettings);
 
   // Determine the source (surface) for this actor run
   const actorRunInfo = scan.actorRuns?.[runId];
@@ -349,7 +349,7 @@ async function handleSucceededRun({
       ? (scannerConfig.kind === 'google' ? sanitizeGoogleQueryForDisplay(searchQuery) : searchQuery)
       : undefined
   );
-  const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
+  const maxSuggestedSearches = effectiveSettings.maxAiDeepSearches;
   const userPreferenceHints = scan.userPreferenceHints;
   const previousFindingUrls = scannerConfig.kind === 'google'
     ? await loadPreviousFindingUrls({
@@ -526,7 +526,7 @@ async function handleSucceededRun({
     suggestedSearches.length > 0 &&
     searchDepth === 0 &&
     scannerConfig.supportsDeepSearch &&
-    normalizeAllowAiDeepSearches(brand.allowAiDeepSearches)
+    effectiveSettings.allowAiDeepSearches
   ) {
     const reservedQueries = await reserveSuggestedSearches({
       scanDoc,
@@ -783,8 +783,9 @@ async function analyseAndWriteGoogleBatch({
   let findingCount = 0;
   let suggestedSearches: string[] | undefined;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
-  const canRunDeepSearchSelection = searchDepth === 0 && normalizeAllowAiDeepSearches(brand.allowAiDeepSearches);
-  const maxSuggestedSearches = normalizeMaxAiDeepSearches(brand.maxAiDeepSearches);
+  const effectiveSettings = getEffectiveScanSettings(brand, scan.effectiveSettings);
+  const canRunDeepSearchSelection = searchDepth === 0 && effectiveSettings.allowAiDeepSearches;
+  const maxSuggestedSearches = effectiveSettings.maxAiDeepSearches;
 
   const normalizedRun = normalizeGoogleSerpRun({
     source,
@@ -3025,13 +3026,14 @@ async function triggerDeepSearches({
   scannerConfig: ScannerConfig;
 }) {
   const queries = suggestedSearches.slice(0, maxSuggestedSearches);
+  const effectiveSettings = getEffectiveScanSettings(brand, scan.effectiveSettings);
 
   const startResults = await Promise.all(queries.map(async (query) => {
     try {
       const { runId, query: executableQuery, displayQuery } = await startDeepSearchRun({
         actor: scannerConfig,
         query,
-        searchResultPages: brand.searchResultPages,
+        searchResultPages: effectiveSettings.searchResultPages,
         webhookUrl,
       });
 

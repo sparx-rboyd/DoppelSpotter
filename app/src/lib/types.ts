@@ -12,6 +12,8 @@ export interface UserRecord {
   passwordChangedAt?: Timestamp;
   /** Optional per-user dashboard state persisted across devices. */
   dashboardPreferences?: DashboardPreferences;
+  /** Optional per-user UI preferences persisted across devices. */
+  preferences?: UserPreferences;
   /**
    * Explicitly false for new users until they click their verification link.
    * undefined / missing means verified (backwards-compat for existing accounts).
@@ -25,6 +27,11 @@ export interface UserRecord {
 export interface DashboardPreferences {
   /** The user's preferred dashboard brand selection. */
   selectedBrandId?: string;
+}
+
+export interface UserPreferences {
+  /** Suppresses the warning shown before opening a domain-registration finding URL. */
+  skipDomainRegistrationVisitWarning?: boolean;
 }
 
 export interface InviteCodeRecord {
@@ -161,6 +168,20 @@ export interface BrandProfileUpdateInput {
   watchWords?: string[];
   safeWords?: string[];
   scanSchedule?: BrandScanScheduleInput;
+}
+
+export interface EffectiveScanSettings {
+  searchResultPages: number;
+  allowAiDeepSearches: boolean;
+  maxAiDeepSearches: number;
+  scanSources: BrandScanSources;
+}
+
+export interface ScanSettingsInput {
+  searchResultPages?: number;
+  allowAiDeepSearches?: boolean;
+  maxAiDeepSearches?: number;
+  scanSources?: BrandScanSources;
 }
 
 export interface BrandSummary {
@@ -340,6 +361,8 @@ export interface Scan {
   brandId: string;
   userId: string;
   status: ScanStatus;
+  /** Snapshot of the effective scan settings used for this run. */
+  effectiveSettings?: EffectiveScanSettings;
   /** Async deletion job state, if this scan and its findings are being removed. */
   deletion?: AsyncDeletionState;
   /** The underlying Apify actor IDs started for this scan. */

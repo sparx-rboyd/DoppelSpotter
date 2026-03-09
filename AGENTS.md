@@ -154,9 +154,11 @@ POST /api/scan
  └─ checks `brands.activeScanId` inside a Firestore transaction
  └─ if the brand already has a pending/running scan, returns 409 with that scan instead of starting another
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
+ └─ manual runs may include optional one-off custom scan settings (depth, deep-search toggle/breadth, scan sources) without mutating the brand defaults
+ └─ snapshots the resolved per-run `scans.effectiveSettings` onto the scan so later webhook processing stays deterministic even if brand settings change mid-scan
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
- └─ resolves the brand's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `domain-registrations`, `discord-servers`, `github-repos`, `x-search`)
- └─ maps `brands.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Domain registrations map the same setting to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to `maxResults = 50..250`; X maps it to `maxItems = 50..250`
+ └─ resolves the scan's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `domain-registrations`, `discord-servers`, `github-repos`, `x-search`) from `scans.effectiveSettings.scanSources`
+ └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Domain registrations map the same setting to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to `maxResults = 50..250`; X maps it to `maxItems = 50..250`
  └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
  └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
  └─ once the scan-level preference hints are ready (or deliberately fail open), replays any deferred succeeded webhooks and then flips the scan to `running`
@@ -255,6 +257,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
       └─ does not run deep-search suggestion generation or follow-up runs
  └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and scanner-specific focus, and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
+└─ AI-requested deep-search eligibility, breadth, and Google page depth are read from `scans.effectiveSettings` when present, falling back to brand defaults only for older scans
 └─ before each finding-level classification pass, the webhook loads the brand's existing finding `theme` labels so the LLM can preferentially reuse them
  └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
 └─ each LLM-classified finding may also store a short primary `theme` label (prefer 1 word, hard max 3 words)

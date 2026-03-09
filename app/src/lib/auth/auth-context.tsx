@@ -8,10 +8,12 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import type { UserPreferences } from '@/lib/types';
 
 export interface AuthUser {
   userId: string;
   email: string;
+  preferences?: UserPreferences;
 }
 
 interface AuthContextValue {
@@ -49,7 +51,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const data = await res.json();
       if (data?.userId) {
-        setUser({ userId: data.userId, email: data.email });
+        setUser({ userId: data.userId, email: data.email, preferences: data.preferences });
         return;
       }
 
@@ -86,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       throw new Error(data.error ?? 'Sign in failed');
     }
     const data = await res.json();
-    setUser({ userId: data.userId, email: data.email });
+    setUser({ userId: data.userId, email: data.email, preferences: data.preferences });
     broadcastAuthSyncEvent('signed-in');
   }
 

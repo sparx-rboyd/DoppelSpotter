@@ -1,8 +1,9 @@
 import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
 import { db } from './firestore';
-import type { ActorRunInfo, BrandProfile, Scan } from './types';
+import type { ActorRunInfo, BrandProfile, EffectiveScanSettings, Scan, ScanSettingsInput } from './types';
 import type { ActorConfig } from './apify/actors';
 import { isBrandDeletionActive, isBrandHistoryDeletionActive } from './async-deletions';
+import { getEffectiveScanSettings } from './brands';
 import {
   clearBrandActiveScanIfMatches,
   isPendingScanStale,
@@ -35,6 +36,7 @@ type StartScanForBrandParams = {
   requestHeaders: Headers;
   ownerUserId?: string;
   scheduled?: ScheduledStartOptions;
+  customSettings?: ScanSettingsInput;
 };
 
 type ScheduledScanSkipReason = 'not_due' | 'active_scan' | 'deletion_in_progress';
@@ -54,6 +56,7 @@ export type StartScanForBrandResult =
 
 type PreparedScanStart = {
   brand: BrandProfile;
+  effectiveSettings: EffectiveScanSettings;
   brandRef: DocumentReference;
   scanRef: DocumentReference;
   targetActors: ActorConfig[];
@@ -155,10 +158,12 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
     }
 
     scan.userId = brandData.userId;
-    const targetActors = getTargetActorConfigs(brandData);
+    const effectiveSettings = getEffectiveScanSettings(brandData, params.customSettings);
+    const targetActors = getTargetActorConfigs(effectiveSettings.scanSources);
     if (targetActors.length === 0) {
       throw new ScanStartError('At least one scan source must be enabled', 400);
     }
+    scan.effectiveSettings = effectiveSettings;
     scan.actorIds = Array.from(new Set(targetActors.map((actor) => actor.actorId)));
     tx.set(scanRef, scan);
 
@@ -175,6 +180,7 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
     tx.update(brandRef, brandUpdates);
     preparedScan = {
       brand: brandData,
+      effectiveSettings,
       brandRef,
       scanRef,
       targetActors,
@@ -201,7 +207,12 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
   const actorStartPromise = (async () => {
     const results = await Promise.all(readyScan.targetActors.map(async (actorConfig) => {
       try {
-        const { runs, failedCount } = await startActorRuns(actorConfig, readyScan.brand, webhookUrl);
+        const { runs, failedCount } = await startActorRuns(
+          actorConfig,
+          readyScan.brand,
+          readyScan.effectiveSettings,
+          webhookUrl,
+        );
         const updates: Record<string, unknown> = {
           actorRunIds: FieldValue.arrayUnion(...runs.map((run) => run.runId)),
         };

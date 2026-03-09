@@ -25,6 +25,7 @@ import {
   Crosshair,
   SearchCheck,
 } from 'lucide-react';
+import { useAuth } from '@/lib/auth/auth-context';
 import { type Finding, type FindingCategory, type FindingSource, type FindingSummary } from '@/lib/types';
 import { getFindingSourceLabel } from '@/lib/scan-sources';
 import { cn } from '@/lib/utils';
@@ -76,6 +77,36 @@ function renderHighlightedText(text: string, query?: string) {
       )
       : part
   ));
+}
+
+function extractDomainLabel(url?: string) {
+  if (!url) return null;
+
+  const trimmedUrl = url.trim();
+  if (!trimmedUrl) return null;
+
+  const candidates = trimmedUrl.includes('://')
+    ? [trimmedUrl]
+    : [`https://${trimmedUrl}`, trimmedUrl];
+
+  for (const candidate of candidates) {
+    try {
+      const parsed = new URL(candidate);
+      return parsed.hostname || trimmedUrl;
+    } catch {
+      continue;
+    }
+  }
+
+  return trimmedUrl;
+}
+
+function truncateMiddle(value: string, maxLength = 44, headLength = 18, tailLength = 23) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, headLength)}...${value.slice(-tailLength)}`;
 }
 
 const sourceConfig: Record<
@@ -267,6 +298,7 @@ export function FindingCard({
   onBookmarkUpdate,
   onNoteUpdate,
 }: FindingCardProps) {
+  const { user, refreshSession } = useAuth();
   const src = sourceConfig[finding.source] ?? sourceConfig.unknown;
   const isFalsePositive = finding.isFalsePositive === true;
   const isIgnored = finding.isIgnored === true;
@@ -285,6 +317,10 @@ export function FindingCard({
   const [isMounted, setIsMounted] = useState(false);
   const [reclassifying, setReclassifying] = useState(false);
   const [isReclassifyDialogOpen, setIsReclassifyDialogOpen] = useState(false);
+  const [isDomainVisitDialogOpen, setIsDomainVisitDialogOpen] = useState(false);
+  const [skipDomainVisitWarningForFuture, setSkipDomainVisitWarningForFuture] = useState(false);
+  const [savingDomainVisitPreference, setSavingDomainVisitPreference] = useState(false);
+  const [domainVisitError, setDomainVisitError] = useState('');
   const [selectedReclassificationCategory, setSelectedReclassificationCategory] = useState<FindingCategory | null>(null);
   const [bookmarking, setBookmarking] = useState(false);
   const [editingNote, setEditingNote] = useState(false);
@@ -299,6 +335,11 @@ export function FindingCard({
     && highlightQuery?.trim()
     && finding.url.toLowerCase().includes(highlightQuery.trim().toLowerCase()),
   );
+  const domainLabel = finding.source === 'domains' ? extractDomainLabel(finding.url) : null;
+  const truncatedDomainLabel = domainLabel ? truncateMiddle(domainLabel) : null;
+  const isDomainLabelTruncated = Boolean(domainLabel && truncatedDomainLabel && domainLabel !== truncatedDomainLabel);
+  const shouldWarnBeforeDomainVisit = finding.source === 'domains'
+    && user?.preferences?.skipDomainRegistrationVisitWarning !== true;
 
   useEffect(() => {
     setIsMounted(true);
@@ -311,20 +352,26 @@ export function FindingCard({
   }, [editingNote, finding.bookmarkNote]);
 
   useEffect(() => {
-    if (!isReclassifyDialogOpen) return undefined;
+    if (!isReclassifyDialogOpen && !isDomainVisitDialogOpen) return undefined;
 
     const originalOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       document.body.style.overflow = originalOverflow;
     };
-  }, [isReclassifyDialogOpen]);
+  }, [isDomainVisitDialogOpen, isReclassifyDialogOpen]);
 
   useEffect(() => {
-    if (!isReclassifyDialogOpen) return undefined;
+    if (!isReclassifyDialogOpen && !isDomainVisitDialogOpen) return undefined;
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !reclassifying) {
+      if (event.key === 'Escape' && isDomainVisitDialogOpen && !savingDomainVisitPreference) {
+        setIsDomainVisitDialogOpen(false);
+        setSkipDomainVisitWarningForFuture(false);
+        setDomainVisitError('');
+      }
+
+      if (event.key === 'Escape' && isReclassifyDialogOpen && !reclassifying) {
         setIsReclassifyDialogOpen(false);
         setSelectedReclassificationCategory(null);
       }
@@ -332,7 +379,7 @@ export function FindingCard({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isReclassifyDialogOpen, reclassifying]);
+  }, [isDomainVisitDialogOpen, isReclassifyDialogOpen, reclassifying, savingDomainVisitPreference]);
 
   async function handleIgnoreToggle(e: React.MouseEvent) {
     e.stopPropagation();
@@ -342,6 +389,64 @@ export function FindingCard({
       await onIgnoreToggle(finding, !isIgnored);
     } finally {
       setIgnoring(false);
+    }
+  }
+
+  function openFindingUrlInNewTab(url: string) {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+
+  function handleVisitClick(event: React.MouseEvent<HTMLAnchorElement>) {
+    event.stopPropagation();
+
+    if (!finding.url) {
+      return;
+    }
+
+    if (!shouldWarnBeforeDomainVisit) {
+      return;
+    }
+
+    event.preventDefault();
+    setDomainVisitError('');
+    setSkipDomainVisitWarningForFuture(false);
+    setIsDomainVisitDialogOpen(true);
+  }
+
+  async function handleConfirmDomainVisit() {
+    if (!finding.url || savingDomainVisitPreference) {
+      return;
+    }
+
+    setSavingDomainVisitPreference(true);
+    setDomainVisitError('');
+
+    try {
+      if (skipDomainVisitWarningForFuture && user?.preferences?.skipDomainRegistrationVisitWarning !== true) {
+        const response = await fetch('/api/settings/preferences', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            skipDomainRegistrationVisitWarning: true,
+          }),
+        });
+
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({}));
+          throw new Error(data.error ?? 'Failed to save setting');
+        }
+
+        await refreshSession();
+      }
+
+      openFindingUrlInNewTab(finding.url);
+      setIsDomainVisitDialogOpen(false);
+      setSkipDomainVisitWarningForFuture(false);
+    } catch (error) {
+      setDomainVisitError(error instanceof Error ? error.message : 'An unexpected error occurred.');
+    } finally {
+      setSavingDomainVisitPreference(false);
     }
   }
 
@@ -461,29 +566,62 @@ export function FindingCard({
           {/* Content */}
           <div className="flex-1 min-w-0">
             {/* Title row */}
-            <div className="flex flex-wrap items-center gap-2.5 mb-2.5">
-              <h4
-                className={cn(
-                  'font-semibold text-base',
-                  muted ? 'text-gray-500' : 'text-gray-900',
-                )}
-              >
-                {renderHighlightedText(finding.title, highlightQuery)}
-              </h4>
-              {!isFalsePositive && (
-                <Tooltip content={severityMeta.label}>
-                  <span
-                    role="img"
-                    aria-label={severityMeta.label}
+            <div className="mb-2.5 flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <h4
                     className={cn(
-                      'inline-flex items-center justify-center rounded-md p-1',
-                      muted ? 'text-gray-400' : severityMeta.className,
+                      'font-semibold text-base',
+                      muted ? 'text-gray-500' : 'text-gray-900',
                     )}
                   >
-                    <SeverityIcon className="w-4 h-4" />
-                  </span>
-                </Tooltip>
-              )}
+                    {renderHighlightedText(finding.title, highlightQuery)}
+                  </h4>
+                  {!isFalsePositive && (
+                    <Tooltip content={severityMeta.label}>
+                      <span
+                        role="img"
+                        aria-label={severityMeta.label}
+                        className={cn(
+                          'inline-flex items-center justify-center rounded-md p-1',
+                          muted ? 'text-gray-400' : severityMeta.className,
+                        )}
+                      >
+                        <SeverityIcon className="w-4 h-4" />
+                      </span>
+                    </Tooltip>
+                  )}
+                </div>
+                {domainLabel && (
+                  <div className="min-w-0">
+                    {isDomainLabelTruncated ? (
+                      <Tooltip
+                        content={domainLabel}
+                        contentClassName="max-w-sm whitespace-normal break-all"
+                      >
+                        <span
+                          className={cn(
+                            'inline-block max-w-full cursor-help text-xs leading-4',
+                            muted ? 'text-gray-400' : 'text-gray-500',
+                          )}
+                        >
+                          {truncatedDomainLabel}
+                        </span>
+                      </Tooltip>
+                    ) : (
+                      <span
+                        className={cn(
+                          'inline-block max-w-full text-xs leading-4',
+                          muted ? 'text-gray-400' : 'text-gray-500',
+                        )}
+                      >
+                        {truncatedDomainLabel}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5">
               {finding.url && (
                 <Tooltip content="Visit">
                   <a
@@ -492,7 +630,7 @@ export function FindingCard({
                     rel="noopener noreferrer"
                     aria-label="Visit"
                     className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 hover:bg-gray-50 hover:text-gray-900 transition"
-                    onClick={(e) => e.stopPropagation()}
+                    onClick={handleVisitClick}
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
                   </a>
@@ -629,6 +767,7 @@ export function FindingCard({
                   </button>
                 </Tooltip>
               )}
+              </div>
             </div>
 
             {finding.theme && (
@@ -899,6 +1038,88 @@ export function FindingCard({
                   <Crosshair className="w-4 h-4" />
                 )}
                 Save category
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
+
+      {isMounted && isDomainVisitDialogOpen && createPortal(
+        <div
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-950/70 px-4"
+          onClick={() => {
+            if (!savingDomainVisitPreference) {
+              setIsDomainVisitDialogOpen(false);
+              setSkipDomainVisitWarningForFuture(false);
+              setDomainVisitError('');
+            }
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={`domain-visit-title-${finding.id}`}
+            aria-describedby={`domain-visit-description-${finding.id}`}
+            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start gap-4">
+              <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-amber-100">
+                <AlertTriangle className="h-5 w-5 text-amber-600" />
+              </div>
+              <div className="min-w-0">
+                <h2 id={`domain-visit-title-${finding.id}`} className="text-lg font-semibold text-gray-900">
+                  Continue to this domain?
+                </h2>
+                <p id={`domain-visit-description-${finding.id}`} className="mt-2 text-sm leading-6 text-gray-600">
+                  Some malicious domains can host inappropriate content (for example, adult material). Are you sure you want to continue?
+                </p>
+              </div>
+            </div>
+
+            <label className="mt-5 ml-[3.75rem] flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+              <input
+                type="checkbox"
+                checked={skipDomainVisitWarningForFuture}
+                disabled={savingDomainVisitPreference}
+                onChange={(event) => setSkipDomainVisitWarningForFuture(event.target.checked)}
+                className="h-4 w-4 rounded border-gray-300 text-brand-600 focus:ring-brand-500"
+              />
+              <span className="text-sm text-gray-700">Don&apos;t show me this again</span>
+            </label>
+
+            {domainVisitError && (
+              <p className="mt-4 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-600">
+                {domainVisitError}
+              </p>
+            )}
+
+            <div className="mt-6 ml-[3.75rem] flex justify-end gap-3">
+              <button
+                type="button"
+                disabled={savingDomainVisitPreference}
+                onClick={() => {
+                  setIsDomainVisitDialogOpen(false);
+                  setSkipDomainVisitWarningForFuture(false);
+                  setDomainVisitError('');
+                }}
+                className="inline-flex items-center gap-1 rounded-md px-3 py-2 text-sm font-medium text-gray-600 transition hover:bg-gray-100 disabled:opacity-60"
+              >
+                No
+              </button>
+              <button
+                type="button"
+                disabled={savingDomainVisitPreference}
+                onClick={() => void handleConfirmDomainVisit()}
+                className="inline-flex items-center gap-2 rounded-md bg-brand-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-brand-700 disabled:opacity-60"
+              >
+                {savingDomainVisitPreference ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <ExternalLink className="w-4 h-4" />
+                )}
+                Yes
               </button>
             </div>
           </div>

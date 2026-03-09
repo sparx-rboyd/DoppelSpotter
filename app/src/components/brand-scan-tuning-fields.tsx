@@ -112,15 +112,15 @@ export function BrandScanTuningFields({
       <div className="flex items-center justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
           <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
-            Allow AI analysis to request deeper Google-backed searches
-            <InfoTooltip content="Allows AI analysis to request follow-up searches when it spots something concerning on Google-backed scan types such as Web search, Reddit, TikTok, YouTube, Facebook, Instagram, and Telegram channels. Domain registrations, Discord servers, GitHub repos, and X do not support deep search." />
+            Allow AI analysis to request deeper searches
+            <InfoTooltip content="Allows AI analysis to request follow-up searches when it spots something concerning. Note: not all scan types support deep search." />
           </div>
         </div>
         <button
           type="button"
           role="switch"
           aria-checked={allowAiDeepSearches}
-          aria-label="Allow AI analysis to request deeper Google-backed searches"
+          aria-label="Allow AI analysis to request deeper searches"
           onClick={() => onAllowAiDeepSearchesChange(!allowAiDeepSearches)}
           className={`inline-flex items-center gap-2 rounded-md text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
             allowAiDeepSearches ? 'text-brand-700' : 'text-gray-600'

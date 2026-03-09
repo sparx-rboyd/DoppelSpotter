@@ -1,4 +1,4 @@
-import type { BrandScanSources } from '@/lib/types';
+import type { BrandProfile, BrandScanSources, EffectiveScanSettings, ScanSettingsInput } from '@/lib/types';
 
 export const DEFAULT_SEARCH_RESULT_PAGES = 3;
 export const MIN_SEARCH_RESULT_PAGES = 1;
@@ -151,6 +151,23 @@ export function hasEnabledBrandScanSource(value: unknown): boolean {
     || scanSources.github
     || scanSources.x
   );
+}
+
+export function getEffectiveScanSettings(
+  source?: Pick<BrandProfile, 'searchResultPages' | 'allowAiDeepSearches' | 'maxAiDeepSearches' | 'scanSources'> | null,
+  overrides?: ScanSettingsInput,
+): EffectiveScanSettings {
+  const baseSearchResultPages = overrides?.searchResultPages ?? source?.searchResultPages;
+  const baseAllowAiDeepSearches = overrides?.allowAiDeepSearches ?? source?.allowAiDeepSearches;
+  const baseMaxAiDeepSearches = overrides?.maxAiDeepSearches ?? source?.maxAiDeepSearches;
+  const baseScanSources = overrides?.scanSources ?? source?.scanSources;
+
+  return {
+    searchResultPages: normalizeSearchResultPages(baseSearchResultPages),
+    allowAiDeepSearches: normalizeAllowAiDeepSearches(baseAllowAiDeepSearches),
+    maxAiDeepSearches: normalizeMaxAiDeepSearches(baseMaxAiDeepSearches),
+    scanSources: normalizeBrandScanSources(baseScanSources),
+  };
 }
 
 function normalizeClampedIntegerInRange(

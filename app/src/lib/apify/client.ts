@@ -1,5 +1,5 @@
 import { ApifyClient } from 'apify-client';
-import type { BrandProfile } from '@/lib/types';
+import type { BrandProfile, EffectiveScanSettings } from '@/lib/types';
 import {
   getInitialDomainRegistrationLimit,
   getInitialDiscordMaxTotalChargeUsd,
@@ -46,6 +46,8 @@ type PreparedActorInput = {
   displayQuery: string;
 };
 
+type ActorRunBrandContext = Pick<BrandProfile, 'name' | 'keywords'>;
+
 const GITHUB_MAX_BOOLEAN_OPERATORS = 5;
 const GITHUB_MAX_OR_TERMS_PER_QUERY = GITHUB_MAX_BOOLEAN_OPERATORS + 1;
 
@@ -54,9 +56,10 @@ const GITHUB_MAX_OR_TERMS_PER_QUERY = GITHUB_MAX_BOOLEAN_OPERATORS + 1;
  */
 export function buildActorInput(
   actor: ActorConfig,
-  brand: BrandProfile,
+  brand: ActorRunBrandContext,
+  settings: EffectiveScanSettings,
 ): { input: Record<string, unknown>; query: string; displayQuery: string } {
-  const actorInputs = buildActorInputs(actor, brand);
+  const actorInputs = buildActorInputs(actor, brand, settings);
   if (actorInputs.length !== 1) {
     throw new Error(`buildActorInput does not support batched inputs for ${actor.id}; use buildActorInputs instead`);
   }
@@ -65,7 +68,8 @@ export function buildActorInput(
 
 function buildActorInputs(
   actor: ActorConfig,
-  brand: BrandProfile,
+  brand: ActorRunBrandContext,
+  settings: EffectiveScanSettings,
 ): PreparedActorInput[] {
   const searchTerms = normalizeSearchTerms([brand.name, ...brand.keywords]);
 
@@ -79,7 +83,7 @@ function buildActorInputs(
         keywords: searchTerms,
         enhancedAnalysisEnabled: true,
         openRouterApiKey: getRequiredEnvVar('OPENROUTER_API_KEY'),
-        totalLimit: getInitialDomainRegistrationLimit(brand.searchResultPages),
+        totalLimit: getInitialDomainRegistrationLimit(settings.searchResultPages),
       },
       query: joinSearchTermsForDisplay(searchTerms),
       displayQuery: joinSearchTermsForDisplay(searchTerms),
@@ -100,7 +104,7 @@ function buildActorInputs(
     return [{
       input: {
         searchTerms,
-        maxItems: getInitialXMaxItems(brand.searchResultPages),
+        maxItems: getInitialXMaxItems(settings.searchResultPages),
         sort: 'Latest',
         includeSearchTerms: true,
       },
@@ -112,7 +116,7 @@ function buildActorInputs(
   if (actor.kind === 'github') {
     const searchTermGroups = chunkValues(searchTerms, GITHUB_MAX_OR_TERMS_PER_QUERY);
     const maxResultsByGroup = splitResultBudget(
-      getInitialGitHubMaxResults(brand.searchResultPages),
+      getInitialGitHubMaxResults(settings.searchResultPages),
       searchTermGroups.length,
     );
 
@@ -133,7 +137,7 @@ function buildActorInputs(
 
   const primaryQuery = searchTerms.join(' OR ');
   const query = buildGoogleScannerQuery(actor.source, primaryQuery);
-  const googlePageCount = getInitialGooglePageCount(brand.searchResultPages);
+  const googlePageCount = getInitialGooglePageCount(settings.searchResultPages);
 
   return [{
     input: { queries: query, maxPagesPerQuery: googlePageCount },
@@ -149,33 +153,35 @@ function buildActorInputs(
  */
 export async function startActorRun(
   actor: ActorConfig,
-  brand: BrandProfile,
+  brand: ActorRunBrandContext,
+  settings: EffectiveScanSettings,
   webhookUrl: string,
 ): Promise<{ runId: string; query: string; displayQuery: string }> {
-  const actorInputs = buildActorInputs(actor, brand);
+  const actorInputs = buildActorInputs(actor, brand, settings);
   if (actorInputs.length !== 1) {
     throw new Error(`startActorRun does not support batched inputs for ${actor.id}; use startActorRuns instead`);
   }
 
   const client = getClient();
   const { input, query, displayQuery } = actorInputs[0];
-  const run = await client.actor(actor.actorId).start(input, buildActorStartOptions(actor, brand, webhookUrl));
+  const run = await client.actor(actor.actorId).start(input, buildActorStartOptions(actor, settings, webhookUrl));
   return { runId: run.id, query, displayQuery };
 }
 
 export async function startActorRuns(
   actor: ActorConfig,
-  brand: BrandProfile,
+  brand: ActorRunBrandContext,
+  settings: EffectiveScanSettings,
   webhookUrl: string,
 ): Promise<StartActorRunsResult> {
   const client = getClient();
-  const actorInputs = buildActorInputs(actor, brand);
+  const actorInputs = buildActorInputs(actor, brand, settings);
   let failedCount = 0;
   const runs: ActorRunStart[] = [];
 
   for (const { input, query, displayQuery } of actorInputs) {
     try {
-      const run = await client.actor(actor.actorId).start(input, buildActorStartOptions(actor, brand, webhookUrl));
+      const run = await client.actor(actor.actorId).start(input, buildActorStartOptions(actor, settings, webhookUrl));
       runs.push({ runId: run.id, query, displayQuery });
     } catch (error) {
       failedCount += 1;
@@ -271,11 +277,12 @@ export async function fetchDatasetItems(datasetId: string): Promise<Record<strin
  */
 export async function runActor(
   actor: ActorConfig,
-  brand: BrandProfile,
+  brand: ActorRunBrandContext,
+  settings: EffectiveScanSettings,
   webhookUrl?: string,
 ): Promise<ActorRunResult> {
   const client = getClient();
-  const actorInputs = buildActorInputs(actor, brand);
+  const actorInputs = buildActorInputs(actor, brand, settings);
   if (actorInputs.length !== 1) {
     throw new Error(`runActor does not support batched inputs for ${actor.id}; use startActorRuns instead`);
   }
@@ -284,7 +291,7 @@ export async function runActor(
 
   const runOptions: Record<string, unknown> = { input };
   if (actor.kind === 'discord') {
-    runOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(brand.searchResultPages);
+    runOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(settings.searchResultPages);
   }
 
   if (webhookUrl) {
@@ -337,7 +344,7 @@ function buildGitHubRepoSearchQuery(values: string[]): string {
 
 function buildActorStartOptions(
   actor: ActorConfig,
-  brand: BrandProfile,
+  settings: EffectiveScanSettings,
   webhookUrl: string,
 ): Record<string, unknown> {
   const startOptions: Record<string, unknown> = {
@@ -351,7 +358,7 @@ function buildActorStartOptions(
   };
 
   if (actor.kind === 'discord') {
-    startOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(brand.searchResultPages);
+    startOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(settings.searchResultPages);
   }
 
   return startOptions;

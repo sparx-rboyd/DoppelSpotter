@@ -2,8 +2,15 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
-import type { BrandProfile, Scan } from '@/lib/types';
+import type { BrandProfile, Scan, ScanSettingsInput } from '@/lib/types';
 import { abortActorRun } from '@/lib/apify/client';
+import {
+  hasEnabledBrandScanSource,
+  isValidAllowAiDeepSearches,
+  isValidBrandScanSources,
+  isValidMaxAiDeepSearches,
+  isValidSearchResultPages,
+} from '@/lib/brands';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import {
   clearBrandActiveScanIfMatches,
@@ -23,21 +30,42 @@ export async function POST(request: NextRequest) {
   const { uid, error } = await requireAuth(request);
   if (error) return error;
 
-  let body: { brandId: string };
+  let body: { brandId: string; customSettings?: ScanSettingsInput };
   try {
     body = await request.json();
   } catch {
     return errorResponse('Invalid JSON body');
   }
 
-  const { brandId } = body;
+  const { brandId, customSettings } = body;
   if (!brandId) return errorResponse('brandId is required');
+  if (customSettings !== undefined) {
+    if (typeof customSettings !== 'object' || customSettings === null) {
+      return errorResponse('customSettings must be an object');
+    }
+    if (customSettings.searchResultPages !== undefined && !isValidSearchResultPages(customSettings.searchResultPages)) {
+      return errorResponse('customSettings.searchResultPages must be a whole number from 1 to 5');
+    }
+    if (customSettings.allowAiDeepSearches !== undefined && !isValidAllowAiDeepSearches(customSettings.allowAiDeepSearches)) {
+      return errorResponse('customSettings.allowAiDeepSearches must be a boolean');
+    }
+    if (customSettings.maxAiDeepSearches !== undefined && !isValidMaxAiDeepSearches(customSettings.maxAiDeepSearches)) {
+      return errorResponse('customSettings.maxAiDeepSearches must be a whole number from 1 to 5');
+    }
+    if (customSettings.scanSources !== undefined && !isValidBrandScanSources(customSettings.scanSources)) {
+      return errorResponse('customSettings.scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, telegram, domains, discord, github, and x values');
+    }
+    if (customSettings.scanSources !== undefined && !hasEnabledBrandScanSource(customSettings.scanSources)) {
+      return errorResponse('At least one scan source must be enabled');
+    }
+  }
 
   try {
     const result = await startScanForBrand({
       brandId,
       ownerUserId: uid,
       requestHeaders: request.headers,
+      customSettings,
     });
 
     if (result.outcome === 'skipped') {
@@ -176,4 +204,3 @@ export async function DELETE(request: NextRequest) {
 
   return NextResponse.json({ data: { scanId, status: 'cancelled' } });
 }
-

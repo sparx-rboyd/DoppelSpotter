@@ -8,7 +8,7 @@ import {
   GITHUB_REPO_SEARCH_ACTOR_ID,
   type ScannerConfig,
 } from '@/lib/scan-sources';
-import type { BrandProfile, ScannerId } from '@/lib/types';
+import type { BrandScanSources, ScannerId } from '@/lib/types';
 
 export type ActorConfig = ScannerConfig;
 
@@ -30,8 +30,8 @@ export function getActorConfigByScannerId(scannerId: ScannerId): ActorConfig {
   return getScannerConfigById(scannerId);
 }
 
-export function getTargetActorConfigs(brand: BrandProfile): ActorConfig[] {
-  return getEnabledScannerConfigs(brand.scanSources);
+export function getTargetActorConfigs(scanSources?: BrandScanSources): ActorConfig[] {
+  return getEnabledScannerConfigs(scanSources);
 }
 
 export {

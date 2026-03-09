@@ -12,20 +12,32 @@ import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { FindingCard } from '@/components/finding-card';
+import { BrandScanSourceFields } from '@/components/brand-scan-source-fields';
+import { BrandScanTuningFields } from '@/components/brand-scan-tuning-fields';
 import { ScanSourceIcon } from '@/components/scan-source-icon';
 import { SelectDropdown } from '@/components/ui/select-dropdown';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { InfoTooltip, Tooltip } from '@/components/ui/tooltip';
-import { normalizeAllowAiDeepSearches, normalizeBrandScanSources } from '@/lib/brands';
+import { getEffectiveScanSettings, hasEnabledBrandScanSource } from '@/lib/brands';
 import {
   formatScanScheduleFrequency,
   formatScheduledRunAt,
 } from '@/lib/scan-schedules';
 import { getFindingSourceLabel, SCAN_SOURCE_ORDER, supportsSourceDeepSearch } from '@/lib/scan-sources';
 import { cn, formatScanDate } from '@/lib/utils';
-import type { ActorRunInfo, BrandProfile, FindingCategory, FindingSource, FindingSummary, Scan, ScanSummary } from '@/lib/types';
+import type {
+  ActorRunInfo,
+  BrandProfile,
+  EffectiveScanSettings,
+  FindingCategory,
+  FindingSource,
+  FindingSummary,
+  Scan,
+  ScanSettingsInput,
+  ScanSummary,
+} from '@/lib/types';
 
 const POLL_INTERVAL_MS = 5_000;
 const ACTIVE_SCAN_IDLE_POLL_INTERVAL_MS = 20_000;
@@ -465,12 +477,17 @@ export default function BrandDetailPage() {
   const [cancelling, setCancelling] = useState(false);
   const [activeScanId, setActiveScanId] = useState<string | null>(null);
   const [activeScan, setActiveScan] = useState<Scan | null>(null);
+  const [optimisticActiveScanSettings, setOptimisticActiveScanSettings] = useState<EffectiveScanSettings | null>(null);
   const [liveScanFindings, setLiveScanFindings] = useState<FindingSummary[]>([]);
   const [liveScanNonHits, setLiveScanNonHits] = useState<FindingSummary[]>([]);
   const [showLiveScanNonHits, setShowLiveScanNonHits] = useState(false);
   const [error, setError] = useState('');
   const [confirmClear, setConfirmClear] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [isRunScanMenuOpen, setIsRunScanMenuOpen] = useState(false);
+  const [isCustomScanDialogOpen, setIsCustomScanDialogOpen] = useState(false);
+  const [customScanSettings, setCustomScanSettings] = useState<EffectiveScanSettings>(() => getEffectiveScanSettings());
+  const [customScanError, setCustomScanError] = useState('');
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const copiedScanLinkResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -480,6 +497,7 @@ export default function BrandDetailPage() {
   const pendingScanIgnoredLoadsRef = useRef<Record<string, Promise<void>>>({});
   const findingSearchAbortControllerRef = useRef<AbortController | null>(null);
   const findingSearchRequestIdRef = useRef(0);
+  const runScanMenuRef = useRef<HTMLDivElement | null>(null);
   const [selectedScanProgressSource, setSelectedScanProgressSource] = useState<FindingSource>('google');
   const [displayedScanProgressPctBySource, setDisplayedScanProgressPctBySource] = useState<Partial<Record<FindingSource, number>>>({});
   const normalizedFindingsSearchInput = normalizeFindingsSearchText(findingsSearchQuery);
@@ -506,6 +524,31 @@ export default function BrandDetailPage() {
     if (!isAnyFindingFilterActive) return;
     setConfirmDeleteScanId(null);
   }, [isAnyFindingFilterActive]);
+
+  useEffect(() => {
+    if (!isRunScanMenuOpen) return undefined;
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (runScanMenuRef.current?.contains(target)) return;
+      setIsRunScanMenuOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setIsRunScanMenuOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isRunScanMenuOpen]);
 
   function stopPolling() {
     if (pollRef.current) {
@@ -920,6 +963,7 @@ export default function BrandDetailPage() {
     setScanning(true);
     setCancelling(false);
     setError('');
+    setOptimisticActiveScanSettings(null);
     if (options?.collapseExpandedScans) {
       setExpandedScanIds([]);
     }
@@ -1795,6 +1839,7 @@ export default function BrandDetailPage() {
           void loadFindingTaxonomyOptions();
           setScanning(false);
           setCancelling(false);
+          setOptimisticActiveScanSettings(null);
           setActiveScanId(null);
           setActiveScan(null);
           setLiveScanFindings([]);
@@ -1806,6 +1851,7 @@ export default function BrandDetailPage() {
           clearStoredScanId(brandId);
           setScanning(false);
           setCancelling(false);
+          setOptimisticActiveScanSettings(null);
           setActiveScanId(null);
           setLiveScanFindings([]);
           setLiveScanNonHits([]);
@@ -1821,6 +1867,7 @@ export default function BrandDetailPage() {
           clearStoredScanId(brandId);
           setScanning(false);
           setCancelling(false);
+          setOptimisticActiveScanSettings(null);
           setActiveScanId(null);
           setLiveScanFindings([]);
           setLiveScanNonHits([]);
@@ -1844,11 +1891,28 @@ export default function BrandDetailPage() {
   // Trigger scan
   // ---------------------------------------------------------------------------
 
-  async function triggerScan() {
+  function openCustomScanDialog() {
+    setIsRunScanMenuOpen(false);
+    setCustomScanSettings(getEffectiveScanSettings(brand));
+    setCustomScanError('');
+    setIsCustomScanDialogOpen(true);
+  }
+
+  function closeCustomScanDialog() {
+    if (scanning) return;
+    setIsCustomScanDialogOpen(false);
+    setCustomScanError('');
+  }
+
+  async function triggerScan(customSettings?: ScanSettingsInput) {
+    const nextEffectiveSettings = getEffectiveScanSettings(brand, customSettings);
     setScanning(true);
     setError('');
+    setCustomScanError('');
+    setIsRunScanMenuOpen(false);
     setActiveScanId(null);
     setActiveScan(null);
+    setOptimisticActiveScanSettings(nextEffectiveSettings);
     setLiveScanFindings([]);
     setLiveScanNonHits([]);
     setShowLiveScanNonHits(false);
@@ -1858,13 +1922,14 @@ export default function BrandDetailPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ brandId }),
+        body: JSON.stringify({ brandId, ...(customSettings ? { customSettings } : {}) }),
       });
 
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
         const existingScan = json.data?.activeScan as Scan | undefined;
         if (res.status === 409 && existingScan) {
+          setOptimisticActiveScanSettings(null);
           attachToActiveScan(existingScan);
           return;
         }
@@ -1877,11 +1942,26 @@ export default function BrandDetailPage() {
       setExpandedScanIds([]);
       setActiveScanId(scanId);
       setStoredScanId(brandId, scanId);
+      setIsCustomScanDialogOpen(false);
       startPolling(scanId);
     } catch (err) {
       setScanning(false);
-      setError(err instanceof Error ? err.message : 'Scan failed');
+      setOptimisticActiveScanSettings(null);
+      const message = err instanceof Error ? err.message : 'Scan failed';
+      setError(message);
+      if (customSettings) {
+        setCustomScanError(message);
+      }
     }
+  }
+
+  async function triggerCustomScan() {
+    if (!hasEnabledBrandScanSource(customScanSettings.scanSources)) {
+      setCustomScanError('At least one scan type must be enabled.');
+      return;
+    }
+
+    await triggerScan(customScanSettings);
   }
 
   // ---------------------------------------------------------------------------
@@ -2069,9 +2149,13 @@ export default function BrandDetailPage() {
   // ---------------------------------------------------------------------------
 
   const allRuns = activeScan?.actorRuns ? Object.values(activeScan.actorRuns) : [];
-  const isAiDeepSearchEnabled = normalizeAllowAiDeepSearches(brand?.allowAiDeepSearches);
+  const defaultScanSettings = getEffectiveScanSettings(brand);
+  const activeScanSettings = activeScan
+    ? getEffectiveScanSettings(brand, activeScan.effectiveSettings)
+    : (optimisticActiveScanSettings ?? defaultScanSettings);
+  const isAiDeepSearchEnabled = activeScanSettings.allowAiDeepSearches;
   const isSummarisingFindings = activeScan?.status === 'summarising';
-  const normalizedScanSources = normalizeBrandScanSources(brand?.scanSources);
+  const normalizedScanSources = activeScanSettings.scanSources;
   const progressSources = SCAN_SOURCE_ORDER.filter(
     (source) => normalizedScanSources[source] || allRuns.some((run) => run.source === source),
   );
@@ -2596,17 +2680,61 @@ export default function BrandDetailPage() {
                           </Button>
                         )
                       )}
-                      <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={triggerScan}
-                        loading={scanning}
-                        disabled={scanning || clearing || historyDeletionInProgress || isAwaitingClearHistoryConfirmation}
-                        className="border-white/15 bg-white !text-brand-700 hover:border-white/30 hover:bg-brand-50 disabled:hover:bg-white"
-                      >
-                        <Play className="w-4 h-4" />
-                        Run scan
-                      </Button>
+                      <div ref={runScanMenuRef} className="relative">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => setIsRunScanMenuOpen((current) => !current)}
+                          loading={scanning}
+                          disabled={scanning || clearing || historyDeletionInProgress || isAwaitingClearHistoryConfirmation}
+                          aria-haspopup="menu"
+                          aria-expanded={isRunScanMenuOpen}
+                          className="border-white/15 bg-white !text-brand-700 hover:border-white/30 hover:bg-brand-50 disabled:hover:bg-white"
+                        >
+                          <Play className="w-4 h-4" />
+                          Run scan
+                          <ChevronDown className="h-4 w-4" />
+                        </Button>
+                        {isRunScanMenuOpen && (
+                          <div
+                            role="menu"
+                            className="absolute right-0 z-20 mt-2 w-72 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={() => {
+                                void triggerScan();
+                              }}
+                              className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-gray-50"
+                            >
+                              <Play className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-600" />
+                              <span className="min-w-0">
+                                <span className="block text-sm font-medium text-gray-900">Scan defaults</span>
+                                <span className="mt-1 block text-xs leading-5 text-gray-500">
+                                  Uses the saved scan depth, deep-search settings, and scan types from Brand Settings.
+                                </span>
+                              </span>
+                            </button>
+                            <div className="border-t border-gray-100" />
+                            <button
+                              type="button"
+                              role="menuitem"
+                              onClick={openCustomScanDialog}
+                              className="flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-gray-50"
+                            >
+                              <Settings className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-600" />
+                              <span className="min-w-0">
+                                <span className="block text-sm font-medium text-gray-900">Custom scan</span>
+                                <span className="mt-1 block text-xs leading-5 text-gray-500">
+                                  Override scan depth, deep search, and scan types for this run only.
+                                </span>
+                              </span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -3704,6 +3832,102 @@ export default function BrandDetailPage() {
             </>
           )}
         </div>
+
+        {isCustomScanDialogOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 px-4 py-8"
+            onClick={closeCustomScanDialog}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="custom-scan-title"
+              aria-describedby="custom-scan-description"
+              className="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-4 border-b border-gray-100 px-6 py-5">
+                <div className="min-w-0 pr-4">
+                  <h2 id="custom-scan-title" className="text-lg font-semibold text-gray-900">
+                    Custom scan
+                  </h2>
+                  <p id="custom-scan-description" className="mt-2 text-sm leading-6 text-gray-600">
+                    Choose one-off settings for this scan. Your saved brand defaults will not be changed.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeCustomScanDialog}
+                  disabled={scanning}
+                  className="rounded-full p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 disabled:opacity-50"
+                  aria-label="Close custom scan dialog"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                <div className="space-y-6">
+                  <div className="rounded-2xl border border-gray-200 bg-white p-6">
+                    <BrandScanTuningFields
+                      searchResultPages={customScanSettings.searchResultPages}
+                      onSearchResultPagesChange={(value) => {
+                        setCustomScanSettings((current) => ({ ...current, searchResultPages: value }));
+                      }}
+                      allowAiDeepSearches={customScanSettings.allowAiDeepSearches}
+                      onAllowAiDeepSearchesChange={(value) => {
+                        setCustomScanSettings((current) => ({ ...current, allowAiDeepSearches: value }));
+                      }}
+                      maxAiDeepSearches={customScanSettings.maxAiDeepSearches}
+                      onMaxAiDeepSearchesChange={(value) => {
+                        setCustomScanSettings((current) => ({ ...current, maxAiDeepSearches: value }));
+                      }}
+                    />
+                  </div>
+
+                  <div className="rounded-2xl border border-gray-200 bg-white p-6">
+                    <div className="mb-4">
+                      <h3 className="text-sm font-medium text-gray-700">Scan types</h3>
+                      <p className="mt-1 text-sm text-gray-500">
+                        Enable the sources you want to include in this scan only.
+                      </p>
+                    </div>
+                    <BrandScanSourceFields
+                      value={customScanSettings.scanSources}
+                      onChange={(value) => {
+                        setCustomScanSettings((current) => ({ ...current, scanSources: value }));
+                        setCustomScanError('');
+                      }}
+                      error={customScanError}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-gray-100 bg-white px-6 py-4">
+                <div className="flex justify-end gap-3">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={scanning}
+                    onClick={closeCustomScanDialog}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    loading={scanning}
+                    onClick={() => {
+                      void triggerCustomScan();
+                    }}
+                  >
+                    Run custom scan
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </AuthGuard>
   );
