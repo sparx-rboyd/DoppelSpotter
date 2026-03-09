@@ -443,13 +443,13 @@ function BulkActionButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'inline-flex min-h-10 items-center justify-center gap-2 rounded-full border px-3.5 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40',
+        'inline-flex min-h-9 items-center justify-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-40',
         emphasis === 'muted'
-          ? 'border-white/20 bg-white/8 text-white/90 hover:border-white/35 hover:bg-white/14'
-          : 'border-white/22 bg-white/14 text-white hover:border-white/40 hover:bg-white/20',
+          ? 'bg-transparent text-slate-600 hover:bg-slate-200/50 hover:text-slate-900'
+          : 'bg-white text-slate-700 shadow-[0_1px_2px_rgba(0,0,0,0.05)] ring-1 ring-slate-200 hover:bg-slate-50 hover:text-slate-900',
       )}
     >
-      <Icon className="h-3.5 w-3.5" />
+      <Icon className={cn("h-4 w-4", emphasis === 'muted' ? "text-slate-400" : "text-slate-500")} />
       {label}
     </button>
   );
@@ -4077,33 +4077,38 @@ export default function BrandDetailPage() {
         </div>
 
         {selectedFindings.length > 0 && (
-          <div className="fixed inset-x-0 bottom-5 z-40 flex justify-center px-4">
-            <div className="w-full max-w-5xl overflow-hidden rounded-[18px] border border-brand-700/60 bg-[radial-gradient(circle_at_top_left,_rgba(255,255,255,0.18),_transparent_34%),linear-gradient(135deg,_rgba(2,132,199,0.97),_rgba(3,105,161,0.96))] shadow-[0_24px_70px_rgba(3,105,161,0.32)] backdrop-blur">
-              <div className="flex flex-col gap-4 px-5 py-4 sm:px-6">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-white">
-                      {selectedFindings.length} finding{selectedFindings.length !== 1 ? 's' : ''} selected
-                    </p>
-                    <p className="mt-1 text-xs text-slate-300">
-                      Bulk actions only apply to compatible selected findings.
-                    </p>
+          <div className="fixed inset-x-0 bottom-6 z-40 flex justify-center px-4 pointer-events-none">
+            <div className="pointer-events-auto w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200/50 bg-white shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1),0_0_0_1px_rgba(0,0,0,0.02)] backdrop-blur-xl ring-1 ring-slate-900/5">
+              <div className="flex flex-col gap-4 p-5 sm:p-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-500 text-white shadow-sm">
+                      <span className="text-xs font-bold">{selectedFindings.length}</span>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">
+                        Finding{selectedFindings.length !== 1 ? 's' : ''} selected
+                      </p>
+                      <p className="mt-0.5 text-xs text-slate-500">
+                        Bulk actions only apply to compatible findings.
+                      </p>
+                    </div>
                   </div>
                   <button
                     type="button"
                     onClick={clearSelectedFindings}
                     disabled={bulkActionLoading}
-                    className="inline-flex items-center gap-2 self-start rounded-md border border-white/18 bg-white/10 px-3 py-1.5 text-xs font-medium text-white/90 transition hover:border-white/34 hover:bg-white/16 disabled:cursor-not-allowed disabled:opacity-40"
+                    className="inline-flex items-center gap-1.5 self-start sm:self-center rounded-lg px-3 py-2 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    <X className="h-3.5 w-3.5" />
+                    <X className="h-4 w-4" />
                     Clear selection
                   </button>
                 </div>
 
-                <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                  <div className="rounded-[14px] border border-white/14 bg-white/8 p-3">
-                    <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
-                      Apply
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <div className="rounded-xl bg-slate-50 p-4 border border-slate-200/60">
+                    <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                      Apply actions
                     </p>
                     <div className="flex flex-wrap gap-2">
                       <BulkActionButton
@@ -4133,9 +4138,9 @@ export default function BrandDetailPage() {
                     </div>
                   </div>
 
-                  <div className="rounded-[14px] border border-white/14 bg-white/8 p-3">
-                    <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-300">
-                      Reverse
+                  <div className="rounded-xl bg-slate-50 p-4 border border-slate-200/60">
+                    <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                      Reverse actions
                     </p>
                     <div className="flex flex-wrap gap-2">
                       <BulkActionButton

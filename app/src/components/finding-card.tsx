@@ -141,7 +141,7 @@ function SelectionCheckbox({
 }
 
 function shouldIgnoreCardSelectionClick(target: EventTarget | null) {
-  if (!(target instanceof HTMLElement)) {
+  if (!(target instanceof Element)) {
     return false;
   }
 
@@ -588,6 +588,11 @@ export function FindingCard({
 
   function handleCardClick(event: React.MouseEvent<HTMLDivElement>) {
     if (!onSelectionChange) return;
+
+    // Don't toggle selection if the user is highlighting text
+    const selection = window.getSelection();
+    if (selection && selection.toString().length > 0) return;
+
     if (shouldIgnoreCardSelectionClick(event.target)) return;
     handleSelectionToggle();
   }
@@ -597,11 +602,13 @@ export function FindingCard({
       <div
         onClick={handleCardClick}
         className={cn(
-          'bg-white p-4 sm:p-5 rounded-xl border',
+          'p-4 sm:p-5 rounded-xl border transition-all duration-200',
           onSelectionChange ? 'cursor-pointer' : undefined,
-          muted
-            ? 'border-gray-200 opacity-75'
-            : 'border-gray-200 hover:border-gray-300 transition-colors duration-200',
+          isSelected
+            ? 'border-brand-500 ring-1 ring-brand-500 bg-brand-50/30'
+            : muted
+              ? 'bg-white border-gray-200 opacity-75'
+              : 'bg-white border-gray-200 hover:border-gray-300',
           className,
         )}
       >

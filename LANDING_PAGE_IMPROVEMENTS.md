@@ -14,4 +14,4 @@ We're now going to overhaul it:
 
 Audience rules:
 - Ensure that British English is used throughout.
-- Remember that the intended audience is the judging panel for the GenAI Zürich 2026 Hackathon. Ensure that we're appealing to what they're looking for, per docs/CHALLENGE_BRIEF.md and docs/CHALLENGE_FAQ.md
+- Remember that the intended audience is the judging panel for the GenAI Zürich 2026 Hackathon. Ensure that we're appealing to what they're looking for, per docs/CHALLENGE_BRIEF.md and docs/CHALLENGE_FAQ.md`
