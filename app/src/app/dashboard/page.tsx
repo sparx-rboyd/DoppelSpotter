@@ -319,15 +319,14 @@ export default function DashboardPage() {
                   <Badge variant="brand">
                     {selectedBrand.scanCount} scan{selectedBrand.scanCount !== 1 ? 's' : ''}
                   </Badge>
-                  <Badge variant="default">
-                    {selectedBrand.findingCount} finding{selectedBrand.findingCount !== 1 ? 's' : ''}
-                  </Badge>
-                  <Badge variant="default">
-                    {selectedBrand.nonHitCount} non-finding{selectedBrand.nonHitCount !== 1 ? 's' : ''}
-                  </Badge>
                   {selectedBrand.lastScanStartedAt && (
                     <Badge variant="default">
                       Last scan {formatDate(selectedBrand.lastScanStartedAt)}
+                    </Badge>
+                  )}
+                  {selectedBrand.scanSchedule?.enabled && selectedBrand.scanSchedule.nextRunAt && (
+                    <Badge variant="default">
+                      Next scan {formatDate(selectedBrand.scanSchedule.nextRunAt)}
                     </Badge>
                   )}
                   {selectedBrand.isScanInProgress && (
