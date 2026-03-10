@@ -29,6 +29,8 @@ export interface GoogleScannerConfig extends BaseScannerConfig {
   source: GoogleFindingSource;
   kind: 'google';
   siteHost?: string;
+  /** Additional Google search operators appended verbatim after the site/query, e.g. ['-inurl:/discover'] */
+  additionalOperators?: string[];
 }
 
 export interface DiscordScannerConfig extends BaseScannerConfig {
@@ -124,6 +126,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     displayName: 'TikTok',
     shortLabel: 'TikTok',
     siteHost: 'tiktok.com',
+    additionalOperators: ['-inurl:/discover'],
     supportsDeepSearch: true,
   },
   'google-youtube': {
@@ -311,7 +314,8 @@ export function buildGoogleScannerQuery(
 
   const scanner = getGoogleScannerConfigBySource(source);
   if (scanner.siteHost) {
-    return `site:${scanner.siteHost} ${trimmedBaseQuery}`.trim();
+    const parts = [`site:${scanner.siteHost}`, trimmedBaseQuery, ...(scanner.additionalOperators ?? [])];
+    return parts.join(' ').trim();
   }
 
   const specialistExclusions = Object.values(SCANNER_CONFIGS)
@@ -328,6 +332,7 @@ export function sanitizeGoogleQueryForDisplay(query: string): string {
   const sanitized = query
     .replace(/(^|\s)-?site:[^\s]+/gi, ' ')
     .replace(/(^|\s)after:\d{4}-\d{2}-\d{2}/gi, ' ')
+    .replace(/(^|\s)-?inurl:[^\s]+/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 

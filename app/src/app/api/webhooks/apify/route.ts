@@ -1646,6 +1646,10 @@ function normalizeGoogleSerpRun({
       const normalizedUrl = normalizeUrlForFinding(rawUrl);
       if (!normalizedUrl) continue;
 
+      // TikTok /discover/* pages are SEO aggregate pages, not individual content — exclude them
+      // regardless of whether Google honoured the -inurl:/discover operator in the query.
+      if (source === 'tiktok' && /tiktok\.com\/discover\//i.test(normalizedUrl)) continue;
+
       const title = typeof result.title === 'string' ? result.title.trim() : normalizedUrl;
       const displayedUrl = typeof result.displayedUrl === 'string' ? result.displayedUrl.trim() : undefined;
       const description = typeof result.description === 'string' ? result.description.trim() : undefined;

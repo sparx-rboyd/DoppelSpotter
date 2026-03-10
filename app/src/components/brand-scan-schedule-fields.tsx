@@ -367,7 +367,7 @@ function DateField({
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
         matchTriggerWidth={false}
-        className="w-[304px]"
+        className="w-[304px] max-w-[calc(100vw-1.5rem)]"
       >
         <div className="flex items-center justify-between px-1 pb-2">
           <button
@@ -498,7 +498,7 @@ function TimeField({
         isOpen={isOpen}
         onClose={() => setIsOpen(false)}
         matchTriggerWidth={false}
-        className="w-[304px]"
+        className="w-[304px] max-w-[calc(100vw-1.5rem)]"
       >
         <div className="mb-2 px-1">
           <p className="text-sm font-medium text-gray-900">{selectedHour}:{selectedMinute}</p>

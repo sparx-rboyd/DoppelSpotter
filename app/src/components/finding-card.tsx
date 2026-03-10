@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import {
@@ -24,6 +24,7 @@ import {
   X,
   Crosshair,
   SearchCheck,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useAuth } from '@/lib/auth/auth-context';
 import { type Finding, type FindingCategory, type FindingSource, type FindingSummary } from '@/lib/types';
@@ -384,6 +385,8 @@ export function FindingCard({
   const [debugFinding, setDebugFinding] = useState<Finding | null>(null);
   const [debugLoading, setDebugLoading] = useState(false);
   const [debugError, setDebugError] = useState('');
+  const [isMoreActionsMenuOpen, setIsMoreActionsMenuOpen] = useState(false);
+  const moreActionsRef = useRef<HTMLDivElement>(null);
   const currentCategory = getFindingCategory(finding);
   const shouldShowMatchedUrl = Boolean(
     finding.url
@@ -435,6 +438,21 @@ export function FindingCard({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isDomainVisitDialogOpen, isReclassifyDialogOpen, reclassifying, savingDomainVisitPreference]);
+
+  useEffect(() => {
+    if (!isMoreActionsMenuOpen) return undefined;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!moreActionsRef.current?.contains(event.target as Node)) {
+        setIsMoreActionsMenuOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handlePointerDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+    };
+  }, [isMoreActionsMenuOpen]);
 
   async function handleIgnoreToggle(e: React.MouseEvent) {
     e.stopPropagation();
@@ -612,13 +630,13 @@ export function FindingCard({
       <div
         onClick={handleCardClick}
         className={cn(
-          'p-4 sm:p-5 rounded-xl border transition-all duration-200',
+          'border-b border-gray-100 p-0 pb-3 last:border-b-0 sm:border-b-0 sm:p-5 sm:rounded-xl sm:border transition-all duration-200',
           onSelectionChange ? 'cursor-pointer' : undefined,
           isSelected
-            ? 'border-brand-500 ring-1 ring-brand-500 bg-brand-50/30'
+            ? 'sm:border-brand-500 sm:ring-1 sm:ring-brand-500 bg-brand-50/30'
             : muted
-              ? 'bg-white border-gray-200 opacity-75'
-              : 'bg-white border-gray-200 hover:border-gray-300',
+              ? 'sm:bg-white sm:border-gray-200 opacity-75'
+              : 'sm:bg-white sm:border-gray-200 sm:hover:border-gray-300',
           className,
         )}
       >
@@ -647,9 +665,9 @@ export function FindingCard({
 
           {/* Content */}
           <div className="flex-1 min-w-0">
-            {/* Title row */}
-            <div className="mb-2.5 flex items-start justify-between gap-3">
-              <div className="min-w-0 flex-1">
+            {/* Title row — stacks on mobile, side-by-side on sm+ */}
+            <div className="mb-2.5 flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+              <div className="min-w-0 sm:flex-1">
                 <div className="flex flex-wrap items-center gap-2.5">
                   <h4
                     className={cn(
@@ -665,7 +683,7 @@ export function FindingCard({
                         role="img"
                         aria-label={severityMeta.label}
                         className={cn(
-                          'inline-flex items-center justify-center rounded-md p-1',
+                          'hidden sm:inline-flex items-center justify-center rounded-md p-1',
                           muted ? 'text-gray-400' : severityMeta.className,
                         )}
                       >
@@ -718,35 +736,16 @@ export function FindingCard({
                   </a>
                 </Tooltip>
               )}
-              {onReclassify && !isAddressed && (
-                isReclassifyDialogOpen ? (
-                  <button
-                    type="button"
-                    disabled={reclassifying}
-                    aria-label="Reclassify"
-                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition disabled:opacity-60"
-                  >
-                    {reclassifying ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Crosshair className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                ) : (
-                  <Tooltip content="Reclassify">
+
+              {/* Secondary actions — always visible on sm+, hidden on mobile in favour of the kebab menu below */}
+              <div className="hidden sm:flex items-center gap-2.5">
+                {onReclassify && !isAddressed && (
+                  isReclassifyDialogOpen ? (
                     <button
                       type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedReclassificationCategory(currentCategory);
-                        setIsReclassifyDialogOpen(true);
-                      }}
                       disabled={reclassifying}
                       aria-label="Reclassify"
-                      className={cn(
-                        'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
-                        'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
-                      )}
+                      className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition disabled:opacity-60"
                     >
                       {reclassifying ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -754,57 +753,104 @@ export function FindingCard({
                         <Crosshair className="w-3.5 h-3.5" />
                       )}
                     </button>
+                  ) : (
+                    <Tooltip content="Reclassify">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedReclassificationCategory(currentCategory);
+                          setIsReclassifyDialogOpen(true);
+                        }}
+                        disabled={reclassifying}
+                        aria-label="Reclassify"
+                        className={cn(
+                          'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
+                          'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
+                        )}
+                      >
+                        {reclassifying ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Crosshair className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                    </Tooltip>
+                  )
+                )}
+                {!isFalsePositive && !isAddressed && onIgnoreToggle && (
+                  <Tooltip content={isIgnored ? 'Un-ignore' : 'Ignore'}>
+                    <button
+                      type="button"
+                      onClick={handleIgnoreToggle}
+                      disabled={ignoring}
+                      aria-label={isIgnored ? 'Un-ignore' : 'Ignore'}
+                      className={cn(
+                        'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
+                        isIgnored
+                          ? 'bg-gray-900 text-white border-transparent hover:bg-black'
+                          : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
+                      )}
+                    >
+                      {ignoring ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : isIgnored ? (
+                        <Eye className="w-3.5 h-3.5" />
+                      ) : (
+                        <EyeOff className="w-3.5 h-3.5" />
+                      )}
+                    </button>
                   </Tooltip>
-                )
-              )}
-              {!isFalsePositive && !isAddressed && onIgnoreToggle && (
-                <Tooltip content={isIgnored ? 'Un-ignore' : 'Ignore'}>
-                  <button
-                    type="button"
-                    onClick={handleIgnoreToggle}
-                    disabled={ignoring}
-                    aria-label={isIgnored ? 'Un-ignore' : 'Ignore'}
-                    className={cn(
-                      'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
-                      isIgnored
-                        ? 'bg-gray-900 text-white border-transparent hover:bg-black'
-                        : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
-                    )}
-                  >
-                    {ignoring ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : isIgnored ? (
-                      <Eye className="w-3.5 h-3.5" />
-                    ) : (
-                      <EyeOff className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </Tooltip>
-              )}
-              {!isFalsePositive && !isIgnored && onAddressToggle && (
-                <Tooltip content={isAddressed ? 'Mark as unaddressed' : 'Mark as addressed'}>
-                  <button
-                    type="button"
-                    onClick={handleAddressToggle}
-                    disabled={addressing}
-                    aria-label={isAddressed ? 'Mark as unaddressed' : 'Mark as addressed'}
-                    className={cn(
-                      'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
-                      isAddressed
-                        ? 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900'
-                        : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
-                    )}
-                  >
-                    {addressing ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : isAddressed ? (
-                      <X className="w-3.5 h-3.5" />
-                    ) : (
-                      <Check className="w-3.5 h-3.5" />
-                    )}
-                  </button>
-                </Tooltip>
-              )}
+                )}
+                {!isFalsePositive && !isIgnored && onAddressToggle && (
+                  <Tooltip content={isAddressed ? 'Mark as unaddressed' : 'Mark as addressed'}>
+                    <button
+                      type="button"
+                      onClick={handleAddressToggle}
+                      disabled={addressing}
+                      aria-label={isAddressed ? 'Mark as unaddressed' : 'Mark as addressed'}
+                      className={cn(
+                        'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
+                        isAddressed
+                          ? 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900'
+                          : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
+                      )}
+                    >
+                      {addressing ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : isAddressed ? (
+                        <X className="w-3.5 h-3.5" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </Tooltip>
+                )}
+                {onNoteUpdate && (
+                  <Tooltip content={hasNote ? 'Edit note' : 'Add note'}>
+                    <button
+                      type="button"
+                      onClick={openNoteEditor}
+                      disabled={savingNote}
+                      aria-label={hasNote ? 'Edit note' : 'Add note'}
+                      className={cn(
+                        'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
+                        hasNote
+                          ? 'border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100'
+                          : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
+                      )}
+                    >
+                      {savingNote ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Pencil className="w-3.5 h-3.5" />
+                      )}
+                    </button>
+                  </Tooltip>
+                )}
+              </div>
+
+              {/* Bookmark — always visible on all screen sizes */}
               {onBookmarkUpdate && (
                 <Tooltip content={isBookmarked ? 'Unbookmark' : 'Bookmark'}>
                   <button
@@ -827,33 +873,92 @@ export function FindingCard({
                   </button>
                 </Tooltip>
               )}
-              {onNoteUpdate && (
-                <Tooltip content={hasNote ? 'Edit note' : 'Add note'}>
+
+              {/* Mobile-only kebab menu for secondary actions */}
+              {(onReclassify || onIgnoreToggle || onAddressToggle || onNoteUpdate) && (
+                <div ref={moreActionsRef} className="relative sm:hidden">
                   <button
                     type="button"
-                    onClick={openNoteEditor}
-                    disabled={savingNote}
-                    aria-label={hasNote ? 'Edit note' : 'Add note'}
-                    className={cn(
-                      'inline-flex h-7 w-7 items-center justify-center rounded-md border transition disabled:opacity-60',
-                      hasNote
-                        ? 'border-brand-200 bg-brand-50 text-brand-700 hover:bg-brand-100'
-                        : 'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
-                    )}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setIsMoreActionsMenuOpen((open) => !open);
+                    }}
+                    aria-label="More actions"
+                    aria-expanded={isMoreActionsMenuOpen}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-900"
                   >
-                    {savingNote ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    ) : (
-                      <Pencil className="w-3.5 h-3.5" />
-                    )}
+                    <MoreHorizontal className="w-3.5 h-3.5" />
                   </button>
-                </Tooltip>
+
+                  {isMoreActionsMenuOpen && (
+                    <div className="absolute left-0 top-full z-50 mt-1 min-w-[10.5rem] overflow-hidden rounded-xl border border-gray-200 bg-white py-1 shadow-xl">
+                      {onReclassify && !isAddressed && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIsMoreActionsMenuOpen(false);
+                            setSelectedReclassificationCategory(currentCategory);
+                            setIsReclassifyDialogOpen(true);
+                          }}
+                          disabled={reclassifying}
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          <Crosshair className="w-4 h-4 flex-shrink-0" />
+                          Reclassify
+                        </button>
+                      )}
+                      {!isFalsePositive && !isAddressed && onIgnoreToggle && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            void handleIgnoreToggle(e);
+                            setIsMoreActionsMenuOpen(false);
+                          }}
+                          disabled={ignoring}
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          {isIgnored ? <Eye className="w-4 h-4 flex-shrink-0" /> : <EyeOff className="w-4 h-4 flex-shrink-0" />}
+                          {isIgnored ? 'Un-ignore' : 'Ignore'}
+                        </button>
+                      )}
+                      {!isFalsePositive && !isIgnored && onAddressToggle && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            void handleAddressToggle(e);
+                            setIsMoreActionsMenuOpen(false);
+                          }}
+                          disabled={addressing}
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          {isAddressed ? <X className="w-4 h-4 flex-shrink-0" /> : <Check className="w-4 h-4 flex-shrink-0" />}
+                          {isAddressed ? 'Mark as unaddressed' : 'Mark as addressed'}
+                        </button>
+                      )}
+                      {onNoteUpdate && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            openNoteEditor(e);
+                            setIsMoreActionsMenuOpen(false);
+                          }}
+                          disabled={savingNote}
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm text-gray-700 transition hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          <Pencil className="w-4 h-4 flex-shrink-0" />
+                          {hasNote ? 'Edit note' : 'Add note'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
               </div>
             </div>
 
             {finding.theme && (
-              <div className="mb-3 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+              <div className="mb-3 hidden flex-wrap items-center gap-2 text-[11px] text-gray-500 sm:flex">
                 {finding.theme && (
                   <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5">
                     <span className="text-gray-700">
@@ -866,7 +971,7 @@ export function FindingCard({
 
             {finding.url && shouldShowMatchedUrl && (
               <div className="mb-4 flex items-start gap-2 text-xs text-gray-500 break-all bg-gray-50 p-2.5 rounded-lg border border-gray-100">
-                <span className="font-semibold text-gray-700 select-none uppercase tracking-wider text-[10px] mt-0.5">URL</span>
+                <span className="hidden sm:inline font-semibold text-gray-700 select-none uppercase tracking-wider text-[10px] mt-0.5">URL</span>
                 <a
                   href={finding.url}
                   target="_blank"
@@ -1031,7 +1136,7 @@ export function FindingCard({
 
       {isMounted && isReclassifyDialogOpen && onReclassify && createPortal(
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-950/70 px-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-950/70 px-4 py-4"
           onClick={() => {
             if (!reclassifying) {
               setIsReclassifyDialogOpen(false);
@@ -1129,7 +1234,7 @@ export function FindingCard({
 
       {isMounted && isDomainVisitDialogOpen && createPortal(
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-950/70 px-4"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-gray-950/70 px-4 py-4"
           onClick={() => {
             if (!savingDomainVisitPreference) {
               setIsDomainVisitDialogOpen(false);
@@ -1160,7 +1265,7 @@ export function FindingCard({
               </div>
             </div>
 
-            <label className="mt-5 ml-[3.75rem] flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
+            <label className="mt-5 ml-0 flex items-center gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 sm:ml-[3.75rem]">
               <input
                 type="checkbox"
                 checked={skipDomainVisitWarningForFuture}
@@ -1177,7 +1282,7 @@ export function FindingCard({
               </p>
             )}
 
-            <div className="mt-6 ml-[3.75rem] flex justify-end gap-3">
+            <div className="mt-6 ml-0 flex justify-end gap-3 sm:ml-[3.75rem]">
               <button
                 type="button"
                 disabled={savingDomainVisitPreference}

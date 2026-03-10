@@ -112,12 +112,12 @@ export function BrandScanTuningFields({
   return (
     <div className={`space-y-4 ${hideDivider ? '' : 'border-t border-gray-100 pt-6'}`}>
       <div className="space-y-3 pb-4">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
             Lookback period
             <InfoTooltip content="How far back (in time) scans should look for findings." />
           </div>
-          <div className="w-44 flex-shrink-0">
+          <div className="w-full sm:w-44 sm:flex-shrink-0">
             <SelectDropdown
               id="lookback-period"
               value={lookbackPeriod}

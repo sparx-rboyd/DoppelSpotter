@@ -40,9 +40,26 @@ export function Tooltip({
     if (!triggerEl) return;
 
     const rect = triggerEl.getBoundingClientRect();
+    const vw = window.innerWidth;
+    // Max tooltip width is max-w-xs = 320px; leave 8px viewport margin
+    const TOOLTIP_MAX_WIDTH = 320;
+    const VIEWPORT_MARGIN = 8;
+
+    let rawLeft = align === 'end' ? rect.right : rect.left + rect.width / 2;
+
+    if (align === 'center') {
+      // Clamp so the centred tooltip (translated -50%) doesn't overflow either edge
+      const halfWidth = TOOLTIP_MAX_WIDTH / 2;
+      rawLeft = Math.max(halfWidth + VIEWPORT_MARGIN, Math.min(rawLeft, vw - halfWidth - VIEWPORT_MARGIN));
+    } else {
+      // 'end' alignment: tooltip is translated -100% on X, so clamp its left edge
+      rawLeft = Math.min(rawLeft, vw - VIEWPORT_MARGIN);
+      rawLeft = Math.max(TOOLTIP_MAX_WIDTH + VIEWPORT_MARGIN, rawLeft);
+    }
+
     setPosition({
       top: rect.top - TOOLTIP_GAP_PX,
-      left: align === 'end' ? rect.right : rect.left + rect.width / 2,
+      left: rawLeft,
     });
   }, [align]);
 

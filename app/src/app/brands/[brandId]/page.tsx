@@ -6,7 +6,7 @@ import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigat
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
-  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check, Download, RotateCcw,
+  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check, FileSpreadsheet, FileText, RotateCcw,
   Sparkles, Crosshair,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -205,15 +205,15 @@ function SeverityGroup({
   }
 
   return (
-    <div id={sectionAnchorId} className="scroll-mt-28 bg-white rounded-xl border border-gray-200 overflow-hidden">
-      <div className={cn("flex items-center transition border-b", headerBg, headerBorder, !forceExpanded && hoverBg)}>
+    <div id={sectionAnchorId} className="scroll-mt-28 overflow-hidden sm:rounded-xl sm:border sm:border-gray-200 sm:bg-white">
+      <div className={cn("flex items-center transition sm:border-b", headerBg, headerBorder, !forceExpanded && hoverBg, "rounded-lg sm:rounded-none")}>
         <button
           type="button"
           onClick={() => {
             if (forceExpanded) return;
             setIsExpanded((v) => !v);
           }}
-          className="flex items-center gap-2 flex-1 px-4 py-3 text-left min-w-0"
+          className="flex items-center gap-2 flex-1 px-3 py-2.5 text-left min-w-0 sm:px-4 sm:py-3"
           aria-expanded={expanded}
         >
           {!forceExpanded && (expanded
@@ -232,7 +232,7 @@ function SeverityGroup({
             type="button"
             onClick={handleIgnoreAll}
             disabled={ignoringAll}
-            className="flex-shrink-0 mr-3 inline-flex items-center gap-1 rounded-full border border-gray-300 bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-700 transition hover:bg-gray-300 disabled:opacity-50"
+            className="flex-shrink-0 mr-2 sm:mr-3 inline-flex items-center gap-1 rounded-full border border-gray-300 bg-gray-200 px-2 py-0.5 text-xs font-medium text-gray-700 transition hover:bg-gray-300 disabled:opacity-50"
           >
             {ignoringAll
               ? <Loader2 className="w-3 h-3 animate-spin" />
@@ -242,7 +242,7 @@ function SeverityGroup({
         )}
       </div>
       {expanded && (
-        <div className="border-t border-gray-100 p-4 space-y-4">
+        <div className="space-y-3 pt-2 sm:space-y-4 sm:border-t sm:border-gray-100 sm:p-4">
           {findings.map((finding) => (
             <FindingCard
               key={finding.id}
@@ -2862,23 +2862,23 @@ export default function BrandDetailPage() {
     <AuthGuard>
       <Navbar />
       <main className="pt-16 min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-10">
 
           {/* Back link */}
-          <div className="flex items-center justify-between gap-3 mb-8">
-            <div className="flex items-center gap-3">
-              <Link href={backHref} className="text-brand-600 hover:text-brand-700 transition">
+          <div className="flex items-center justify-between gap-3 mb-4 sm:mb-8">
+            <div className="flex min-w-0 items-center gap-3">
+              <Link href={backHref} className="flex-shrink-0 text-brand-600 hover:text-brand-700 transition">
                 <ArrowLeft className="w-5 h-5" />
               </Link>
               {brand && (
-                <h1 className="text-2xl font-bold text-gray-900">{brand.name}</h1>
+                <h1 className="min-w-0 truncate text-2xl font-bold text-gray-900">{brand.name}</h1>
               )}
             </div>
             {brand && (
-              <Link href={`/brands/${brandId}/edit`}>
+              <Link href={`/brands/${brandId}/edit`} className="flex-shrink-0">
                 <Button variant="secondary" size="sm">
                   <Settings className="w-4 h-4" />
-                  Brand Settings
+                  <span className="hidden sm:inline">Brand Settings</span>
                 </Button>
               </Link>
             )}
@@ -2918,8 +2918,8 @@ export default function BrandDetailPage() {
               )}
 
               <section className="mb-6">
-                <div className="rounded-t-2xl bg-brand-600 px-5 py-6 sm:px-6">
-                  <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div className="rounded-t-2xl bg-brand-600 px-4 py-4 sm:px-5 sm:py-6">
+                  <div className="flex flex-col gap-3 sm:gap-5 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0 space-y-4">
                       <h2 className="text-xl font-semibold text-white sm:text-2xl">Findings</h2>
                       <div className="flex flex-wrap items-center gap-2.5">
@@ -3013,7 +3013,7 @@ export default function BrandDetailPage() {
                         {isRunScanMenuOpen && (
                           <div
                             role="menu"
-                            className="absolute right-0 z-20 mt-2 w-72 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+                            className="absolute right-0 z-20 mt-2 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
                           >
                             <button
                               type="button"
@@ -3051,7 +3051,7 @@ export default function BrandDetailPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="mt-5 flex flex-col gap-3 lg:flex-row lg:items-center">
+                  <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:gap-3 lg:flex-row lg:items-center">
                     <div className="relative max-w-lg flex-1">
                       <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                       <Input
@@ -3073,7 +3073,7 @@ export default function BrandDetailPage() {
                         </button>
                       )}
                     </div>
-                    <div className="flex flex-col gap-3 sm:flex-row lg:flex-shrink-0">
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-3 lg:flex-shrink-0">
                       <SelectDropdown
                         id="findings-theme-filter"
                         ariaLabel="Filter findings by theme"
@@ -3126,7 +3126,7 @@ export default function BrandDetailPage() {
                         <button
                           type="button"
                           onClick={resetFindingsSearchAndFilters}
-                          className="inline-flex items-center justify-center gap-1.5 rounded-full border border-white/15 bg-white/8 px-3 py-2 text-xs font-medium text-white/85 transition hover:bg-white/12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                          className="flex w-full items-center justify-center gap-1.5 rounded-full border border-white/15 bg-white/8 px-3 py-2 text-xs font-medium text-white/85 transition hover:bg-white/12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:inline-flex sm:w-auto"
                         >
                           <RotateCcw className="h-3.5 w-3.5" />
                           Reset
@@ -3179,7 +3179,7 @@ export default function BrandDetailPage() {
 
                 <div className="overflow-hidden rounded-b-2xl border border-gray-200 border-t-0 bg-white">
                   <div className="border-b border-gray-200 px-4 sm:px-6">
-                    <div className="flex items-end gap-7 overflow-x-auto">
+                    <div className="flex items-end gap-4 overflow-x-auto sm:gap-7">
                       <button
                         type="button"
                         onClick={() => switchFindingsTab('scans')}
@@ -3246,7 +3246,7 @@ export default function BrandDetailPage() {
                     </div>
                   </div>
 
-                  <div className="bg-gray-50 px-4 py-6 sm:px-6">
+                  <div className="bg-gray-50 px-2 py-4 sm:px-6 sm:py-6">
                     {isSearchResultsMode ? (
                       <div className="space-y-4">
                         {isSearchQueryTooShort ? (
@@ -3405,8 +3405,8 @@ export default function BrandDetailPage() {
                             ))}
 
                           {bookmarkedNonHits.length > 0 && (
-                            <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-                              <div className="flex items-center gap-2 border-b border-gray-100 bg-gray-50 px-4 py-3">
+                            <div className="overflow-hidden sm:rounded-xl sm:border sm:border-gray-200 sm:bg-white">
+                              <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2.5 sm:rounded-none sm:border-b sm:border-gray-100 sm:px-4 sm:py-3">
                                 <Bookmark className="w-3.5 h-3.5 text-gray-400" />
                                 <span className="text-sm font-medium text-gray-500">
                                   Non-findings
@@ -3414,9 +3414,9 @@ export default function BrandDetailPage() {
                                     ({bookmarkedNonHits.length})
                                   </span>
                                 </span>
-                                <span className="text-xs text-gray-400">· bookmarked despite AI classifying them as false positives · reclassify to any category</span>
+                                <span className="hidden sm:inline text-xs text-gray-400">· bookmarked despite AI classifying them as false positives · reclassify to any category</span>
                               </div>
-                              <div className="space-y-4 border-t border-gray-100 p-4">
+                              <div className="space-y-3 pt-2 sm:space-y-4 sm:border-t sm:border-gray-100 sm:p-4">
                                 {bookmarkedNonHits.map((finding) => (
                                   <FindingCard
                                     key={finding.id}
@@ -3507,7 +3507,7 @@ export default function BrandDetailPage() {
 
                             return (
                               <div className="overflow-hidden rounded-xl border border-brand-200 bg-white">
-                                <div className="bg-brand-50/40 px-6 py-4">
+                                <div className="bg-brand-50/40 px-3 py-3 sm:px-6 sm:py-4">
                                   <div className="flex items-start justify-between gap-4">
                                     <div className="min-w-0 flex-1">
                                       <div className="flex min-w-0 items-center gap-3 text-left">
@@ -3516,7 +3516,7 @@ export default function BrandDetailPage() {
                                           Scan in progress
                                         </span>
                                       </div>
-                                      <div className="mt-4 pl-7">
+                                      <div className="mt-4 pl-0 sm:pl-7">
                                         <div className="mb-5 flex flex-wrap items-center gap-2.5">
                                           {progressSourcesWithFallback.map((source) => {
                                             const buttonClasses = getProgressSourceButtonClasses(
@@ -3617,7 +3617,7 @@ export default function BrandDetailPage() {
                                     )}
                                   </div>
                                 </div>
-                                <div className="border-t border-brand-100 bg-brand-50/30 px-4 py-5 sm:px-6">
+                                <div className="border-t border-brand-100 bg-brand-50/30 px-2 py-3 sm:px-6 sm:py-5">
                                   {visibleLiveScanFindings.length === 0 && visibleLiveScanNonHits.length === 0 ? (
                                     <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
                                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -3668,7 +3668,7 @@ export default function BrandDetailPage() {
                                       {visibleLiveScanNonHits.length > 0 && (
                                         <div
                                           id={activeScan?.id ? getScanCategorySectionAnchorId(activeScan.id, 'non-hit') : undefined}
-                                          className="scroll-mt-28 overflow-hidden rounded-xl border border-gray-200 bg-white"
+                                          className="scroll-mt-28 overflow-hidden sm:rounded-xl sm:border sm:border-gray-200 sm:bg-white"
                                         >
                                           <button
                                             type="button"
@@ -3677,8 +3677,8 @@ export default function BrandDetailPage() {
                                               setShowLiveScanNonHits((prev) => !prev);
                                             }}
                                             className={cn(
-                                              "flex w-full items-center gap-2 px-4 py-3 text-left transition",
-                                              showLiveNonHitsSection ? "border-b border-gray-100 bg-gray-50" : "hover:bg-gray-50",
+                                              "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left transition sm:rounded-none sm:px-4 sm:py-3",
+                                              showLiveNonHitsSection ? "sm:border-b border-gray-100 bg-gray-50" : "hover:bg-gray-50",
                                             )}
                                           >
                                             {!isAnyFindingFilterActive && (showLiveNonHitsSection
@@ -3690,10 +3690,10 @@ export default function BrandDetailPage() {
                                                 ({visibleLiveScanNonHits.length})
                                               </span>
                                             </span>
-                                            <span className="text-xs text-gray-400">· classified as false positives by AI · reclassify to any category</span>
+                                            <span className="hidden sm:inline text-xs text-gray-400">· classified as false positives by AI · reclassify to any category</span>
                                           </button>
                                           {showLiveNonHitsSection && (
-                                            <div className="space-y-4 border-t border-gray-100 p-4">
+                                            <div className="space-y-3 pt-2 sm:space-y-4 sm:border-t sm:border-gray-100 sm:p-4">
                                               {visibleLiveScanNonHits.map((finding) => (
                                                 <FindingCard
                                                   key={finding.id}
@@ -3801,7 +3801,7 @@ export default function BrandDetailPage() {
                                 className="scroll-mt-24 overflow-hidden rounded-xl border border-gray-200 bg-white"
                               >
                                 {isConfirmingDelete ? (
-                                  <div className="flex items-center justify-between gap-4 bg-red-50 px-6 py-4">
+                                  <div className="flex flex-col gap-3 bg-red-50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-4">
                                     <p className="text-sm text-red-800">
                                       <span className="font-semibold">
                                         Delete this scan and its {formatInteger(scanResultsCount)} result{scanResultsCount !== 1 ? 's' : ''}?
@@ -3830,14 +3830,14 @@ export default function BrandDetailPage() {
                                     </div>
                                   </div>
                                 ) : (
-                                  <div className="group flex items-start gap-3 px-6 py-4 transition hover:bg-gray-50">
+                                  <div className="group flex flex-col gap-1 px-3 py-3 transition hover:bg-gray-50 sm:flex-row sm:items-start sm:gap-3 sm:px-6 sm:py-4">
                                     <button
                                       type="button"
                                       onClick={() => {
                                         if (isAnyFindingFilterActive) return;
                                         toggleScanExpand(scan.id);
                                       }}
-                                      className="flex min-w-0 flex-1 items-start gap-4 text-left"
+                                      className="flex min-w-0 flex-1 items-start gap-2 text-left sm:gap-4"
                                       aria-expanded={isExpanded}
                                     >
                                       {!isAnyFindingFilterActive && (isExpanded
@@ -3849,26 +3849,28 @@ export default function BrandDetailPage() {
                                             {formatScanDate(scan.startedAt)}
                                           </span>
                                           {(scan.sources?.length ?? 0) > 0 && (
-                                            <span className="flex flex-wrap items-center gap-2 text-gray-300">
-                                              <span
-                                                aria-hidden="true"
-                                                className="h-3.5 w-px rounded-full bg-gray-200"
-                                              />
-                                              <span
-                                                className="flex flex-wrap items-center gap-1.5"
-                                                aria-label={`Scan types: ${scan.sources?.map((source) => getFindingSourceLabel(source)).join(', ')}`}
-                                              >
-                                                {scan.sources?.map((source) => (
-                                                  <span
-                                                    key={source}
-                                                    title={getFindingSourceLabel(source)}
-                                                    className="inline-flex items-center"
-                                                  >
-                                                    <ScanSourceIcon source={source} className="h-[14px] w-[14px]" />
-                                                  </span>
-                                                ))}
+                                            <>
+                                              <span className="hidden sm:flex flex-wrap items-center gap-2 text-gray-300">
+                                                <span
+                                                  aria-hidden="true"
+                                                  className="h-3.5 w-px rounded-full bg-gray-200"
+                                                />
+                                                <span
+                                                  className="flex flex-wrap items-center gap-1.5"
+                                                  aria-label={`Scan types: ${scan.sources?.map((source) => getFindingSourceLabel(source)).join(', ')}`}
+                                                >
+                                                  {scan.sources?.map((source) => (
+                                                    <span
+                                                      key={source}
+                                                      title={getFindingSourceLabel(source)}
+                                                      className="inline-flex items-center"
+                                                    >
+                                                      <ScanSourceIcon source={source} className="h-[14px] w-[14px]" />
+                                                    </span>
+                                                  ))}
+                                                </span>
                                               </span>
-                                            </span>
+                                            </>
                                           )}
                                         </span>
                                         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -3882,22 +3884,22 @@ export default function BrandDetailPage() {
                                             <span className="text-xs text-gray-400">No findings</span>
                                           )}
                                           {displayedNonHitCount > 0 && (
-                                            <span className="text-xs text-gray-400">
+                                            <span className="hidden sm:inline text-xs text-gray-400">
                                               · {formatInteger(displayedNonHitCount)} non-hit{displayedNonHitCount !== 1 ? 's' : ''}
                                             </span>
                                           )}
                                           {displayedAddressedCount > 0 && (
-                                            <span className="text-xs text-gray-400">
+                                            <span className="hidden sm:inline text-xs text-gray-400">
                                               · {formatInteger(displayedAddressedCount)} addressed
                                             </span>
                                           )}
                                           {displayedIgnoredCount > 0 && (
-                                            <span className="text-xs text-gray-400">
+                                            <span className="hidden sm:inline text-xs text-gray-400">
                                               · {formatInteger(displayedIgnoredCount)} ignored
                                             </span>
                                           )}
                                           {(scan.skippedCount ?? 0) > 0 && (
-                                            <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+                                            <span className="hidden sm:inline-flex items-center gap-1 text-xs text-gray-400">
                                               · {formatInteger(scan.skippedCount ?? 0)} skipped
                                               <InfoTooltip
                                                 content="Findings that appeared in other searches in this scan, or historical findings."
@@ -3915,18 +3917,22 @@ export default function BrandDetailPage() {
                                       </span>
                                     </button>
 
+                                    {/* Action buttons — own row on mobile, inline at sm+ */}
+                                    {(showScanLevelActions || showDebug) && (
+                                    <div className="mt-1.5 flex flex-shrink-0 items-center gap-2 pl-6 sm:mt-0 sm:pl-0">
                                     {showScanLevelActions && (
-                                      <div className="flex flex-shrink-0 items-center gap-2">
+                                      <>
                                         <Button
                                           variant="secondary"
                                           size="sm"
                                           loading={exportingCsvScanId === scan.id}
                                           disabled={exportingCsvScanId !== null && exportingCsvScanId !== scan.id}
                                           onClick={() => void exportScanFindings(scan)}
+                                          aria-label="Export CSV"
                                           className="flex-shrink-0"
                                         >
-                                          <Download className="w-3.5 h-3.5" />
-                                          Export CSV
+                                          <FileSpreadsheet className="w-3.5 h-3.5" />
+                                          <span className="hidden sm:inline">CSV</span>
                                         </Button>
 
                                         <Button
@@ -3935,12 +3941,13 @@ export default function BrandDetailPage() {
                                           loading={exportingPdfScanId === scan.id}
                                           disabled={exportingPdfScanId !== null && exportingPdfScanId !== scan.id}
                                           onClick={() => void exportScanPdf(scan)}
+                                          aria-label="Export PDF"
                                           className="flex-shrink-0"
                                         >
-                                          <Download className="w-3.5 h-3.5" />
-                                          Export PDF
+                                          <FileText className="w-3.5 h-3.5" />
+                                          <span className="hidden sm:inline">PDF</span>
                                         </Button>
-                                      </div>
+                                      </>
                                     )}
 
                                     {showDebug && (
@@ -4006,11 +4013,13 @@ export default function BrandDetailPage() {
                                         </button>
                                       )
                                     )}
+                                    </div>
+                                    )}
                                   </div>
                                 )}
 
                                 {isExpanded && (
-                                  <div className="border-t border-gray-100 bg-gray-50 px-4 py-5 sm:px-6">
+                                  <div className="border-t border-gray-100 bg-gray-50 px-2 py-3 sm:px-6 sm:py-5">
                                     {isLoading ? (
                                       <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
                                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -4067,7 +4076,7 @@ export default function BrandDetailPage() {
                                         {displayedNonHitCount > 0 && (
                                           <div
                                             id={getScanCategorySectionAnchorId(scan.id, 'non-hit')}
-                                            className="mt-4 scroll-mt-28 overflow-hidden rounded-xl border border-gray-200 bg-white"
+                                            className="mt-3 scroll-mt-28 overflow-hidden sm:mt-4 sm:rounded-xl sm:border sm:border-gray-200 sm:bg-white"
                                           >
                                             <button
                                               type="button"
@@ -4078,8 +4087,8 @@ export default function BrandDetailPage() {
                                                 if (next) loadScanNonHits(scan.id);
                                               }}
                                               className={cn(
-                                                "flex w-full items-center gap-2 px-4 py-3 text-left transition",
-                                                showNonHits ? "border-b border-gray-100 bg-gray-50" : "hover:bg-gray-50",
+                                                "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left transition sm:rounded-none sm:px-4 sm:py-3",
+                                                showNonHits ? "sm:border-b border-gray-100 bg-gray-50" : "hover:bg-gray-50",
                                               )}
                                             >
                                               {!isAnyFindingFilterActive && (showNonHits
@@ -4091,10 +4100,10 @@ export default function BrandDetailPage() {
                                                   ({nonHits ? nonHits.length : displayedNonHitCount})
                                                 </span>
                                               </span>
-                                              <span className="text-xs text-gray-400">· classified as false positives by AI · reclassify to any category</span>
+                                              <span className="hidden sm:inline text-xs text-gray-400">· classified as false positives by AI · reclassify to any category</span>
                                             </button>
                                             {showNonHits && (
-                                              <div className="space-y-4 border-t border-gray-100 p-4">
+                                              <div className="space-y-3 pt-2 sm:space-y-4 sm:border-t sm:border-gray-100 sm:p-4">
                                                 {!nonHits ? (
                                                   <div className="flex items-center justify-center gap-2 py-4 text-gray-400">
                                                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -4194,7 +4203,7 @@ export default function BrandDetailPage() {
         {selectedFindings.length > 0 && (
           <div className="fixed inset-x-0 bottom-6 z-40 flex justify-center px-4 pointer-events-none">
             <div className="pointer-events-auto w-full max-w-4xl overflow-hidden rounded-2xl border border-slate-200/50 bg-white shadow-[0_20px_60px_-15px_rgba(0,0,0,0.1),0_0_0_1px_rgba(0,0,0,0.02)] backdrop-blur-xl ring-1 ring-slate-900/5">
-              <div className="flex flex-col gap-4 p-5 sm:p-6">
+              <div className="flex max-h-[60vh] flex-col gap-4 overflow-y-auto p-4 sm:p-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-500 text-white shadow-sm">
@@ -4289,7 +4298,7 @@ export default function BrandDetailPage() {
 
         {isBulkReclassifyDialogOpen && createPortal(
           <div
-            className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/60 px-4"
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/60 px-4 py-4"
             onClick={() => {
               if (!bulkActionLoading) {
                 setIsBulkReclassifyDialogOpen(false);
@@ -4389,7 +4398,7 @@ export default function BrandDetailPage() {
 
         {isLookbackNudgeOpen && createPortal(
           <div
-            className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/60 px-4"
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/60 px-4 py-4 sm:py-6"
             onClick={() => {
               if (!lookbackNudgeLoading) handleLookbackNudgeDismiss();
             }}
@@ -4399,7 +4408,8 @@ export default function BrandDetailPage() {
               aria-modal="true"
               aria-labelledby="lookback-nudge-title"
               aria-describedby="lookback-nudge-description"
-              className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl"
+              className="w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl"
+              style={{ maxHeight: 'min(90vh, 600px)' }}
               onClick={(event) => event.stopPropagation()}
             >
               <div className="flex items-start gap-4">

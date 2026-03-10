@@ -1,8 +1,9 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ScanEye, LayoutDashboard, Shield, CircleHelp } from 'lucide-react';
+import { ScanEye, LayoutDashboard, Shield, CircleHelp, Menu, X } from 'lucide-react';
 import { UserMenu } from '@/components/user-menu';
 import { cn } from '@/lib/utils';
 
@@ -13,6 +14,11 @@ const navLinks = [
 
 export function Navbar() {
   const pathname = usePathname();
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  useEffect(() => {
+    setIsMobileMenuOpen(false);
+  }, [pathname]);
 
   return (
     <nav className="fixed z-50 w-full border-b border-brand-700/60 bg-brand-600">
@@ -24,7 +30,7 @@ export function Navbar() {
             <span className="font-bold text-lg tracking-tight text-white">DoppelSpotter</span>
           </Link>
 
-          {/* Nav links */}
+          {/* Desktop nav links */}
           <div className="hidden sm:flex items-center gap-1">
             {navLinks.map(({ href, label, icon: Icon }) => (
               <Link
@@ -57,9 +63,40 @@ export function Navbar() {
               <CircleHelp className="h-5 w-5" />
             </Link>
             <UserMenu />
+            {/* Mobile hamburger button */}
+            <button
+              type="button"
+              onClick={() => setIsMobileMenuOpen((open) => !open)}
+              aria-label={isMobileMenuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={isMobileMenuOpen}
+              className="sm:hidden flex h-8 w-8 items-center justify-center rounded-full text-white/80 transition hover:bg-white/10 hover:text-white"
+            >
+              {isMobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Mobile menu drawer */}
+      {isMobileMenuOpen && (
+        <div className="sm:hidden border-t border-brand-700/60 bg-brand-600 px-4 pb-3 pt-2">
+          {navLinks.map(({ href, label, icon: Icon }) => (
+            <Link
+              key={href}
+              href={href}
+              className={cn(
+                'flex items-center gap-2.5 rounded-lg px-3 py-3 text-sm font-medium transition',
+                pathname.startsWith(href)
+                  ? 'bg-white/20 text-white'
+                  : 'text-white/70 hover:text-white hover:bg-white/10',
+              )}
+            >
+              <Icon className="w-4 h-4" />
+              {label}
+            </Link>
+          ))}
+        </div>
+      )}
     </nav>
   );
 }

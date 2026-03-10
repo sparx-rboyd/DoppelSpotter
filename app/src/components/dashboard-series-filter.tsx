@@ -92,7 +92,7 @@ export function DashboardSeriesFilter({
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full z-[230] mt-2 w-[15rem] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
+        <div className="absolute right-0 top-full z-[230] mt-2 w-[15rem] max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl">
           <div className="flex items-center justify-between border-b border-gray-100 px-2.5 py-2">
             <button
               type="button"

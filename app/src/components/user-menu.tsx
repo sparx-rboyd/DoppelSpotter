@@ -83,7 +83,7 @@ export function UserMenu() {
         <div
           role="menu"
           aria-label="User menu"
-          className="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
+          className="absolute right-0 z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl"
         >
           <div className="border-b border-gray-100 px-4 py-3">
             <p className="text-xs font-medium uppercase tracking-[0.12em] text-gray-400">Signed in as</p>

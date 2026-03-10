@@ -369,7 +369,7 @@ export default function SettingsPage() {
 
         {isDeleteDialogOpen && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 px-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 px-4 py-4"
             onClick={() => {
               if (!deleting) {
                 setIsDeleteDialogOpen(false);
