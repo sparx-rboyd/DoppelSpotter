@@ -1841,14 +1841,13 @@ export default function BrandDetailPage() {
       return;
     }
 
-    const needsHydration = scans.some((scan) => {
-      const hitCount = scan.highCount + scan.mediumCount + scan.lowCount;
-      return (
-        (hitCount > 0 && scanFindings[scan.id] === undefined)
-        || (scan.nonHitCount > 0 && scanNonHits[scan.id] === undefined)
-        || ((scan.ignoredCount ?? 0) > 0 && scanIgnored[scan.id] === undefined)
-      );
-    });
+    // Filter mode needs a complete cross-scan view, so hydrate every scan bucket
+    // instead of relying on summary counts that may be stale or incomplete.
+    const needsHydration = scans.some((scan) => (
+      scanFindings[scan.id] === undefined
+      || scanNonHits[scan.id] === undefined
+      || scanIgnored[scan.id] === undefined
+    ));
 
     if (!needsHydration) {
       setFilterHydrationLoading(false);
@@ -1861,15 +1860,13 @@ export default function BrandDetailPage() {
     void Promise.all(
       scans.flatMap((scan) => {
         const loads: Promise<void>[] = [];
-        const hitCount = scan.highCount + scan.mediumCount + scan.lowCount;
-
-        if (hitCount > 0 && scanFindings[scan.id] === undefined) {
+        if (scanFindings[scan.id] === undefined) {
           loads.push(loadScanFindings(scan.id));
         }
-        if (scan.nonHitCount > 0 && scanNonHits[scan.id] === undefined) {
+        if (scanNonHits[scan.id] === undefined) {
           loads.push(loadScanNonHits(scan.id));
         }
-        if ((scan.ignoredCount ?? 0) > 0 && scanIgnored[scan.id] === undefined) {
+        if (scanIgnored[scan.id] === undefined) {
           loads.push(loadScanIgnored(scan.id));
         }
 
@@ -2837,15 +2834,15 @@ export default function BrandDetailPage() {
   const isSearchResultsMode = isFindingsSearchActive;
   const isSearchQueryTooShort = isSearchResultsMode && !canRunServerFindingSearch;
   const searchResultsCountLabel = `${formatInteger(searchResults.length)} result${searchResults.length !== 1 ? 's' : ''}`;
-  const scansToRender = anchorTargetScanId
-    ? scans
-    : isAnyFindingFilterActive
-      ? scans.filter((scan) => {
-          const hits = filterFindings(scanFindings[scan.id]) ?? [];
-          const nonHits = filterFindings(scanNonHits[scan.id]) ?? [];
-          const ignored = filterFindings(scanIgnored[scan.id]) ?? [];
-          return hits.length > 0 || nonHits.length > 0 || ignored.length > 0;
-        })
+  const scansToRender = isAnyFindingFilterActive
+    ? scans.filter((scan) => {
+        const hits = filterFindings(scanFindings[scan.id]) ?? [];
+        const nonHits = filterFindings(scanNonHits[scan.id]) ?? [];
+        const ignored = filterFindings(scanIgnored[scan.id]) ?? [];
+        return hits.length > 0 || nonHits.length > 0 || ignored.length > 0;
+      })
+    : anchorTargetScanId
+      ? scans
       : scans;
   const hasVisibleScanMatches = (
     visibleLiveScanFindings.length > 0
@@ -3747,10 +3744,10 @@ export default function BrandDetailPage() {
                             const matchingHitCount = hits?.length ?? 0;
                             const matchingNonHitCount = nonHits?.length ?? 0;
                             const matchingIgnoredCount = ignored?.length ?? 0;
-                            const isExpanded = anchorTargetScanId
-                              ? anchorTargetScanId === scan.id
-                              : isAnyFindingFilterActive
-                                ? matchingHitCount + matchingNonHitCount + matchingIgnoredCount > 0
+                            const isExpanded = isAnyFindingFilterActive
+                              ? matchingHitCount + matchingNonHitCount + matchingIgnoredCount > 0
+                              : anchorTargetScanId
+                                ? anchorTargetScanId === scan.id
                                 : expandedScanIds.includes(scan.id);
                             const isLoading = loadingScanIds.includes(scan.id);
                             const showNonHits = isAnyFindingFilterActive
