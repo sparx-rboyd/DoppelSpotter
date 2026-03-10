@@ -106,7 +106,7 @@ function buildActorInputs(
         maxItems: getInitialXMaxItems(settings.searchResultPages),
         sort: 'Latest',
         includeSearchTerms: true,
-        tweetDateSince: settings.lookbackDate,
+        start: settings.lookbackDate,
       },
       query,
       displayQuery: query,
