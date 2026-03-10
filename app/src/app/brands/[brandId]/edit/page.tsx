@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
+import { BrandAnalysisSettingsFields } from '@/components/brand-analysis-settings-fields';
 import { BrandScanScheduleFields } from '@/components/brand-scan-schedule-fields';
 import { BrandScanSourceFields } from '@/components/brand-scan-source-fields';
 import { BrandScanTuningFields } from '@/components/brand-scan-tuning-fields';
@@ -26,13 +27,17 @@ import {
   hasEnabledBrandScanSource,
 } from '@/lib/brands';
 import {
+  isValidBrandAnalysisSeverityDefinitions,
+  normalizeBrandAnalysisSeverityDefinitions,
+} from '@/lib/analysis-severity';
+import {
   DEFAULT_SCAN_SCHEDULE_FREQUENCY,
   getBrowserTimeZone,
   getDefaultScheduleStartInput,
   getScheduleInputFromBrandSchedule,
   isScheduleStartInPast,
 } from '@/lib/scan-schedules';
-import type { BrandProfile, BrandScanScheduleInput } from '@/lib/types';
+import type { BrandAnalysisSeverityDefinitions, BrandProfile, BrandScanScheduleInput } from '@/lib/types';
 
 export default function EditBrandPage() {
   const { brandId } = useParams<{ brandId: string }>();
@@ -56,6 +61,7 @@ export default function EditBrandPage() {
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
   const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
   const [scanSources, setScanSources] = useState(DEFAULT_BRAND_SCAN_SOURCES);
+  const [analysisSeverityDefinitions, setAnalysisSeverityDefinitions] = useState<BrandAnalysisSeverityDefinitions>({});
   const [scanSchedule, setScanSchedule] = useState<BrandScanScheduleInput>(() => {
     const timeZone = getBrowserTimeZone();
     const defaultStart = getDefaultScheduleStartInput(timeZone);
@@ -92,6 +98,7 @@ export default function EditBrandPage() {
         setAllowAiDeepSearches(normalizeAllowAiDeepSearches(brand.allowAiDeepSearches));
         setMaxAiDeepSearches(normalizeMaxAiDeepSearches(brand.maxAiDeepSearches));
         setScanSources(normalizeBrandScanSources(brand.scanSources));
+        setAnalysisSeverityDefinitions(normalizeBrandAnalysisSeverityDefinitions(brand.analysisSeverityDefinitions));
         setWatchWords(brand.watchWords ?? []);
         setSafeWords(brand.safeWords ?? []);
         const resolvedScanSchedule = getScheduleInputFromBrandSchedule(brand.scanSchedule);
@@ -206,6 +213,10 @@ export default function EditBrandPage() {
       setSaveError('At least one scan source must be enabled');
       return;
     }
+    if (!isValidBrandAnalysisSeverityDefinitions(analysisSeverityDefinitions)) {
+      setSaveError('Custom analysis severity definitions must be non-empty and no longer than 1500 characters');
+      return;
+    }
 
     if (scanSchedule.enabled && isScheduleStartInPast(scanSchedule) && !hasUnchangedScheduleStart(scanSchedule)) {
       setSaveError('Scheduled scan start date and time must be in the future');
@@ -229,6 +240,7 @@ export default function EditBrandPage() {
           allowAiDeepSearches,
           maxAiDeepSearches,
           scanSources,
+          analysisSeverityDefinitions,
           watchWords,
           safeWords,
           scanSchedule,
@@ -461,6 +473,21 @@ export default function EditBrandPage() {
                 </CardHeader>
                 <CardContent className="p-6">
                   <BrandScanSourceFields value={scanSources} onChange={setScanSources} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader className="px-6 py-5">
+                  <div className="inline-flex items-center gap-1.5">
+                    <h2 className="font-semibold text-gray-900">Analysis settings</h2>
+                    <InfoTooltip content="Customise how DoppelSpotter distinguishes high, medium, and low severity findings for this brand." />
+                  </div>
+                </CardHeader>
+                <CardContent className="p-6">
+                  <BrandAnalysisSettingsFields
+                    value={analysisSeverityDefinitions}
+                    onChange={setAnalysisSeverityDefinitions}
+                  />
                 </CardContent>
               </Card>
 

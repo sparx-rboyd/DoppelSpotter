@@ -1,4 +1,9 @@
-import type { FindingSource, Severity, UserPreferenceHints } from '@/lib/types';
+import type {
+  FindingSource,
+  ResolvedBrandAnalysisSeverityDefinitions,
+  Severity,
+  UserPreferenceHints,
+} from '@/lib/types';
 import { MAX_FINDING_TAXONOMY_WORDS } from '@/lib/findings-taxonomy';
 import type { GoogleScannerConfig } from '@/lib/scan-sources';
 import {
@@ -60,10 +65,9 @@ Rules for "items":
 - Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current result.
 
-Severity guidelines:
-- "high": Clear impersonation, phishing, counterfeit, or direct brand misuse posing immediate risk to customers or the brand
-- "medium": Suspicious activity that warrants investigation but may have a legitimate explanation (e.g. fan accounts, resellers using the brand name)
-- "low": Likely benign mention but worth logging (e.g. news articles, legitimate reviews)
+Severity assignment:
+- The user prompt will include this brand's definitions for "high", "medium", and "low".
+- Apply those brand-specific definitions exactly when assigning severity.
 
 Counter signals:
 Treat results with less caution when ...
@@ -110,10 +114,9 @@ Rules for "items":
 - Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current server metadata.
 
-Severity guidelines:
-- "high": Clear impersonation, scam support, fake official community claims, or direct brand misuse posing immediate risk to customers or the brand
-- "medium": Suspicious branding, unofficial communities, resale/promo activity, or risky associations that warrant investigation but may have a legitimate explanation
-- "low": Likely benign mention or discussion community worth logging, but with limited evidence of harmful intent
+Severity assignment:
+- The user prompt will include this brand's definitions for "high", "medium", and "low".
+- Apply those brand-specific definitions exactly when assigning severity.
 
 Counter signals:
 Treat servers with less caution when ...
@@ -160,10 +163,9 @@ Rules for "items":
 - Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current domain metadata.
 
-Severity guidelines:
-- "high": Clear phishing, fake official site signals, credential-harvesting risk, or highly deceptive typo-squatting posing immediate customer or brand risk
-- "medium": Suspicious recent registration that strongly references the brand and warrants investigation, but with incomplete evidence of harmful use
-- "low": Likely benign or inactive registration worth logging because it references the brand, but with limited evidence of abuse
+Severity assignment:
+- The user prompt will include this brand's definitions for "high", "medium", and "low".
+- Apply those brand-specific definitions exactly when assigning severity.
 
 Counter signals:
 Treat domains with less caution when ...
@@ -210,10 +212,9 @@ Rules for "items":
 - Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current repository metadata.
 
-Severity guidelines:
-- "high": Clear fake official tooling, phishing/scam tooling, cheat/bypass tooling, or direct brand misuse posing immediate risk
-- "medium": Suspicious branding, risky unofficial tooling, misleading integrations, or repositories that warrant investigation but may have a legitimate explanation
-- "low": Likely benign integrations, wrappers, examples, or discussion-related repositories worth logging, but with limited evidence of harmful intent
+Severity assignment:
+- The user prompt will include this brand's definitions for "high", "medium", and "low".
+- Apply those brand-specific definitions exactly when assigning severity.
 
 Counter signals:
 Treat repositories with less caution when ...
@@ -260,10 +261,9 @@ Rules for "items":
 - Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current post.
 
-Severity guidelines:
-- "high": Clear impersonation, phishing, fraudulent giveaway, fake support, scam promotion, or direct brand misuse posing immediate risk
-- "medium": Suspicious claims, misleading promotions, risky associations, or posts that warrant investigation but may have a legitimate explanation
-- "low": Likely benign discussion, commentary, or mention worth logging, but with limited evidence of harmful intent
+Severity assignment:
+- The user prompt will include this brand's definitions for "high", "medium", and "low".
+- Apply those brand-specific definitions exactly when assigning severity.
 
 Counter signals:
 Treat posts with less caution when ...
@@ -363,6 +363,7 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   brandName: string;
   keywords: string[];
   officialDomains: string[];
+  severityDefinitions: ResolvedBrandAnalysisSeverityDefinitions;
   watchWords?: string[];
   safeWords?: string[];
   userPreferenceHints?: UserPreferenceHints;
@@ -376,6 +377,7 @@ export function buildGoogleChunkAnalysisPrompt(params: {
     brandName,
     keywords,
     officialDomains,
+    severityDefinitions,
     watchWords,
     safeWords,
     userPreferenceHints,
@@ -412,6 +414,7 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${buildSeverityDefinitionsSection(severityDefinitions)}
 ${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
 ${monitoringSurfaceLine}
 
@@ -432,6 +435,7 @@ export function buildDiscordChunkAnalysisPrompt(params: {
   brandName: string;
   keywords: string[];
   officialDomains: string[];
+  severityDefinitions: ResolvedBrandAnalysisSeverityDefinitions;
   watchWords?: string[];
   safeWords?: string[];
   userPreferenceHints?: UserPreferenceHints;
@@ -444,6 +448,7 @@ export function buildDiscordChunkAnalysisPrompt(params: {
     brandName,
     keywords,
     officialDomains,
+    severityDefinitions,
     watchWords,
     safeWords,
     userPreferenceHints,
@@ -484,6 +489,7 @@ export function buildDiscordChunkAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${buildSeverityDefinitionsSection(severityDefinitions)}
 ${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
 Monitoring surface: Discord servers
 
@@ -505,6 +511,7 @@ export function buildDomainRegistrationChunkAnalysisPrompt(params: {
   brandName: string;
   keywords: string[];
   officialDomains: string[];
+  severityDefinitions: ResolvedBrandAnalysisSeverityDefinitions;
   watchWords?: string[];
   safeWords?: string[];
   userPreferenceHints?: UserPreferenceHints;
@@ -517,6 +524,7 @@ export function buildDomainRegistrationChunkAnalysisPrompt(params: {
     brandName,
     keywords,
     officialDomains,
+    severityDefinitions,
     watchWords,
     safeWords,
     userPreferenceHints,
@@ -556,6 +564,7 @@ export function buildDomainRegistrationChunkAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${buildSeverityDefinitionsSection(severityDefinitions)}
 ${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
 Monitoring surface: Domain registrations
 
@@ -579,6 +588,7 @@ export function buildGitHubChunkAnalysisPrompt(params: {
   brandName: string;
   keywords: string[];
   officialDomains: string[];
+  severityDefinitions: ResolvedBrandAnalysisSeverityDefinitions;
   watchWords?: string[];
   safeWords?: string[];
   userPreferenceHints?: UserPreferenceHints;
@@ -591,6 +601,7 @@ export function buildGitHubChunkAnalysisPrompt(params: {
     brandName,
     keywords,
     officialDomains,
+    severityDefinitions,
     watchWords,
     safeWords,
     userPreferenceHints,
@@ -626,6 +637,7 @@ export function buildGitHubChunkAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${buildSeverityDefinitionsSection(severityDefinitions)}
 ${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
 Monitoring surface: GitHub repos
 
@@ -647,6 +659,7 @@ export function buildXChunkAnalysisPrompt(params: {
   brandName: string;
   keywords: string[];
   officialDomains: string[];
+  severityDefinitions: ResolvedBrandAnalysisSeverityDefinitions;
   watchWords?: string[];
   safeWords?: string[];
   userPreferenceHints?: UserPreferenceHints;
@@ -659,6 +672,7 @@ export function buildXChunkAnalysisPrompt(params: {
     brandName,
     keywords,
     officialDomains,
+    severityDefinitions,
     watchWords,
     safeWords,
     userPreferenceHints,
@@ -701,6 +715,7 @@ export function buildXChunkAnalysisPrompt(params: {
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
 Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${buildSeverityDefinitionsSection(severityDefinitions)}
 ${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
 Monitoring surface: X
 
@@ -818,6 +833,15 @@ function buildUserPreferenceHintsSection(
   }
 
   return `Historical user-review tendencies (soft hints only — use these as gentle guidance, not hard include/exclude rules, and do not override clear evidence):\n${lines.map((line) => `  - ${line}`).join('\n')}`;
+}
+
+function buildSeverityDefinitionsSection(
+  severityDefinitions: ResolvedBrandAnalysisSeverityDefinitions,
+): string {
+  return `Severity definitions for this brand:
+- High: ${severityDefinitions.high}
+- Medium: ${severityDefinitions.medium}
+- Low: ${severityDefinitions.low}`;
 }
 
 function uniqueStrings(values: string[]): string[] {

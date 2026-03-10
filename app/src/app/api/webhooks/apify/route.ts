@@ -4,6 +4,7 @@ import { db } from '@/lib/firestore';
 import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
 import { fetchDatasetItems, startDeepSearchRun } from '@/lib/apify/client';
 import { chatCompletion } from '@/lib/analysis/openrouter';
+import { resolveBrandAnalysisSeverityDefinitions } from '@/lib/analysis-severity';
 import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-hints';
 import {
   DISCORD_CLASSIFICATION_SYSTEM_PROMPT,
@@ -784,6 +785,8 @@ async function analyseAndWriteGoogleBatch({
   let suggestedSearches: string[] | undefined;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
   const effectiveSettings = getEffectiveScanSettings(brand, scan.effectiveSettings);
+  const severityDefinitions = scan.analysisSeverityDefinitions
+    ?? resolveBrandAnalysisSeverityDefinitions(brand.analysisSeverityDefinitions);
   const canRunDeepSearchSelection = searchDepth === 0 && effectiveSettings.allowAiDeepSearches;
   const maxSuggestedSearches = effectiveSettings.maxAiDeepSearches;
 
@@ -822,6 +825,7 @@ async function analyseAndWriteGoogleBatch({
         brandName: brand.name,
         keywords: brand.keywords,
         officialDomains: brand.officialDomains,
+        severityDefinitions,
         watchWords: brand.watchWords,
         safeWords: brand.safeWords,
         userPreferenceHints,
@@ -947,6 +951,8 @@ async function analyseAndWriteDiscordBatch({
 }> {
   let findingCount = 0;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const severityDefinitions = scan.analysisSeverityDefinitions
+    ?? resolveBrandAnalysisSeverityDefinitions(brand.analysisSeverityDefinitions);
 
   const normalizedRun = normalizeDiscordServerRun({
     searchQuery,
@@ -978,6 +984,7 @@ async function analyseAndWriteDiscordBatch({
         brandName: brand.name,
         keywords: brand.keywords,
         officialDomains: brand.officialDomains,
+        severityDefinitions,
         watchWords: brand.watchWords,
         safeWords: brand.safeWords,
         userPreferenceHints,
@@ -1092,6 +1099,8 @@ async function analyseAndWriteDomainRegistrationBatch({
 }> {
   let findingCount = 0;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const severityDefinitions = scan.analysisSeverityDefinitions
+    ?? resolveBrandAnalysisSeverityDefinitions(brand.analysisSeverityDefinitions);
 
   const normalizedRun = normalizeDomainRegistrationRun({
     searchQuery,
@@ -1123,6 +1132,7 @@ async function analyseAndWriteDomainRegistrationBatch({
         brandName: brand.name,
         keywords: brand.keywords,
         officialDomains: brand.officialDomains,
+        severityDefinitions,
         watchWords: brand.watchWords,
         safeWords: brand.safeWords,
         userPreferenceHints,
@@ -1237,6 +1247,8 @@ async function analyseAndWriteXBatch({
 }> {
   let findingCount = 0;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const severityDefinitions = scan.analysisSeverityDefinitions
+    ?? resolveBrandAnalysisSeverityDefinitions(brand.analysisSeverityDefinitions);
   const normalizedRun = normalizeXRun({
     searchQuery,
     displayQuery,
@@ -1267,6 +1279,7 @@ async function analyseAndWriteXBatch({
         brandName: brand.name,
         keywords: brand.keywords,
         officialDomains: brand.officialDomains,
+        severityDefinitions,
         watchWords: brand.watchWords,
         safeWords: brand.safeWords,
         userPreferenceHints,
@@ -1381,6 +1394,8 @@ async function analyseAndWriteGitHubBatch({
 }> {
   let findingCount = 0;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const severityDefinitions = scan.analysisSeverityDefinitions
+    ?? resolveBrandAnalysisSeverityDefinitions(brand.analysisSeverityDefinitions);
   const normalizedRun = normalizeGitHubRun({
     searchQuery,
     displayQuery,
@@ -1411,6 +1426,7 @@ async function analyseAndWriteGitHubBatch({
         brandName: brand.name,
         keywords: brand.keywords,
         officialDomains: brand.officialDomains,
+        severityDefinitions,
         watchWords: brand.watchWords,
         safeWords: brand.safeWords,
         userPreferenceHints,

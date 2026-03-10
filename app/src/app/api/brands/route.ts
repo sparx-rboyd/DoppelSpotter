@@ -3,6 +3,11 @@ import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
 import {
+  hasCustomBrandAnalysisSeverityDefinitions,
+  isValidBrandAnalysisSeverityDefinitions,
+  normalizeBrandAnalysisSeverityDefinitions,
+} from '@/lib/analysis-severity';
+import {
   drainBrandDeletion,
   drainBrandHistoryDeletion,
   isBrandDeletionActive,
@@ -156,6 +161,7 @@ export async function POST(request: NextRequest) {
     allowAiDeepSearches = DEFAULT_ALLOW_AI_DEEP_SEARCHES,
     maxAiDeepSearches = DEFAULT_MAX_AI_DEEP_SEARCHES,
     scanSources = DEFAULT_BRAND_SCAN_SOURCES,
+    analysisSeverityDefinitions = {},
     scanSchedule,
   } = body;
 
@@ -185,6 +191,9 @@ export async function POST(request: NextRequest) {
   if (!isValidBrandScanSources(scanSources)) {
     return errorResponse('scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, telegram, apple_app_store, google_play, domains, discord, github, and x values');
   }
+  if (!isValidBrandAnalysisSeverityDefinitions(analysisSeverityDefinitions)) {
+    return errorResponse('analysisSeverityDefinitions must include optional high, medium, and low strings up to 1500 characters');
+  }
   if (!hasEnabledBrandScanSource(scanSources)) {
     return errorResponse('At least one scan source must be enabled');
   }
@@ -213,6 +222,9 @@ export async function POST(request: NextRequest) {
     allowAiDeepSearches,
     maxAiDeepSearches,
     scanSources: normalizeBrandScanSources(scanSources),
+    ...(hasCustomBrandAnalysisSeverityDefinitions(analysisSeverityDefinitions)
+      ? { analysisSeverityDefinitions: normalizeBrandAnalysisSeverityDefinitions(analysisSeverityDefinitions) }
+      : {}),
     watchWords: (watchWords as string[]).map((w) => String(w).trim().toLowerCase()).filter(Boolean),
     safeWords: (safeWords as string[]).map((w) => String(w).trim().toLowerCase()).filter(Boolean),
     ...(resolvedScanSchedule ? { scanSchedule: resolvedScanSchedule } : {}),

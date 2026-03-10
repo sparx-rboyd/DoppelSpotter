@@ -3,6 +3,11 @@ import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
 import {
+  hasCustomBrandAnalysisSeverityDefinitions,
+  isValidBrandAnalysisSeverityDefinitions,
+  normalizeBrandAnalysisSeverityDefinitions,
+} from '@/lib/analysis-severity';
+import {
   drainBrandDeletion,
   drainBrandHistoryDeletion,
   isBrandDeletionActive,
@@ -123,6 +128,15 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     }
     updates.scanSources = normalizeBrandScanSources(body.scanSources);
   }
+  if (body.analysisSeverityDefinitions !== undefined) {
+    if (!isValidBrandAnalysisSeverityDefinitions(body.analysisSeverityDefinitions)) {
+      return errorResponse('analysisSeverityDefinitions must include optional high, medium, and low strings up to 1500 characters');
+    }
+
+    updates.analysisSeverityDefinitions = hasCustomBrandAnalysisSeverityDefinitions(body.analysisSeverityDefinitions)
+      ? normalizeBrandAnalysisSeverityDefinitions(body.analysisSeverityDefinitions)
+      : FieldValue.delete();
+  }
   if (body.watchWords !== undefined) updates.watchWords = body.watchWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
   if (body.safeWords !== undefined) updates.safeWords = body.safeWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
   if (body.scanSchedule !== undefined) {
@@ -148,9 +162,14 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 
   await db.collection('brands').doc(brandId).update(updates);
+  const responseData: Record<string, unknown> = { id: brandId, ...doc.data(), ...updates, updatedAt };
+
+  if (updates.analysisSeverityDefinitions === FieldValue.delete()) {
+    delete responseData.analysisSeverityDefinitions;
+  }
 
   // Substitute a real Date for the sentinel so the response is serialisable
-  return NextResponse.json({ data: { id: brandId, ...doc.data(), ...updates, updatedAt } });
+  return NextResponse.json({ data: responseData });
 }
 
 // DELETE /api/brands/[brandId]

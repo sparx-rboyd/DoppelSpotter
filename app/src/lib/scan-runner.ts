@@ -2,6 +2,7 @@ import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
 import { db } from './firestore';
 import type { ActorRunInfo, BrandProfile, EffectiveScanSettings, Scan, ScanSettingsInput } from './types';
 import type { ActorConfig } from './apify/actors';
+import { resolveBrandAnalysisSeverityDefinitions } from './analysis-severity';
 import { isBrandDeletionActive, isBrandHistoryDeletionActive } from './async-deletions';
 import { getEffectiveScanSettings } from './brands';
 import {
@@ -164,6 +165,7 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
       throw new ScanStartError('At least one scan source must be enabled', 400);
     }
     scan.effectiveSettings = effectiveSettings;
+    scan.analysisSeverityDefinitions = resolveBrandAnalysisSeverityDefinitions(brandData.analysisSeverityDefinitions);
     scan.actorIds = Array.from(new Set(targetActors.map((actor) => actor.actorId)));
     tx.set(scanRef, scan);
 

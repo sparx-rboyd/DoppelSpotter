@@ -95,6 +95,18 @@ export interface BrandScanSources {
   x: boolean;
 }
 
+export interface BrandAnalysisSeverityDefinitions {
+  high?: string;
+  medium?: string;
+  low?: string;
+}
+
+export interface ResolvedBrandAnalysisSeverityDefinitions {
+  high: string;
+  medium: string;
+  low: string;
+}
+
 export type AsyncDeletionStatus = 'queued' | 'running';
 
 export interface AsyncDeletionState {
@@ -128,6 +140,8 @@ export interface BrandProfile {
   maxAiDeepSearches?: number;
   /** Which scan surfaces are enabled for this brand. */
   scanSources?: BrandScanSources;
+  /** Optional per-brand custom severity definitions injected into AI classification prompts. */
+  analysisSeverityDefinitions?: BrandAnalysisSeverityDefinitions;
   /** Internal pointer to the currently active scan for this brand, if any. */
   activeScanId?: string;
   /** Terms AI analysis should flag if found associated with the brand in search results. */
@@ -153,6 +167,7 @@ export interface BrandProfileCreateInput {
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
   scanSources?: BrandScanSources;
+  analysisSeverityDefinitions?: BrandAnalysisSeverityDefinitions;
   watchWords?: string[];
   safeWords?: string[];
   scanSchedule?: BrandScanScheduleInput;
@@ -167,6 +182,7 @@ export interface BrandProfileUpdateInput {
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
   scanSources?: BrandScanSources;
+  analysisSeverityDefinitions?: BrandAnalysisSeverityDefinitions;
   watchWords?: string[];
   safeWords?: string[];
   scanSchedule?: BrandScanScheduleInput;
@@ -371,6 +387,8 @@ export interface Scan {
   status: ScanStatus;
   /** Snapshot of the effective scan settings used for this run. */
   effectiveSettings?: EffectiveScanSettings;
+  /** Snapshot of the resolved AI severity definitions used for this run. */
+  analysisSeverityDefinitions?: ResolvedBrandAnalysisSeverityDefinitions;
   /** Async deletion job state, if this scan and its findings are being removed. */
   deletion?: AsyncDeletionState;
   /** The underlying Apify actor IDs started for this scan. */

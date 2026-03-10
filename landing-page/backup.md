@@ -1,5 +1,5 @@
 # DoppelSpotter
-**Enterprise-style brand protection for SMEs, powered by Apify actors and generative AI.**
+**Spot your brand's doppelgängers across the web.**
 
 [Product](#product) | [Published Actor](https://apify.com/doppelspotter/recent-domain-registrations) | [GitHub](https://github.com/sparx-rboyd/DoppelSpotter)
 

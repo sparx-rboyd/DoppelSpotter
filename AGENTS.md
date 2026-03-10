@@ -140,6 +140,7 @@ Brand add/edit pages
  └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches on supported Google-backed scan types
  └─ persist `brands.maxAiDeepSearches` as the user-facing `Google deep search breadth` setting; it caps AI-requested follow-up searches from 1-5 on supported Google-backed scan types
  └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|telegram|apple_app_store|google_play|domains|discord|github|x` so each scan surface can be enabled or disabled per brand
+ └─ persist optional `brands.analysisSeverityDefinitions.high|medium|low` overrides so each brand can customise the severity definitions injected into finding-classification prompts
  └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
  └─ scheduling is anchored from the chosen local start date/time and stored timezone
 
@@ -159,6 +160,7 @@ POST /api/scan
  └─ reserves the new scan by writing the scan doc + `brands.activeScanId` atomically
  └─ manual runs may include optional one-off custom scan settings (depth, deep-search toggle/breadth, scan sources) without mutating the brand defaults
  └─ snapshots the resolved per-run `scans.effectiveSettings` onto the scan so later webhook processing stays deterministic even if brand settings change mid-scan
+ └─ also snapshots the resolved `scans.analysisSeverityDefinitions` so classification thresholds stay deterministic if the brand settings are edited mid-scan
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
  └─ resolves the scan's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `google-apple-app-store`, `google-play`, `domain-registrations`, `discord-servers`, `github-repos`, `x-search`) from `scans.effectiveSettings.scanSources`
  └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Domain registrations map the same setting to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to `maxResults = 50..250`; X maps it to `maxItems = 50..250`
@@ -262,6 +264,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and scanner-specific focus, and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
 └─ AI-requested deep-search eligibility, breadth, and Google page depth are read from `scans.effectiveSettings` when present, falling back to brand defaults only for older scans
 └─ before each finding-level classification pass, the webhook loads the brand's existing finding `theme` labels so the LLM can preferentially reuse them
+ └─ each classification prompt also receives the scan's resolved high/medium/low severity definitions, falling back to the current brand defaults only for older scans that predate the snapshot
  └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
 └─ each LLM-classified finding may also store a short primary `theme` label (prefer 1 word, hard max 3 words)
  └─ isFalsePositive: true findings are stored but excluded from default API responses

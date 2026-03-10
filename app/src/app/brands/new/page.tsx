@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
+import { BrandAnalysisSettingsFields } from '@/components/brand-analysis-settings-fields';
 import { BrandScanScheduleFields } from '@/components/brand-scan-schedule-fields';
 import { BrandScanSourceFields } from '@/components/brand-scan-source-fields';
 import { BrandScanTuningFields } from '@/components/brand-scan-tuning-fields';
@@ -21,13 +22,14 @@ import {
   DEFAULT_MAX_AI_DEEP_SEARCHES,
   hasEnabledBrandScanSource,
 } from '@/lib/brands';
+import { isValidBrandAnalysisSeverityDefinitions } from '@/lib/analysis-severity';
 import {
   DEFAULT_SCAN_SCHEDULE_FREQUENCY,
   getBrowserTimeZone,
   getDefaultScheduleStartInput,
   isScheduleStartInPast,
 } from '@/lib/scan-schedules';
-import type { BrandScanScheduleInput } from '@/lib/types';
+import type { BrandAnalysisSeverityDefinitions, BrandScanScheduleInput } from '@/lib/types';
 
 export default function NewBrandPage() {
   const router = useRouter();
@@ -47,6 +49,7 @@ export default function NewBrandPage() {
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
   const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
   const [scanSources, setScanSources] = useState(DEFAULT_BRAND_SCAN_SOURCES);
+  const [analysisSeverityDefinitions, setAnalysisSeverityDefinitions] = useState<BrandAnalysisSeverityDefinitions>({});
   const [scanSchedule, setScanSchedule] = useState<BrandScanScheduleInput>(() => {
     const timeZone = getBrowserTimeZone();
     const defaultStart = getDefaultScheduleStartInput(timeZone);
@@ -135,6 +138,10 @@ export default function NewBrandPage() {
       setError('At least one scan source must be enabled');
       return;
     }
+    if (!isValidBrandAnalysisSeverityDefinitions(analysisSeverityDefinitions)) {
+      setError('Custom analysis severity definitions must be non-empty and no longer than 1500 characters');
+      return;
+    }
     if (scanSchedule.enabled && isScheduleStartInPast(scanSchedule)) {
       setError('Scheduled scan start date and time must be in the future');
       return;
@@ -157,6 +164,7 @@ export default function NewBrandPage() {
           allowAiDeepSearches,
           maxAiDeepSearches,
           scanSources,
+          analysisSeverityDefinitions,
           watchWords,
           safeWords,
           scanSchedule,
@@ -345,6 +353,21 @@ export default function NewBrandPage() {
               </CardHeader>
               <CardContent className="p-6">
                 <BrandScanSourceFields value={scanSources} onChange={setScanSources} />
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="px-6 py-5">
+                <div className="inline-flex items-center gap-1.5">
+                  <h2 className="font-semibold text-gray-900">Analysis settings</h2>
+                  <InfoTooltip content="Customise how DoppelSpotter distinguishes high, medium, and low severity findings for this brand." />
+                </div>
+              </CardHeader>
+              <CardContent className="p-6">
+                <BrandAnalysisSettingsFields
+                  value={analysisSeverityDefinitions}
+                  onChange={setAnalysisSeverityDefinitions}
+                />
               </CardContent>
             </Card>
 
