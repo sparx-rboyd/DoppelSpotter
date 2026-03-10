@@ -28,7 +28,7 @@ import {
   formatScheduledRunAt,
 } from '@/lib/scan-schedules';
 import { getFindingSourceLabel, SCAN_SOURCE_ORDER, supportsSourceDeepSearch } from '@/lib/scan-sources';
-import { cn, formatScanDate } from '@/lib/utils';
+import { cn, formatInteger, formatScanDate } from '@/lib/utils';
 import type {
   ActorRunInfo,
   BrandProfile,
@@ -122,19 +122,19 @@ function SeverityPills({ high, medium, low }: { high: number; medium: number; lo
       {high > 0 && (
         <Badge variant="danger" className="gap-1 px-2 py-0.5 text-[11px]">
           <AlertCircle className="w-3 h-3" />
-          {high} High
+          {formatInteger(high)} High
         </Badge>
       )}
       {medium > 0 && (
         <Badge variant="warning" className="gap-1 px-2 py-0.5 text-[11px]">
           <AlertTriangle className="w-3 h-3" />
-          {medium} Medium
+          {formatInteger(medium)} Medium
         </Badge>
       )}
       {low > 0 && (
         <Badge variant="success" className="gap-1 px-2 py-0.5 text-[11px]">
           <Info className="w-3 h-3" />
-          {low} Low
+          {formatInteger(low)} Low
         </Badge>
       )}
     </span>
@@ -224,7 +224,7 @@ function SeverityGroup({
             {label}
           </Badge>
           <span className={cn('text-xs', SEVERITY_COUNT_TEXT_CLASSES[severity])}>
-            {findings.length} finding{findings.length !== 1 ? 's' : ''}
+            {formatInteger(findings.length)} finding{findings.length !== 1 ? 's' : ''}
           </span>
         </button>
         {onIgnoreToggle && (
@@ -2572,7 +2572,7 @@ export default function BrandDetailPage() {
     if (skippedDuplicateCount === 1) {
       return '1 result is being skipped because it duplicates previous findings.';
     }
-    return `${skippedDuplicateCount} results are being skipped because they duplicate other findings in this scan, or historical findings.`;
+    return `${formatInteger(skippedDuplicateCount)} results are being skipped because they duplicate other findings in this scan, or historical findings.`;
   }
 
   function getRunProgressFraction(run: ActorRunInfo): number {
@@ -2834,7 +2834,7 @@ export default function BrandDetailPage() {
   const visibleLiveScanNonHits = sortBySeverity(filterFindings(liveScanNonHits) ?? []);
   const isSearchResultsMode = isFindingsSearchActive;
   const isSearchQueryTooShort = isSearchResultsMode && !canRunServerFindingSearch;
-  const searchResultsCountLabel = `${searchResults.length} result${searchResults.length !== 1 ? 's' : ''}`;
+  const searchResultsCountLabel = `${formatInteger(searchResults.length)} result${searchResults.length !== 1 ? 's' : ''}`;
   const scansToRender = anchorTargetScanId
     ? scans
     : isAnyFindingFilterActive
@@ -2926,16 +2926,16 @@ export default function BrandDetailPage() {
                         <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
                           {scans.length === 0
                             ? 'No scans yet'
-                            : `${scans.length} scan${scans.length !== 1 ? 's' : ''}`}
+                            : `${formatInteger(scans.length)} scan${scans.length !== 1 ? 's' : ''}`}
                         </span>
                         {scans.length > 0 && (
                           <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
-                            {totalFindings} finding{totalFindings !== 1 ? 's' : ''} detected
+                            {formatInteger(totalFindings)} finding{totalFindings !== 1 ? 's' : ''} detected
                           </span>
                         )}
                         {totalNonHits > 0 && (
                           <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
-                            {totalNonHits} non-hit{totalNonHits !== 1 ? 's' : ''}
+                            {formatInteger(totalNonHits)} non-hit{totalNonHits !== 1 ? 's' : ''}
                           </span>
                         )}
                       </div>
@@ -3160,7 +3160,7 @@ export default function BrandDetailPage() {
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-sm text-red-800">
                         <span className="font-semibold">
-                          Permanently delete all {totalResultsCount} result{totalResultsCount !== 1 ? 's' : ''} and scan history?
+                          Permanently delete all {formatInteger(totalResultsCount)} result{totalResultsCount !== 1 ? 's' : ''} and scan history?
                         </span>{' '}
                         This cannot be undone.
                       </p>
@@ -3205,7 +3205,7 @@ export default function BrandDetailPage() {
                         Bookmarks
                         {visibleBookmarkedCount > 0 && (
                           <Badge variant="default" className="rounded-full border-none bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-600">
-                            {visibleBookmarkedCount}
+                            {formatInteger(visibleBookmarkedCount)}
                           </Badge>
                         )}
                       </button>
@@ -3222,7 +3222,7 @@ export default function BrandDetailPage() {
                         Addressed
                         {visibleAddressedCount > 0 && (
                           <Badge variant="default" className="rounded-full border-none bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-600">
-                            {visibleAddressedCount}
+                            {formatInteger(visibleAddressedCount)}
                           </Badge>
                         )}
                       </button>
@@ -3239,7 +3239,7 @@ export default function BrandDetailPage() {
                         Ignored
                         {visibleIgnoredCount > 0 && (
                           <Badge variant="default" className="rounded-full border-none bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-600">
-                            {visibleIgnoredCount}
+                            {formatInteger(visibleIgnoredCount)}
                           </Badge>
                         )}
                       </button>
@@ -3804,7 +3804,7 @@ export default function BrandDetailPage() {
                                   <div className="flex items-center justify-between gap-4 bg-red-50 px-6 py-4">
                                     <p className="text-sm text-red-800">
                                       <span className="font-semibold">
-                                        Delete this scan and its {scanResultsCount} result{scanResultsCount !== 1 ? 's' : ''}?
+                                        Delete this scan and its {formatInteger(scanResultsCount)} result{scanResultsCount !== 1 ? 's' : ''}?
                                       </span>{' '}
                                       This cannot be undone.
                                     </p>
@@ -3883,22 +3883,22 @@ export default function BrandDetailPage() {
                                           )}
                                           {displayedNonHitCount > 0 && (
                                             <span className="text-xs text-gray-400">
-                                              · {displayedNonHitCount} non-hit{displayedNonHitCount !== 1 ? 's' : ''}
+                                              · {formatInteger(displayedNonHitCount)} non-hit{displayedNonHitCount !== 1 ? 's' : ''}
                                             </span>
                                           )}
                                           {displayedAddressedCount > 0 && (
                                             <span className="text-xs text-gray-400">
-                                              · {displayedAddressedCount} addressed
+                                              · {formatInteger(displayedAddressedCount)} addressed
                                             </span>
                                           )}
                                           {displayedIgnoredCount > 0 && (
                                             <span className="text-xs text-gray-400">
-                                              · {displayedIgnoredCount} ignored
+                                              · {formatInteger(displayedIgnoredCount)} ignored
                                             </span>
                                           )}
                                           {(scan.skippedCount ?? 0) > 0 && (
                                             <span className="inline-flex items-center gap-1 text-xs text-gray-400">
-                                              · {scan.skippedCount} skipped
+                                              · {formatInteger(scan.skippedCount ?? 0)} skipped
                                               <InfoTooltip
                                                 content="Findings that appeared in other searches in this scan, or historical findings."
                                                 iconClassName="text-gray-300 hover:text-gray-400"
@@ -4198,7 +4198,7 @@ export default function BrandDetailPage() {
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full bg-brand-500 text-white shadow-sm">
-                      <span className="text-xs font-bold">{selectedFindings.length}</span>
+                      <span className="text-xs font-bold">{formatInteger(selectedFindings.length)}</span>
                     </div>
                     <div>
                       <p className="text-sm font-semibold text-slate-900">
@@ -4412,7 +4412,7 @@ export default function BrandDetailPage() {
                   </h2>
                   <div id="lookback-nudge-description" className="mt-3 space-y-3 text-sm leading-6 text-gray-600">
                     <p>
-                      You&apos;ve now performed a few scans for this brand with a 1 year lookback period. This is a great way to establish a broad and solid base of findings; however, if you leave the lookback period set to 1 year, future scans are likely to include a large number of findings that duplicate existing ones, so they&apos;ll be skipped.
+                      You&apos;ve now performed a few scans for this brand with a 1 year lookback period. This is a great way to establish a solid base of findings; however, if you leave the lookback period set to 1 year, future scans are likely to include a large number of findings that duplicate existing ones, so they&apos;ll be skipped.
                     </p>
                     <p>
                       We recommend switching to <strong className="font-medium text-gray-800">Since last scan</strong>. This focuses each scan on genuinely new activity, giving you higher quality, more recent findings.

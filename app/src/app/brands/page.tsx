@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { formatScheduledRunAtShort } from '@/lib/scan-schedules';
 import type { BrandSummary } from '@/lib/types';
-import { formatDate } from '@/lib/utils';
+import { formatDate, formatInteger } from '@/lib/utils';
 
 function getScanStatusLabel(brand: BrandSummary): string {
   if (brand.isScanInProgress) return 'Scan in progress';
@@ -111,7 +111,7 @@ export default function BrandsPage() {
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-gray-900 truncate">{brand.name}</h3>
                         <p className="text-xs text-gray-500 mt-0.5">
-                          {brand.scanCount} scan{brand.scanCount !== 1 ? 's' : ''} · {brand.findingCount} finding{brand.findingCount !== 1 ? 's' : ''} detected · {brand.nonHitCount} non-hit{brand.nonHitCount !== 1 ? 's' : ''}
+                          {formatInteger(brand.scanCount)} scan{brand.scanCount !== 1 ? 's' : ''} · {formatInteger(brand.findingCount)} finding{brand.findingCount !== 1 ? 's' : ''} detected · {formatInteger(brand.nonHitCount)} non-hit{brand.nonHitCount !== 1 ? 's' : ''}
                         </p>
                         <p className={`text-xs mt-1 ${brand.isScanInProgress ? 'text-brand-600 font-medium' : 'text-gray-400'}`}>
                           {getScanStatusLabel(brand)}

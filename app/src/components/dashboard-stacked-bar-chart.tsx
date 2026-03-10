@@ -12,6 +12,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { formatInteger } from '@/lib/utils';
 import type { DashboardBreakdownCategory, DashboardBreakdownRow } from '@/lib/types';
 
 type DashboardStackedBarChartProps = {
@@ -62,7 +63,7 @@ function DashboardChartTooltip({ active, payload, label }: DashboardChartTooltip
   return (
     <div className="pointer-events-none min-w-[12rem] rounded-xl border border-gray-200 bg-white p-3 shadow-lg">
       <p className="text-sm font-semibold text-gray-900">{label}</p>
-      <p className="mt-1 text-xs text-gray-500">{total} total finding{total !== 1 ? 's' : ''}</p>
+      <p className="mt-1 text-xs text-gray-500">{formatInteger(total)} total finding{total !== 1 ? 's' : ''}</p>
       <div className="mt-3 space-y-2">
         {payload.map((entry) => {
           const value = Number(entry.value) || 0;
@@ -77,7 +78,7 @@ function DashboardChartTooltip({ active, payload, label }: DashboardChartTooltip
                 />
                 <span className="text-gray-600">{entry.name}</span>
               </div>
-              <span className="font-medium text-gray-900">{value}</span>
+              <span className="font-medium text-gray-900">{formatInteger(value)}</span>
             </div>
           );
         })}

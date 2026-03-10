@@ -11,7 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { formatScanDate } from '@/lib/utils';
+import { formatInteger, formatScanDate } from '@/lib/utils';
 import type { DashboardTimeline } from '@/lib/types';
 
 type DashboardLineChartProps = {
@@ -87,7 +87,7 @@ function DashboardLineChartTooltip({ active, payload, label }: DashboardLineChar
   return (
     <div className="pointer-events-none min-w-[12rem] rounded-xl border border-gray-200 bg-white px-3 py-2.5 shadow-lg">
       <p className="text-sm font-semibold text-gray-900">{label}</p>
-      <p className="mt-1 text-[11px] text-gray-500">{total} actionable finding{total !== 1 ? 's' : ''}</p>
+      <p className="mt-1 text-[11px] text-gray-500">{formatInteger(total)} actionable finding{total !== 1 ? 's' : ''}</p>
       <div className="mt-2.5 space-y-1.5">
         {entries.map((entry) => (
           <div key={entry.dataKey} className="flex items-center justify-between gap-4 text-xs">
@@ -98,7 +98,7 @@ function DashboardLineChartTooltip({ active, payload, label }: DashboardLineChar
               />
               <span className="text-gray-600">{entry.name}</span>
             </div>
-            <span className="font-medium text-gray-900">{entry.numericValue}</span>
+            <span className="font-medium text-gray-900">{formatInteger(entry.numericValue)}</span>
           </div>
         ))}
       </div>

@@ -16,6 +16,7 @@ import {
   renderToBuffer,
 } from '@react-pdf/renderer';
 import { getFindingSourceLabel } from './scan-sources';
+import { formatInteger } from './utils';
 import { buildCountOnlyScanAiSummary } from './scans';
 import {
   filterActionableFindings,
@@ -718,7 +719,7 @@ function renderSeveritySection({
         wrap={false}
       >
         <Text style={{ ...styles.severityHeaderText, color: tone.text }}>
-          {title} ({findings.length})
+          {title} ({formatInteger(findings.length)})
         </Text>
       </View>
       {findings.length > 0
@@ -783,7 +784,7 @@ function ScanExportPdfDocument({
               >
                 <Text style={{ ...styles.statLabel, color: tone.text }}>{tone.label} severity findings</Text>
                 <Text style={{ ...styles.statValue, color: tone.text }}>
-                  {actionableBySeverity[severity].length}
+                  {formatInteger(actionableBySeverity[severity].length)}
                 </Text>
               </View>
             );
@@ -796,7 +797,7 @@ function ScanExportPdfDocument({
             }}
           >
             <Text style={{ ...styles.statLabel, color: BRAND.blue700 }}>Addressed findings</Text>
-            <Text style={{ ...styles.statValue, color: BRAND.blue700 }}>{addressedCount}</Text>
+            <Text style={{ ...styles.statValue, color: BRAND.blue700 }}>{formatInteger(addressedCount)}</Text>
           </View>
           <View
             style={{
@@ -806,7 +807,7 @@ function ScanExportPdfDocument({
             }}
           >
             <Text style={styles.statLabel}>Total in report</Text>
-            <Text style={styles.statValue}>{actionableCount + addressedCount}</Text>
+            <Text style={styles.statValue}>{formatInteger(actionableCount + addressedCount)}</Text>
           </View>
         </View>
 
