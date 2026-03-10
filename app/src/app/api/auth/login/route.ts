@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import bcrypt from 'bcryptjs';
 import { db } from '@/lib/firestore';
 import { signToken, AUTH_COOKIE_NAME } from '@/lib/auth/jwt';
-import { errorResponse } from '@/lib/api-utils';
+import { errorResponse, setUserLastSeen } from '@/lib/api-utils';
 import type { UserRecord } from '@/lib/types';
 
 export async function POST(request: NextRequest) {
@@ -54,6 +54,7 @@ export async function POST(request: NextRequest) {
 
   const sessionVersion = user.sessionVersion ?? 0;
   const token = signToken(userDoc.id, normalizedEmail, sessionVersion);
+  await setUserLastSeen(userDoc.id);
 
   const response = NextResponse.json({ userId: userDoc.id, email: normalizedEmail });
 

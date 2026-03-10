@@ -8,6 +8,8 @@ export interface UserRecord {
   passwordHash: string;
   /** Bumped whenever credentials change so older JWT sessions can be rejected. */
   sessionVersion?: number;
+  /** Most recent time the user was seen making an authenticated request. */
+  lastSeenAt?: Timestamp;
   /** Timestamp when the password was last changed. */
   passwordChangedAt?: Timestamp;
   /** Optional per-user dashboard state persisted across devices. */
