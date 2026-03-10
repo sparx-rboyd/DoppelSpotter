@@ -21,6 +21,10 @@ const SOURCE_ROWS: Array<{
 }));
 
 export function BrandScanSourceFields({ value, onChange, error }: BrandScanSourceFieldsProps) {
+  const enabledCount = SOURCE_ROWS.filter((source) => value[source.key]).length;
+  const allEnabled = enabledCount === SOURCE_ROWS.length;
+  const allDisabled = enabledCount === 0;
+
   function toggleSource(key: keyof BrandScanSources) {
     onChange({
       ...value,
@@ -28,8 +32,40 @@ export function BrandScanSourceFields({ value, onChange, error }: BrandScanSourc
     });
   }
 
+  function setAllSources(enabled: boolean) {
+    onChange(
+      SOURCE_ROWS.reduce<BrandScanSources>((nextValue, source) => {
+        nextValue[source.key] = enabled;
+        return nextValue;
+      }, { ...value }),
+    );
+  }
+
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-gray-500">
+          {enabledCount} of {SOURCE_ROWS.length} enabled
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAllSources(true)}
+            disabled={allEnabled}
+            className="rounded-full border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:border-brand-200 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Turn all on
+          </button>
+          <button
+            type="button"
+            onClick={() => setAllSources(false)}
+            disabled={allDisabled}
+            className="rounded-full border border-gray-200 px-3 py-1.5 text-sm font-medium text-gray-700 transition hover:border-brand-200 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Turn all off
+          </button>
+        </div>
+      </div>
       {SOURCE_ROWS.map((source) => {
         const enabled = value[source.key];
         return (
