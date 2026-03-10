@@ -12,7 +12,9 @@ import {
 import {
   buildDashboardBreakdownRows,
   buildDashboardMetricTotalsFromScans,
+  buildDashboardSourceTimeline,
   buildDashboardSourceBreakdownRows,
+  buildDashboardThemeTimeline,
   TERMINAL_DASHBOARD_SCAN_STATUSES,
 } from '@/lib/dashboard';
 import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
@@ -161,6 +163,8 @@ export async function GET(request: NextRequest) {
     totals: buildDashboardMetricTotalsFromScans(selectedScans),
     sourceBreakdown: buildDashboardSourceBreakdownRows(findingsForBreakdown, scanOrderById),
     themeBreakdown: buildDashboardBreakdownRows(findingsForBreakdown, scanOrderById),
+    sourceTimeline: selectedScanId ? null : buildDashboardSourceTimeline(terminalScans, findingsForBreakdown),
+    themeTimeline: selectedScanId ? null : buildDashboardThemeTimeline(terminalScans, findingsForBreakdown),
   };
 
   return NextResponse.json({ data });

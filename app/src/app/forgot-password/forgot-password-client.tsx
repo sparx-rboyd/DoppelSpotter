@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
 import { Mail, ScanEye } from 'lucide-react';
-import { PASSWORD_RESET_REQUEST_SUCCESS_MESSAGE, PASSWORD_RESET_TOKEN_MAX_AGE_LABEL } from '@/lib/password-reset';
+import { PASSWORD_RESET_REQUEST_SUCCESS_MESSAGE } from '@/lib/password-reset';
 
 export default function ForgotPasswordClient() {
   const [email, setEmail] = useState('');

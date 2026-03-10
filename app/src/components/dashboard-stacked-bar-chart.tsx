@@ -19,6 +19,7 @@ type DashboardStackedBarChartProps = {
   emptyMessage: string;
   onSegmentClick?: (category: DashboardBreakdownCategory, row: DashboardBreakdownRow) => void;
   hiddenCategories?: DashboardBreakdownCategory[];
+  expanded?: boolean;
 };
 
 type DashboardChartTooltipEntry = {
@@ -94,8 +95,10 @@ export function DashboardStackedBarChart({
   emptyMessage,
   onSegmentClick,
   hiddenCategories = [],
+  expanded = false,
 }: DashboardStackedBarChartProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [isChartPointerActive, setIsChartPointerActive] = useState(false);
   const [hoveredSegmentKey, setHoveredSegmentKey] = useState<string | null>(null);
   const [scrollCueState, setScrollCueState] = useState({
     hasOverflow: false,
@@ -138,6 +141,11 @@ export function DashboardStackedBarChart({
     ));
   }, []);
 
+  const clearChartHoverState = useCallback(() => {
+    setIsChartPointerActive(false);
+    setHoveredSegmentKey(null);
+  }, []);
+
   useEffect(() => {
     const frameId = window.requestAnimationFrame(updateScrollCues);
     window.addEventListener('resize', updateScrollCues);
@@ -150,31 +158,40 @@ export function DashboardStackedBarChart({
 
   if (visibleData.length === 0) {
     return (
-      <div className="flex min-h-[20rem] items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 px-6 text-center text-sm text-gray-500">
+      <div className={`flex ${expanded ? 'min-h-full h-full' : 'min-h-[20rem]'} items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-gray-50/70 px-6 text-center text-sm text-gray-500`}>
         {emptyMessage}
       </div>
     );
   }
 
-  const chartWidth = Math.max(520, visibleData.length * 92);
+  const chartWidth = Math.max(expanded ? 920 : 520, visibleData.length * (expanded ? 118 : 92));
+  const chartHeight = expanded ? 620 : 340;
+  const gradientClassName = expanded
+    ? 'from-white via-white/90'
+    : 'from-white via-white/95';
 
   return (
     <div
-      className="relative"
-      onMouseLeave={() => setHoveredSegmentKey(null)}
+      className={`relative ${expanded ? 'h-full min-h-0' : ''}`}
+      onMouseLeave={clearChartHoverState}
     >
       <div
         ref={scrollRef}
-        className="overflow-x-auto pb-2 select-none"
+        className={`overflow-x-auto select-none ${expanded ? 'h-full min-h-0 pb-3' : 'pb-2'}`}
         onScroll={updateScrollCues}
+        onMouseLeave={clearChartHoverState}
       >
-        <div style={{ width: chartWidth, height: 340 }}>
+        <div style={{ width: chartWidth, height: chartHeight }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={visibleData}
-              margin={{ top: 8, right: 12, left: 0, bottom: 48 }}
+              margin={{ top: 8, right: 12, left: expanded ? 8 : 0, bottom: expanded ? 72 : 48 }}
               barGap={4}
-              barCategoryGap={20}
+              barCategoryGap={expanded ? 24 : 20}
+              onMouseMove={() => {
+                setIsChartPointerActive(true);
+              }}
+              onMouseLeave={clearChartHoverState}
             >
               <CartesianGrid vertical={false} stroke="#e5e7eb" />
               <XAxis
@@ -184,8 +201,8 @@ export function DashboardStackedBarChart({
                 interval={0}
                 angle={-25}
                 textAnchor="end"
-                height={56}
-                tick={{ fill: '#64748b', fontSize: 12 }}
+                height={expanded ? 72 : 56}
+                tick={{ fill: '#64748b', fontSize: expanded ? 13 : 12 }}
                 tickFormatter={formatAxisLabel}
               />
               <YAxis
@@ -195,10 +212,11 @@ export function DashboardStackedBarChart({
                 tick={{ fill: '#64748b', fontSize: 12 }}
               />
               <Tooltip
-                cursor={{ fill: 'rgba(2, 132, 199, 0.08)' }}
+                active={isChartPointerActive ? undefined : false}
+                cursor={isChartPointerActive ? { fill: 'rgba(2, 132, 199, 0.08)' } : false}
                 content={({ active, payload, label }) => (
                   <DashboardChartTooltip
-                    active={active}
+                    active={isChartPointerActive && active}
                     payload={payload as readonly DashboardChartTooltipEntry[] | undefined}
                     label={typeof label === 'string' ? label : undefined}
                   />
@@ -297,12 +315,12 @@ export function DashboardStackedBarChart({
       {scrollCueState.hasOverflow && (
         <>
           {scrollCueState.showLeft && (
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex w-12 items-center justify-start bg-gradient-to-r from-white via-white/95 to-transparent">
+            <div className={`pointer-events-none absolute inset-y-0 left-0 flex w-12 items-center justify-start bg-gradient-to-r ${gradientClassName} to-transparent`}>
               <ChevronLeft className="ml-2 h-4 w-4 text-gray-300" />
             </div>
           )}
           {scrollCueState.showRight && (
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex w-12 items-center justify-end bg-gradient-to-l from-white via-white/95 to-transparent">
+            <div className={`pointer-events-none absolute inset-y-0 right-0 flex w-12 items-center justify-end bg-gradient-to-l ${gradientClassName} to-transparent`}>
               <ChevronRight className="mr-2 h-4 w-4 text-gray-300" />
             </div>
           )}

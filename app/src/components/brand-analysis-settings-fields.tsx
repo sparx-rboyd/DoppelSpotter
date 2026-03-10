@@ -74,7 +74,7 @@ export function BrandAnalysisSettingsFields({
     <>
       <div className="space-y-5">
         <p className="text-sm text-gray-500">
-          Customise the definitions that DoppelSpotter's AI analysis uses to categorise findings.
+          Customise the definitions that DoppelSpotter&apos;s AI analysis uses to categorise findings.
         </p>
 
         {ANALYSIS_SEVERITY_ORDER.map((severity) => {

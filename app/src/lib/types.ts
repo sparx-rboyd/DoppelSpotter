@@ -480,6 +480,25 @@ export interface DashboardActiveScanSummary {
   startedAt: Timestamp;
 }
 
+export interface DashboardTimelineSeries {
+  key: string;
+  label: string;
+  color: string;
+  total: number;
+  strokeDasharray?: string;
+}
+
+export interface DashboardTimelinePoint {
+  scanId: string;
+  startedAt: Timestamp;
+  values: Record<string, number>;
+}
+
+export interface DashboardTimeline {
+  series: DashboardTimelineSeries[];
+  points: DashboardTimelinePoint[];
+}
+
 export interface DashboardMetricsData {
   brandId: string;
   selectedScanId: string | null;
@@ -489,6 +508,8 @@ export interface DashboardMetricsData {
   totals: DashboardMetricTotals;
   sourceBreakdown: DashboardBreakdownRow[];
   themeBreakdown: DashboardBreakdownRow[];
+  sourceTimeline: DashboardTimeline | null;
+  themeTimeline: DashboardTimeline | null;
 }
 
 // ─── AI Analysis ───────────────────────────────────────────────────────────

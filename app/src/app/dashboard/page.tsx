@@ -1,29 +1,36 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { createPortal } from 'react-dom';
 import {
   AlertCircle,
   AlertTriangle,
   ArrowRight,
   BarChart3,
   Building2,
+  Expand,
   Info,
   Loader2,
   PlayCircle,
   SearchCheck,
   Shield,
+  X,
 } from 'lucide-react';
 import { AuthGuard } from '@/components/auth-guard';
 import { DashboardCtaCard } from '@/components/dashboard-cta-card';
+import { DashboardLineChart } from '@/components/dashboard-line-chart';
 import { DashboardMetricCard } from '@/components/dashboard-metric-card';
+import { DashboardSeriesFilter } from '@/components/dashboard-series-filter';
 import { DashboardStackedBarChart } from '@/components/dashboard-stacked-bar-chart';
 import { Navbar } from '@/components/navbar';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { SelectDropdown } from '@/components/ui/select-dropdown';
 import { UNLABELLED_DASHBOARD_BREAKDOWN_BUCKET } from '@/lib/dashboard';
+import { cn } from '@/lib/utils';
 import { formatDate, formatScanDate } from '@/lib/utils';
 import type {
   BrandSummary,
@@ -37,6 +44,13 @@ import type {
 
 const DASHBOARD_RETURN_TO_PARAM = 'returnTo';
 const DASHBOARD_RETURN_TO_VALUE = 'dashboard';
+const DEFAULT_THEME_TIMELINE_SELECTION_COUNT = 15;
+
+type ExpandedDashboardChartId =
+  | 'source-breakdown'
+  | 'theme-breakdown'
+  | 'source-timeline'
+  | 'theme-timeline';
 
 async function readDashboardResponse<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
   const response = await fetch(input, init);
@@ -71,6 +85,10 @@ export default function DashboardPage() {
   const [bootstrapError, setBootstrapError] = useState('');
   const [metricsError, setMetricsError] = useState('');
   const [preferenceError, setPreferenceError] = useState('');
+  const [expandedChartId, setExpandedChartId] = useState<ExpandedDashboardChartId | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+  const [selectedSourceTimelineSeriesKeys, setSelectedSourceTimelineSeriesKeys] = useState<string[]>([]);
+  const [selectedThemeTimelineSeriesKeys, setSelectedThemeTimelineSeriesKeys] = useState<string[]>([]);
 
   const selectedBrand = useMemo(
     () => brands.find((brand) => brand.id === selectedBrandId) ?? null,
@@ -97,6 +115,29 @@ export default function DashboardPage() {
     () => metrics?.scanOptions.find((scan) => scan.id === selectedScanId) ?? null,
     [metrics?.scanOptions, selectedScanId],
   );
+  const sourceTimelineOptions = useMemo(
+    () => metrics?.sourceTimeline?.series ?? [],
+    [metrics?.sourceTimeline?.series],
+  );
+  const themeTimelineOptions = useMemo(
+    () => metrics?.themeTimeline?.series ?? [],
+    [metrics?.themeTimeline?.series],
+  );
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!metrics?.brandId) return;
+
+    setSelectedSourceTimelineSeriesKeys(sourceTimelineOptions.map((series) => series.key));
+    setSelectedThemeTimelineSeriesKeys(
+      themeTimelineOptions
+        .slice(0, DEFAULT_THEME_TIMELINE_SELECTION_COUNT)
+        .map((series) => series.key),
+    );
+  }, [metrics?.brandId, sourceTimelineOptions, themeTimelineOptions]);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,12 +248,51 @@ export default function DashboardPage() {
     : selectedBrand
       ? `Covering all completed scans for ${selectedBrand.name}.`
       : 'Covering all completed scans.';
+  const isAllScansScope = !selectedScanId;
 
-  function navigateToChartDrilldown(
+  useEffect(() => {
+    if (sourceTimelineOptions.length === 0) {
+      setSelectedSourceTimelineSeriesKeys([]);
+      return;
+    }
+
+    const availableKeys = new Set(sourceTimelineOptions.map((series) => series.key));
+    setSelectedSourceTimelineSeriesKeys((current) => current.filter((key) => availableKeys.has(key)));
+  }, [sourceTimelineOptions]);
+
+  useEffect(() => {
+    if (themeTimelineOptions.length === 0) {
+      setSelectedThemeTimelineSeriesKeys([]);
+      return;
+    }
+
+    const availableKeys = new Set(themeTimelineOptions.map((series) => series.key));
+    setSelectedThemeTimelineSeriesKeys((current) => current.filter((key) => availableKeys.has(key)));
+  }, [themeTimelineOptions]);
+
+  useEffect(() => {
+    if (!expandedChartId) return undefined;
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        setExpandedChartId(null);
+      }
+    }
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleEscape);
+
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [expandedChartId]);
+
+  const navigateToChartDrilldown = useCallback((
     dimension: 'theme' | 'source',
     category: DashboardBreakdownCategory,
     row: DashboardBreakdownRow,
-  ) {
+  ) => {
     if (!selectedBrand) return;
 
     const targetScanId = metrics?.selectedScanId ?? row.drilldownScanIds?.[category];
@@ -237,7 +317,99 @@ export default function DashboardPage() {
 
     const hash = targetScanId ? `#scan-result-set-${targetScanId}` : '';
     router.push(`/brands/${selectedBrand.id}?${params.toString()}${hash}`);
-  }
+  }, [metrics?.selectedScanId, router, selectedBrand]);
+
+  const expandedChartMeta = useMemo(() => {
+    if (!metrics) return null;
+
+    const chartMap: Record<ExpandedDashboardChartId, {
+      title: string;
+      description: string;
+      controls?: React.ReactNode;
+      content: React.ReactNode;
+    }> = {
+      'source-breakdown': {
+        title: 'Findings by scan type',
+        description: 'Compare where actionable findings are appearing across scan types.',
+        content: (
+          <DashboardStackedBarChart
+            data={metrics.sourceBreakdown}
+            emptyMessage="No actionable scan-type findings are available in this scope yet."
+            hiddenCategories={['nonHit']}
+            onSegmentClick={(category, row) => navigateToChartDrilldown('source', category, row)}
+            expanded
+          />
+        ),
+      },
+      'theme-breakdown': {
+        title: 'Findings by theme',
+        description: 'See which themes recur most often among actionable findings.',
+        content: (
+          <DashboardStackedBarChart
+            data={metrics.themeBreakdown}
+            emptyMessage="No actionable theme-labelled findings are available in this scope yet."
+            hiddenCategories={['nonHit']}
+            onSegmentClick={(category, row) => navigateToChartDrilldown('theme', category, row)}
+            expanded
+          />
+        ),
+      },
+      'source-timeline': {
+        title: 'Findings by scan type over time',
+        description: 'Cumulative findings at all severity levels over time, by scan type.',
+        controls: (
+          <DashboardSeriesFilter
+            buttonLabelSingular="scan type"
+            buttonLabelPlural="scan types"
+            options={sourceTimelineOptions}
+            selectedKeys={selectedSourceTimelineSeriesKeys}
+            onChange={setSelectedSourceTimelineSeriesKeys}
+          />
+        ),
+        content: (
+          <DashboardLineChart
+            data={metrics.sourceTimeline}
+            emptyMessage="No actionable scan-type findings are available across these scans yet."
+            expanded
+            visibleSeriesKeys={selectedSourceTimelineSeriesKeys}
+            selectionEmptyMessage="Select at least one scan type to display."
+          />
+        ),
+      },
+      'theme-timeline': {
+        title: 'Findings by theme over time',
+        description: 'Cumulative findings at all severity levels over time, by theme.',
+        controls: (
+          <DashboardSeriesFilter
+            buttonLabelSingular="theme"
+            buttonLabelPlural="themes"
+            options={themeTimelineOptions}
+            selectedKeys={selectedThemeTimelineSeriesKeys}
+            onChange={setSelectedThemeTimelineSeriesKeys}
+          />
+        ),
+        content: (
+          <DashboardLineChart
+            data={metrics.themeTimeline}
+            emptyMessage="No actionable theme-labelled findings are available across these scans yet."
+            expanded
+            visibleSeriesKeys={selectedThemeTimelineSeriesKeys}
+            selectionEmptyMessage="Select at least one theme to display."
+          />
+        ),
+      },
+    };
+
+    return expandedChartId ? chartMap[expandedChartId] : null;
+  }, [
+    expandedChartId,
+    metrics,
+    navigateToChartDrilldown,
+    selectedSourceTimelineSeriesKeys,
+    selectedThemeTimelineSeriesKeys,
+    sourceTimelineOptions,
+    themeTimelineOptions,
+  ]);
 
   function navigateToMetricCardDrilldown(category: DashboardBreakdownCategory) {
     if (!selectedBrand) return;
@@ -253,6 +425,31 @@ export default function DashboardPage() {
 
     const hash = metrics?.selectedScanId ? `#scan-result-set-${metrics.selectedScanId}` : '';
     router.push(`/brands/${selectedBrand.id}?${params.toString()}${hash}`);
+  }
+
+  function renderChartHeader(
+    title: string,
+    description: string,
+    chartId: ExpandedDashboardChartId,
+  ) {
+    return (
+      <CardHeader className="border-b border-brand-100 bg-brand-50/80">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-base font-semibold text-gray-900">{title}</h3>
+            <p className="mt-1 text-sm text-gray-500">{description}</p>
+          </div>
+          <button
+            type="button"
+            aria-label={`Expand ${title}`}
+            onClick={() => setExpandedChartId(chartId)}
+            className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:border-gray-300 hover:bg-gray-50 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          >
+            <Expand className="h-4 w-4" />
+          </button>
+        </div>
+      </CardHeader>
+    );
   }
 
   return (
@@ -447,12 +644,11 @@ export default function DashboardPage() {
 
                   <div className="grid gap-6 xl:grid-cols-2">
                     <Card>
-                      <CardHeader>
-                        <h3 className="text-base font-semibold text-gray-900">Findings by scan type</h3>
-                        <p className="mt-1 text-sm text-gray-500">
-                          Compare where actionable findings are appearing across scan types.
-                        </p>
-                      </CardHeader>
+                      {renderChartHeader(
+                        'Findings by scan type',
+                        'Compare where actionable findings are appearing across scan types.',
+                        'source-breakdown',
+                      )}
                       <CardContent>
                         <DashboardStackedBarChart
                           data={metrics.sourceBreakdown}
@@ -464,12 +660,11 @@ export default function DashboardPage() {
                     </Card>
 
                     <Card>
-                      <CardHeader>
-                        <h3 className="text-base font-semibold text-gray-900">Findings by theme</h3>
-                        <p className="mt-1 text-sm text-gray-500">
-                          See which themes recur most often among actionable findings.
-                        </p>
-                      </CardHeader>
+                      {renderChartHeader(
+                        'Findings by theme',
+                        'See which themes recur most often among actionable findings.',
+                        'theme-breakdown',
+                      )}
                       <CardContent>
                         <DashboardStackedBarChart
                           data={metrics.themeBreakdown}
@@ -480,12 +675,112 @@ export default function DashboardPage() {
                       </CardContent>
                     </Card>
                   </div>
+
+                  {isAllScansScope && (
+                    <div className="grid gap-6 xl:grid-cols-2">
+                      <Card>
+                        {renderChartHeader(
+                          'Findings by scan type over time',
+                          'Cumulative findings at all severity levels over time, by scan type.',
+                          'source-timeline',
+                        )}
+                        <CardContent className="space-y-4">
+                          <div className="flex justify-end">
+                            <DashboardSeriesFilter
+                              buttonLabelSingular="scan type"
+                              buttonLabelPlural="scan types"
+                              options={sourceTimelineOptions}
+                              selectedKeys={selectedSourceTimelineSeriesKeys}
+                              onChange={setSelectedSourceTimelineSeriesKeys}
+                            />
+                          </div>
+                          <DashboardLineChart
+                            data={metrics.sourceTimeline}
+                            emptyMessage="No actionable scan-type findings are available across these scans yet."
+                            visibleSeriesKeys={selectedSourceTimelineSeriesKeys}
+                            selectionEmptyMessage="Select at least one scan type to display."
+                          />
+                        </CardContent>
+                      </Card>
+
+                      <Card>
+                        {renderChartHeader(
+                          'Findings by theme over time',
+                          'Cumulative findings at all severity levels over time, by theme.',
+                          'theme-timeline',
+                        )}
+                        <CardContent className="space-y-4">
+                          <div className="flex justify-end">
+                            <DashboardSeriesFilter
+                              buttonLabelSingular="theme"
+                              buttonLabelPlural="themes"
+                              options={themeTimelineOptions}
+                              selectedKeys={selectedThemeTimelineSeriesKeys}
+                              onChange={setSelectedThemeTimelineSeriesKeys}
+                            />
+                          </div>
+                          <DashboardLineChart
+                            data={metrics.themeTimeline}
+                            emptyMessage="No actionable theme-labelled findings are available across these scans yet."
+                            visibleSeriesKeys={selectedThemeTimelineSeriesKeys}
+                            selectionEmptyMessage="Select at least one theme to display."
+                          />
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
                 </section>
               )}
             </div>
           )}
         </div>
       </main>
+
+      {isMounted && expandedChartMeta && createPortal(
+        <div
+          className="fixed inset-0 z-[220] flex items-center justify-center bg-slate-950/70 p-4 sm:p-6"
+          onClick={() => setExpandedChartId(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dashboard-chart-modal-title"
+            aria-describedby="dashboard-chart-modal-description"
+            className="flex h-[min(92vh,980px)] w-full max-w-[min(96vw,1440px)] flex-col overflow-hidden rounded-3xl border border-brand-100 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4 border-b border-brand-100 bg-brand-50/90 px-6 py-5">
+              <div>
+                <h2 id="dashboard-chart-modal-title" className="text-xl font-semibold text-gray-900">
+                  {expandedChartMeta.title}
+                </h2>
+                <p id="dashboard-chart-modal-description" className="mt-1 text-sm text-gray-600">
+                  {expandedChartMeta.description}
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setExpandedChartId(null)}
+                className="h-10 w-10 rounded-full border border-brand-100 bg-white/90 p-0 text-brand-700 hover:bg-white"
+              >
+                <X className="h-4 w-4" />
+                <span className="sr-only">Close expanded chart</span>
+              </Button>
+            </div>
+            <div className={cn('flex-1 min-h-0 overflow-auto p-4 sm:p-6 lg:p-7')}>
+              {expandedChartMeta.controls ? (
+                <div className="mb-4 flex justify-end">
+                  {expandedChartMeta.controls}
+                </div>
+              ) : null}
+              {expandedChartMeta.content}
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </AuthGuard>
   );
 }
