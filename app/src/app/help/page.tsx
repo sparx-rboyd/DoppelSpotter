@@ -1,34 +1,115 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { type ElementType, type ReactNode, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import {
+  Bell,
+  CheckCircle2,
+  ChevronRight,
+  Compass,
+  FileDown,
+  Filter,
+  LayoutDashboard,
+  PlayCircle,
+  Settings2,
+  Shield,
+  UserCog,
+} from 'lucide-react';
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
-import {
-  Shield,
-  Search,
-  LayoutDashboard,
-  Bell,
-  CheckCircle,
-  XCircle,
-  FileText,
-  FileDown,
-  Info,
-  ChevronRight,
-} from 'lucide-react';
 
 const SECTIONS = [
-  { id: 'getting-started', label: 'Getting Started' },
+  { id: 'overview', label: 'Overview & Navigation' },
+  { id: 'brands', label: 'Brands & Setup' },
+  { id: 'scan-settings', label: 'Scan Settings' },
+  { id: 'running-scans', label: 'Running Scans' },
+  { id: 'reviewing-findings', label: 'Reviewing Findings' },
+  { id: 'search-and-bulk', label: 'Search, Filters & Bulk Actions' },
   { id: 'dashboard', label: 'Dashboard & Analytics' },
-  { id: 'scans', label: 'Running Scans' },
-  { id: 'reviewing', label: 'Reviewing Findings' },
-  { id: 'deep-search', label: 'Deep Search' },
-  { id: 'exporting', label: 'Exporting Reports' },
+  { id: 'reports', label: 'Reports & Emails' },
+  { id: 'account', label: 'Account & Data Management' },
 ];
 
 const inlineLink = 'font-medium text-brand-700 transition hover:underline';
+
+function PlaceholderMedia({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-center justify-center rounded-xl border border-gray-200 bg-gray-100 px-6 text-center text-sm italic text-gray-400',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  );
+}
+
+function HelpAccordion({
+  title,
+  children,
+  defaultOpen = false,
+}: {
+  title: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+}) {
+  return (
+    <details
+      open={defaultOpen}
+      className="group overflow-hidden rounded-lg border border-gray-200 bg-white"
+    >
+      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3.5 text-sm font-medium text-gray-900 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
+        {title}
+        <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
+      </summary>
+      <div className="border-t border-gray-100 px-4 pb-4 pt-3 text-sm leading-6 text-gray-500">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+function HelpSection({
+  id,
+  icon: Icon,
+  title,
+  description,
+  children,
+}: {
+  id: string;
+  icon: ElementType;
+  title: string;
+  description: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} className="scroll-mt-24">
+      <Card>
+        <CardHeader className="px-6 py-5">
+          <div className="flex items-start gap-4">
+            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand-50">
+              <Icon className="h-5 w-5 text-brand-600" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
+              <p className="mt-1 text-sm leading-6 text-gray-600">{description}</p>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-5 px-6 pb-6">{children}</CardContent>
+      </Card>
+    </section>
+  );
+}
 
 export default function HelpPage() {
   const [activeId, setActiveId] = useState<string>(SECTIONS[0].id);
@@ -39,7 +120,7 @@ export default function HelpPage() {
       (entries) => {
         if (isScrollingTo.current) return;
         const visible = entries
-          .filter((e) => e.isIntersecting)
+          .filter((entry) => entry.isIntersecting)
           .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
         if (visible.length > 0) {
           setActiveId(visible[0].target.id);
@@ -49,8 +130,8 @@ export default function HelpPage() {
     );
 
     for (const { id } of SECTIONS) {
-      const el = document.getElementById(id);
-      if (el) observer.observe(el);
+      const element = document.getElementById(id);
+      if (element) observer.observe(element);
     }
 
     return () => observer.disconnect();
@@ -80,15 +161,15 @@ export default function HelpPage() {
         <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
           <div className="mb-8">
             <h1 className="text-2xl font-bold text-gray-900">Help</h1>
-            <p className="text-sm text-gray-500 mt-0.5">
-              Everything you need to know about setting up and using DoppelSpotter. For account and password settings, see <Link href="/settings" className={inlineLink}>Settings</Link>.
+            <p className="mt-0.5 text-sm text-gray-500">
+              A practical guide to setting up brands, tuning scans, reviewing findings, exporting reports,
+              and managing your account. Use the sidebar to jump straight to the part of the workflow you
+              need.
             </p>
           </div>
 
-          <div className="flex flex-col lg:flex-row gap-8">
-
-            {/* Sticky sidebar nav */}
-            <div className="w-full lg:w-56 flex-none">
+          <div className="flex flex-col gap-8 lg:flex-row">
+            <div className="w-full flex-none lg:w-64">
               <div className="sticky top-24">
                 <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-gray-400">
                   On this page
@@ -113,285 +194,562 @@ export default function HelpPage() {
               </div>
             </div>
 
-            {/* Main content */}
             <div className="flex-1 space-y-6">
+              <HelpSection
+                id="overview"
+                icon={Compass}
+                title="Overview & Navigation"
+                description={(
+                  <>
+                    DoppelSpotter is organised around a few core surfaces: the{' '}
+                    <Link href="/dashboard" className={inlineLink}>Dashboard</Link>, your{' '}
+                    <Link href="/brands" className={inlineLink}>Brands</Link>, the in-app{' '}
+                    Help page, and your account menu.
+                  </>
+                )}
+              >
+                <PlaceholderMedia className="aspect-[21/8]">
+                  [Placeholder: Annotated screenshot of the main navigation showing Dashboard, Brands, Help,
+                  and the user menu]
+                </PlaceholderMedia>
 
-              {/* Getting Started */}
-              <section id="getting-started" className="scroll-mt-24">
-                <Card>
-                  <CardHeader className="px-6 py-5">
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand-50">
-                        <Shield className="h-5 w-5 text-brand-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <h2 className="text-lg font-semibold text-gray-900">Getting Started: Managing Brands</h2>
-                        <p className="mt-1 text-sm leading-6 text-gray-600">
-                          DoppelSpotter organises your monitoring into <Link href="/brands" className={inlineLink}>Brands</Link>. A Brand represents a product, company, or entity you want to protect.
-                        </p>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-5 px-6 pb-6">
-                    <div className="rounded-xl border border-gray-200 bg-gray-100 aspect-[16/7] flex items-center justify-center text-sm italic text-gray-400">
-                      [Placeholder: Screenshot of the &quot;Add Brand&quot; form showing Keywords, Official Domains, Watch words, and Safe words fields]
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-1.5">
-                        <p className="text-sm font-medium text-gray-900">Search Configuration</p>
-                        <p className="text-sm text-gray-500">
-                          <strong className="text-gray-700">Keywords</strong> are the terms we search for (e.g., your company name or product name).{' '}
-                          <strong className="text-gray-700">Official Domains</strong> are your real websites — we automatically exclude these from alerts so you aren&apos;t flagged for your own content.
-                          Configure both when <Link href="/brands/new" className={inlineLink}>adding a brand</Link>.
-                        </p>
-                      </div>
-                      <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-1.5">
-                        <p className="text-sm font-medium text-gray-900">AI Context</p>
-                        <p className="text-sm text-gray-500">
-                          <strong className="text-gray-700">Watch words</strong> are suspicious terms (like &quot;crack&quot;, &quot;free&quot;, &quot;discount&quot;) that make the AI treat findings more strictly.{' '}
-                          <strong className="text-gray-700">Safe words</strong> are terms that typically indicate benign content (like &quot;review&quot;, &quot;comparison&quot;).
-                          Both are set in your <Link href="/brands" className={inlineLink}>brand settings</Link>.
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <p className="text-sm font-medium text-gray-900">Dashboard</p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Use the dashboard for the big-picture view: severity totals, scan-type breakdowns,
+                      theme breakdowns, and trend charts over time.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <p className="text-sm font-medium text-gray-900">Brand pages</p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Most day-to-day work happens on a brand page: running scans, checking progress,
+                      searching results, reviewing findings, exporting reports, and opening Brand Settings.
+                    </p>
+                  </div>
+                </div>
 
-              {/* Dashboard & Analytics */}
-              <section id="dashboard" className="scroll-mt-24">
-                <Card>
-                  <CardHeader className="px-6 py-5">
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand-50">
-                        <LayoutDashboard className="h-5 w-5 text-brand-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <h2 className="text-lg font-semibold text-gray-900">Dashboard &amp; Analytics</h2>
-                        <p className="mt-1 text-sm leading-6 text-gray-600">
-                          The <Link href="/dashboard" className={inlineLink}>Dashboard</Link> gives you a high-level view of your brand&apos;s threat landscape over time.
-                        </p>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-4 px-6 pb-6">
-                    <div className="rounded-xl border border-gray-200 bg-gray-100 aspect-[21/8] flex items-center justify-center text-sm italic text-gray-400">
-                      [Placeholder: Screenshot of the Dashboard showing the metric cards and stacked bar charts]
-                    </div>
+                <HelpAccordion title="Recommended first-time workflow" defaultOpen>
+                  <ol className="list-decimal space-y-2 pl-5">
+                    <li>Create a brand from <Link href="/brands/new" className={inlineLink}>Add Brand</Link>.</li>
+                    <li>Start with a broader lookback period to build an initial baseline of findings.</li>
+                    <li>Run a scan using your saved defaults or a one-off custom scan.</li>
+                    <li>Review the completed scan by severity, then tidy the results using reclassify, ignore, addressed, bookmark, and note actions.</li>
+                    <li>Use the dashboard and exports once you have a few completed scans to compare trends over time.</li>
+                  </ol>
+                </HelpAccordion>
 
-                    <details className="group overflow-hidden rounded-lg border border-gray-200 bg-white">
-                      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3.5 text-sm font-medium text-gray-900 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
-                        Understanding the Metric Cards
-                        <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
-                      </summary>
-                      <div className="border-t border-gray-100 px-4 pb-4 pt-3 text-sm text-gray-500 leading-6">
-                        The <Link href="/dashboard" className={inlineLink}>dashboard</Link> breaks findings into four severity categories:
-                        <ul className="mt-2 space-y-1 pl-4 list-disc">
-                          <li><strong className="text-red-700">High:</strong> Urgent issues that need rapid review — e.g., phishing, direct impersonation.</li>
-                          <li><strong className="text-amber-600">Medium:</strong> Suspicious activity worth investigating.</li>
-                          <li><strong className="text-emerald-600">Low:</strong> Lower-risk results still worth monitoring.</li>
-                          <li><strong className="text-gray-600">Non-findings:</strong> Results the AI classified as benign or irrelevant.</li>
-                        </ul>
-                        <p className="mt-2">Clicking any metric card takes you directly to those filtered findings on the <Link href="/brands" className={inlineLink}>brand page</Link>.</p>
-                      </div>
-                    </details>
+                <HelpAccordion title="Where to go for common tasks">
+                  <ul className="list-disc space-y-2 pl-5">
+                    <li><strong className="text-gray-700">Add or edit a monitored brand:</strong> <Link href="/brands" className={inlineLink}>Brands</Link>.</li>
+                    <li><strong className="text-gray-700">Run a scan or review results:</strong> open a brand page from <Link href="/brands" className={inlineLink}>Brands</Link>.</li>
+                    <li><strong className="text-gray-700">Compare trends across scans:</strong> <Link href="/dashboard" className={inlineLink}>Dashboard</Link>.</li>
+                    <li><strong className="text-gray-700">Change your password or account preferences:</strong> <Link href="/settings" className={inlineLink}>Settings</Link>.</li>
+                  </ul>
+                </HelpAccordion>
+              </HelpSection>
 
-                    <details className="group overflow-hidden rounded-lg border border-gray-200 bg-white">
-                      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3.5 text-sm font-medium text-gray-900 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
-                        Interactive Charts
-                        <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
-                      </summary>
-                      <div className="border-t border-gray-100 px-4 pb-4 pt-3 text-sm text-gray-500 leading-6">
-                        The <strong className="text-gray-700">Findings by scan type</strong> and <strong className="text-gray-700">Findings by theme</strong> charts let you see where threats are originating and what topics they cover. Clicking any segment takes you directly to those specific findings on the <Link href="/brands" className={inlineLink}>brand page</Link>.
-                      </div>
-                    </details>
-                  </CardContent>
-                </Card>
-              </section>
+              <HelpSection
+                id="brands"
+                icon={Shield}
+                title="Brands & Setup"
+                description={(
+                  <>
+                    A brand is the unit DoppelSpotter monitors. Each brand has its own keywords, owned
+                    domains, scan defaults, source toggles, AI settings, and scan history.
+                  </>
+                )}
+              >
+                <PlaceholderMedia className="aspect-[16/8]">
+                  [Placeholder: Screenshot of the "Add Brand" or "Brand Settings" page showing Brand name,
+                  Keywords, Official domains, Watch words, Safe words, scan settings, and scan types]
+                </PlaceholderMedia>
 
-              {/* Running Scans */}
-              <section id="scans" className="scroll-mt-24">
-                <Card>
-                  <CardHeader className="px-6 py-5">
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand-50">
-                        <Search className="h-5 w-5 text-brand-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <h2 className="text-lg font-semibold text-gray-900">Running Scans</h2>
-                        <p className="mt-1 text-sm leading-6 text-gray-600">
-                          Scans are the core of DoppelSpotter. Start one from any <Link href="/brands" className={inlineLink}>brand page</Link> — we search across your selected platforms and use AI to classify the results.
-                        </p>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-5 px-6 pb-6">
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <p className="text-sm font-medium text-gray-900">Scan Sources</p>
-                        <p className="text-sm text-gray-500">Toggle specific platforms on or off per brand in <Link href="/brands" className={inlineLink}>brand settings</Link>:</p>
-                        <ul className="space-y-1 text-sm text-gray-500 pl-4 list-disc">
-                          <li><strong className="text-gray-700">Web Search:</strong> General Google results</li>
-                          <li><strong className="text-gray-700">Social:</strong> Reddit, TikTok, YouTube, Facebook, Instagram, X</li>
-                          <li><strong className="text-gray-700">Communities:</strong> Discord servers, Telegram channels</li>
-                          <li><strong className="text-gray-700">Code &amp; Apps:</strong> GitHub repositories, Apple App Store, Google Play</li>
-                          <li><strong className="text-gray-700">Infrastructure:</strong> Newly registered domains</li>
-                        </ul>
-                      </div>
-                      <div className="space-y-3">
-                        <div className="space-y-1">
-                          <p className="text-sm font-medium text-gray-900">Search Depth</p>
-                          <p className="text-sm text-gray-500">Controls how many results are pulled per source. Configure the default in <Link href="/brands" className={inlineLink}>brand settings</Link>, or override it per-run when starting a scan manually.</p>
-                        </div>
-                        <div className="space-y-1">
-                          <p className="text-sm font-medium text-gray-900">Scheduled Scans</p>
-                          <p className="text-sm text-gray-500">Set scans to run automatically on a daily, weekly, or monthly basis in <Link href="/brands" className={inlineLink}>brand settings</Link> so you never miss emerging threats.</p>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-gray-200 bg-gray-100 aspect-[16/5] flex items-center justify-center text-sm italic text-gray-400">
-                      [Placeholder: Screenshot of the &quot;Run Scan&quot; modal showing one-off customisation options]
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <p className="text-sm font-medium text-gray-900">Brand name</p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      The primary label for the entity you want to protect. This is what you will see in the
+                      dashboard, brand list, and exports.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <p className="text-sm font-medium text-gray-900">Keywords</p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Search terms associated with the brand, such as trademarks, product names, or common
+                      variants. These drive what the scans look for.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <p className="text-sm font-medium text-gray-900">Official domains</p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Domains you own. These help DoppelSpotter avoid treating your legitimate sites as
+                      threats and are validated when you save the brand.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <p className="text-sm font-medium text-gray-900">Watch words and safe words</p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      These do not create additional searches on their own. Instead, they steer the AI to be
+                      more cautious around suspicious language and more forgiving around obviously benign
+                      language.
+                    </p>
+                  </div>
+                </div>
 
-              {/* Reviewing Findings */}
-              <section id="reviewing" className="scroll-mt-24">
-                <Card>
-                  <CardHeader className="px-6 py-5">
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand-50">
-                        <CheckCircle className="h-5 w-5 text-brand-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <h2 className="text-lg font-semibold text-gray-900">Reviewing Findings</h2>
-                        <p className="mt-1 text-sm leading-6 text-gray-600">
-                          When a scan completes, findings are grouped by severity on the <Link href="/brands" className={inlineLink}>brand page</Link>. DoppelSpotter learns from how you review them.
-                        </p>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-5 px-6 pb-6">
-                    <div className="rounded-xl border border-gray-200 bg-gray-100 aspect-[16/7] flex items-center justify-center text-sm italic text-gray-400">
-                      [Placeholder: Screenshot of a Finding Card showing the AI analysis, severity badge, Bookmark, Add Note, Address, and Ignore buttons]
-                    </div>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4">
-                        <div className="flex items-center gap-2">
-                          <XCircle className="h-4 w-4 flex-shrink-0 text-gray-400" />
-                          <p className="text-sm font-medium text-gray-900">Ignoring False Positives</p>
-                        </div>
-                        <p className="text-sm text-gray-500">
-                          If the AI misclassified a benign result, click <strong className="text-gray-700">Ignore</strong>. This moves it to the &quot;Ignored&quot; tab and — more importantly — <strong className="text-gray-700">teaches the AI</strong> to automatically filter out similar results in future scans.
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle className="h-4 w-4 flex-shrink-0 text-emerald-500" />
-                          <p className="text-sm font-medium text-gray-900">Marking as Addressed</p>
-                        </div>
-                        <p className="text-sm text-gray-500">
-                          Once you&apos;ve taken action on a legitimate threat (like issuing a takedown notice), click <strong className="text-gray-700">Mark as Addressed</strong>. This moves it to the &quot;Addressed&quot; tab to keep your active list clean.
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4">
-                        <div className="flex items-center gap-2">
-                          <Bell className="h-4 w-4 flex-shrink-0 text-brand-500" />
-                          <p className="text-sm font-medium text-gray-900">Bookmarks &amp; Notes</p>
-                        </div>
-                        <p className="text-sm text-gray-500">
-                          Use <strong className="text-gray-700">Bookmarks</strong> to pin important findings to the top of the <Link href="/brands" className={inlineLink}>brand page</Link>. You can also <strong className="text-gray-700">Add notes</strong> to any finding to track next steps or collaborate with your team.
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4">
-                        <div className="flex items-center gap-2">
-                          <Info className="h-4 w-4 flex-shrink-0 text-blue-500" />
-                          <p className="text-sm font-medium text-gray-900">AI Themes</p>
-                        </div>
-                        <p className="text-sm text-gray-500">
-                          The AI assigns short <strong className="text-gray-700">Theme tags</strong> to findings. Use the theme filter dropdown at the top of the <Link href="/brands" className={inlineLink}>brand page</Link> to quickly narrow down results.
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
+                <HelpAccordion title="When to edit a brand instead of using a custom scan" defaultOpen>
+                  <p>
+                    Update <Link href="/brands" className={inlineLink}>Brand Settings</Link> when you want to
+                    change the saved defaults for future scans, such as source toggles, schedules, deep search,
+                    or analysis rules. Use a custom scan when you only want a one-off override for a single run.
+                  </p>
+                </HelpAccordion>
 
-              {/* Deep Search */}
-              <section id="deep-search" className="scroll-mt-24">
-                <Card>
-                  <CardHeader className="px-6 py-5">
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand-50">
-                        <Search className="h-5 w-5 text-brand-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <h2 className="text-lg font-semibold text-gray-900">Deep Search</h2>
-                        <p className="mt-1 text-sm leading-6 text-gray-600">
-                          When enabled in <Link href="/brands" className={inlineLink}>brand settings</Link>, the AI analyses your initial scan results and automatically runs new, highly targeted follow-up searches to uncover hidden threats.
-                        </p>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="px-6 pb-6">
-                    <div className="rounded-xl border border-brand-100 bg-brand-50 p-4 space-y-2">
-                      <p className="text-sm font-medium text-brand-900">How it works</p>
-                      <ul className="space-y-1.5 text-sm text-brand-800 leading-6 pl-4 list-disc">
-                        <li>After the initial scan completes, the AI reviews the intent and context of all results.</li>
-                        <li>It then synthesizes and launches new searches targeting distinct abuse vectors it identified.</li>
-                        <li>Use the <strong>Deep search breadth</strong> setting in <Link href="/brands" className="font-medium text-brand-700 transition hover:underline">brand settings</Link> (1–5) to control how many follow-up searches can run per scan.</li>
-                        <li>Deep searches are clearly labelled in the progress UI while a scan is running.</li>
-                      </ul>
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
+                <HelpAccordion title="Brand list page">
+                  <p>
+                    The <Link href="/brands" className={inlineLink}>Brands</Link> page shows every monitored
+                    brand with a quick summary: total scans, total findings, total non-findings, the last scan
+                    time, whether a scan is currently in progress, and the next scheduled run if scheduling is
+                    enabled.
+                  </p>
+                </HelpAccordion>
+              </HelpSection>
 
-              {/* Exporting */}
-              <section id="exporting" className="scroll-mt-24">
-                <Card>
-                  <CardHeader className="px-6 py-5">
-                    <div className="flex items-start gap-4">
-                      <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand-50">
-                        <FileDown className="h-5 w-5 text-brand-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <h2 className="text-lg font-semibold text-gray-900">Exporting Reports</h2>
-                        <p className="mt-1 text-sm leading-6 text-gray-600">
-                          Share your findings with legal teams, stakeholders, or clients using the Export button on any completed scan on your <Link href="/brands" className={inlineLink}>brand page</Link>.
-                        </p>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-5 px-6 pb-6">
-                    <div className="rounded-xl border border-gray-200 bg-gray-100 aspect-[16/5] flex items-center justify-center text-sm italic text-gray-400">
-                      [Placeholder: Screenshot of the scan header showing the &quot;Export&quot; button dropdown]
-                    </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4">
-                        <div className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 flex-shrink-0 text-gray-400" />
-                          <p className="text-sm font-medium text-gray-900">PDF Reports</p>
-                        </div>
-                        <p className="text-sm text-gray-500">
-                          A clean, branded document containing the AI&apos;s executive summary and all actionable threats, grouped by severity. Ideal for sharing with management or legal teams.
-                        </p>
-                      </div>
-                      <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-4">
-                        <div className="flex items-center gap-2">
-                          <FileDown className="h-4 w-4 flex-shrink-0 text-gray-400" />
-                          <p className="text-sm font-medium text-gray-900">CSV Exports</p>
-                        </div>
-                        <p className="text-sm text-gray-500">
-                          Raw data for every finding in the scan, including URLs, AI analysis, notes, and review-state flags. Ideal for tracking in spreadsheets.
-                        </p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </section>
+              <HelpSection
+                id="scan-settings"
+                icon={Settings2}
+                title="Scan Settings"
+                description={(
+                  <>
+                    Each brand stores default scan behavior, including lookback period, search depth, deep
+                    search, source selection, scheduled scans, summary emails, and AI severity definitions.
+                  </>
+                )}
+              >
+                <PlaceholderMedia className="aspect-[16/8]">
+                  [Placeholder: Screenshot or GIF of the scan settings area showing lookback period, search
+                  depth, deep search, scheduled scans, and analysis settings]
+                </PlaceholderMedia>
 
+                <HelpAccordion title="Lookback period" defaultOpen>
+                  <p>
+                    Choose how far back scans should look for results. Available options are <strong className="text-gray-700">1 year</strong>,{' '}
+                    <strong className="text-gray-700">1 month</strong>, <strong className="text-gray-700">1 week</strong>, and{' '}
+                    <strong className="text-gray-700">Since last scan</strong>.
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                    <li>Use a broader lookback early on to build an initial baseline.</li>
+                    <li>After a few scans, switching to <strong className="text-gray-700">Since last scan</strong> usually gives cleaner, more recent results.</li>
+                    <li>DoppelSpotter may suggest this switch automatically after several scans.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Search depth">
+                  <p>
+                    Search depth controls how much data DoppelSpotter pulls per source. Higher depth usually
+                    means better coverage, but slower scans.
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                    <li>Google-backed scan types use this as search-result depth.</li>
+                    <li>Domain registrations use it as result volume.</li>
+                    <li>GitHub repos and X use it as item volume.</li>
+                    <li>Discord servers map it to a higher spend cap per run.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Scan types">
+                  <p>
+                    You can turn individual scan types on or off per brand. The current app supports Web search,
+                    Reddit, TikTok, YouTube, Facebook, Instagram, Telegram channels, Apple App Store, Google
+                    Play, Discord servers, GitHub repos, X, and recent domain registrations.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Deep search">
+                  <p>
+                    Deep search lets AI request follow-up searches after it reviews the initial results. You can
+                    control both whether it is allowed and how many follow-up searches it may run.
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                    <li>Deep search is only available on Google-backed scan types.</li>
+                    <li>It is not used for Discord servers, GitHub repos, X, or domain registrations.</li>
+                    <li>The <strong className="text-gray-700">Deep search breadth</strong> slider caps how many follow-up searches can run in a scan.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Scheduled scans">
+                  <p>
+                    Scheduled scans can run <strong className="text-gray-700">daily</strong>,{' '}
+                    <strong className="text-gray-700">weekly</strong>,{' '}
+                    <strong className="text-gray-700">fortnightly</strong>, or{' '}
+                    <strong className="text-gray-700">monthly</strong>. The selected start date, time, and
+                    timezone anchor the schedule, and manual scans are still available whenever you need them.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Scan summary emails">
+                  <p>
+                    If enabled, DoppelSpotter sends a completed-scan summary to your account email address.
+                    This is configured per brand, so you can enable it for some brands and disable it for
+                    others.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Analysis settings">
+                  <p>
+                    The analysis settings section lets you customise the definitions DoppelSpotter uses for{' '}
+                    <strong className="text-gray-700">high</strong>, <strong className="text-gray-700">medium</strong>, and{' '}
+                    <strong className="text-gray-700">low</strong> severity. Use this when you want the AI to
+                    follow brand-specific risk thresholds.
+                  </p>
+                </HelpAccordion>
+              </HelpSection>
+
+              <HelpSection
+                id="running-scans"
+                icon={PlayCircle}
+                title="Running Scans"
+                description={(
+                  <>
+                    Start scans from a brand page, either with your saved defaults or with one-off custom
+                    settings for that run only.
+                  </>
+                )}
+              >
+                <PlaceholderMedia className="aspect-[16/8]">
+                  [Placeholder: GIF of opening the "Run scan" menu, choosing between Scan defaults and Custom
+                  scan, then showing the live progress panel]
+                </PlaceholderMedia>
+
+                <HelpAccordion title="Scan defaults vs custom scan" defaultOpen>
+                  <p>
+                    The <strong className="text-gray-700">Run scan</strong> menu has two paths:
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                    <li><strong className="text-gray-700">Scan defaults:</strong> uses the saved settings from Brand Settings.</li>
+                    <li><strong className="text-gray-700">Custom scan:</strong> lets you override lookback period, search depth, deep search, and scan types for this run only.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Live scan progress">
+                  <p>
+                    While a scan is running, the top of the Scans tab shows a live progress card. It groups
+                    progress by source, shows source-specific status text, displays a progress bar, and can
+                    reveal early findings before the scan fully completes.
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                    <li>Use the source icons to switch between Web search, domain registrations, Discord, GitHub, X, and other enabled scan types.</li>
+                    <li>If deep search runs, the progress labels switch to related-query investigation states.</li>
+                    <li>Duplicate results may be skipped automatically if they repeat historical or same-scan findings.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Cancelling a scan">
+                  <p>
+                    You can cancel a scan while it is in progress. Once cancelled, the live progress card closes
+                    and the scan history refreshes. Deleting scans or clearing history is disabled while another
+                    scan is active.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Scheduled scan visibility">
+                  <p>
+                    If a brand has scheduling enabled, the brand page shows a banner above the findings area with
+                    the schedule frequency and the next due run time in the chosen timezone.
+                  </p>
+                </HelpAccordion>
+              </HelpSection>
+
+              <HelpSection
+                id="reviewing-findings"
+                icon={CheckCircle2}
+                title="Reviewing Findings"
+                description={(
+                  <>
+                    Completed scans appear as expandable result sets on the brand page, grouped by severity with
+                    AI summaries and per-finding actions.
+                  </>
+                )}
+              >
+                <PlaceholderMedia className="aspect-[16/8]">
+                  [Placeholder: Screenshot of an expanded completed scan showing the AI summary, severity groups,
+                  a non-findings section, and a finding card with action buttons]
+                </PlaceholderMedia>
+
+                <HelpAccordion title="What a completed scan shows" defaultOpen>
+                  <p>
+                    Each scan row shows the scan date, which scan types were used, counts by severity, and any
+                    non-findings, ignored items, addressed items, or skipped duplicates. Expand the row to review
+                    the findings and the scan-level AI summary.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Severity groups and non-findings">
+                  <p>
+                    Actionable findings are grouped into <strong className="text-red-700">High</strong>,{' '}
+                    <strong className="text-amber-600">Medium</strong>, and <strong className="text-emerald-600">Low</strong>.
+                    Results the AI believes are benign or irrelevant are shown under{' '}
+                    <strong className="text-gray-700">Non-findings</strong>.
+                  </p>
+                  <p className="mt-2">
+                    Non-findings can still be useful to review. You can bookmark them, add notes, or reclassify
+                    them into any severity if the AI got the judgment wrong.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Finding card actions">
+                  <ul className="list-disc space-y-1.5 pl-5">
+                    <li><strong className="text-gray-700">Reclassify:</strong> move a finding into High, Medium, Low, or Non-finding.</li>
+                    <li><strong className="text-gray-700">Ignore:</strong> dismiss a real finding you do not want treated as actionable.</li>
+                    <li><strong className="text-gray-700">Mark as addressed:</strong> move a real finding out of the active list once you have dealt with it.</li>
+                    <li><strong className="text-gray-700">Bookmark:</strong> pin a finding for follow-up. This is available for both real findings and non-findings.</li>
+                    <li><strong className="text-gray-700">Add note:</strong> store your own follow-up context directly on the finding card.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Ignored vs addressed vs bookmarked">
+                  <ul className="list-disc space-y-1.5 pl-5">
+                    <li><strong className="text-gray-700">Ignored</strong> is for real findings you have dismissed. Ignored items live in the Ignored tab and in per-scan Ignored sections.</li>
+                    <li><strong className="text-gray-700">Addressed</strong> is for real findings you acted on and want to keep out of the active queue.</li>
+                    <li><strong className="text-gray-700">Bookmarks</strong> are follow-up markers only. They do not change the finding's severity or review state.</li>
+                    <li>Ignored and addressed behavior is applied across matching findings for the same URL, while bookmarks and notes stay on the individual finding record.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Themes and AI analysis">
+                  <p>
+                    Each finding can include a short AI-assigned <strong className="text-gray-700">theme</strong>.
+                    Themes help you spot recurring abuse patterns and can be used in both filters and dashboard
+                    charts.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Domain registration warning">
+                  <p>
+                    Opening a domain-registration finding may show a warning first, because some suspicious
+                    domains can host inappropriate content. You can keep the warning on, or turn it off in{' '}
+                    <Link href="/settings" className={inlineLink}>Settings</Link>.
+                  </p>
+                </HelpAccordion>
+              </HelpSection>
+
+              <HelpSection
+                id="search-and-bulk"
+                icon={Filter}
+                title="Search, Filters & Bulk Actions"
+                description={(
+                  <>
+                    The brand page supports cross-scan search, severity/source/theme filters, dedicated tabs for
+                    different review states, and bulk actions for faster cleanup.
+                  </>
+                )}
+              >
+                <PlaceholderMedia className="aspect-[16/8]">
+                  [Placeholder: GIF of typing into findings search, applying theme/severity/source filters,
+                  switching tabs, selecting findings, and using the bulk action tray]
+                </PlaceholderMedia>
+
+                <HelpAccordion title="Findings search" defaultOpen>
+                  <p>
+                    Use the search box at the top of the findings area to search finding titles, URLs, and AI
+                    analyses across scans.
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                    <li>Search starts once you type at least <strong className="text-gray-700">2 characters</strong>.</li>
+                    <li>Results can include findings from the Scans, Bookmarks, Addressed, Ignored, and Non-findings views.</li>
+                    <li>You can combine search with severity, scan-type, and theme filters.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Tabs">
+                  <p>
+                    The main findings area is split into four tabs:
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                    <li><strong className="text-gray-700">Scans:</strong> the normal per-scan review view.</li>
+                    <li><strong className="text-gray-700">Bookmarks:</strong> cross-scan follow-up items, including bookmarked non-findings.</li>
+                    <li><strong className="text-gray-700">Addressed:</strong> real findings you have already handled.</li>
+                    <li><strong className="text-gray-700">Ignored:</strong> real findings you dismissed.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Filters">
+                  <p>
+                    The filter row lets you narrow results by <strong className="text-gray-700">theme</strong>,{' '}
+                    <strong className="text-gray-700">severity</strong>, and{' '}
+                    <strong className="text-gray-700">scan type</strong>. Use <strong className="text-gray-700">Reset</strong> to
+                    clear everything at once.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Bulk actions">
+                  <p>
+                    Selecting one or more findings opens a bulk action tray at the bottom of the screen. Bulk
+                    actions only apply to compatible findings, so some buttons may be disabled depending on what
+                    you selected.
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                    <li>Apply actions: Reclassify, Ignore, Mark as addressed, Bookmark.</li>
+                    <li>Reverse actions: Un-ignore, Mark as not addressed, Un-bookmark.</li>
+                  </ul>
+                </HelpAccordion>
+              </HelpSection>
+
+              <HelpSection
+                id="dashboard"
+                icon={LayoutDashboard}
+                title="Dashboard & Analytics"
+                description={(
+                  <>
+                    The dashboard gives you a brand-scoped analytics view of completed scans, including totals,
+                    breakdown charts, and trend charts over time.
+                  </>
+                )}
+              >
+                <PlaceholderMedia className="aspect-[21/8]">
+                  [Placeholder: Screenshot of the dashboard showing brand selector, scan scope selector, metric
+                  cards, stacked charts, and trend charts]
+                </PlaceholderMedia>
+
+                <HelpAccordion title="Brand and scan scope" defaultOpen>
+                  <p>
+                    Choose a focused brand at the top of the dashboard, then decide whether you want to look at{' '}
+                    <strong className="text-gray-700">All scans</strong> or a single completed scan. Your selected
+                    brand is saved so it comes back the next time you visit.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Metric cards">
+                  <p>
+                    The four metric cards show totals for High severity, Medium severity, Low severity, and
+                    Non-findings. Clicking a card takes you to the relevant filtered results on the brand page.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Breakdown charts">
+                  <p>
+                    The stacked bar charts answer two different questions:
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                    <li><strong className="text-gray-700">Findings by scan type:</strong> where results are being found.</li>
+                    <li><strong className="text-gray-700">Findings by theme:</strong> what recurring topics or abuse patterns are appearing.</li>
+                  </ul>
+                  <p className="mt-2">
+                    Clicking a chart segment opens the matching slice of results on the brand page.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Trend charts">
+                  <p>
+                    When the dashboard is set to <strong className="text-gray-700">All scans</strong>, two extra
+                    line charts appear to show cumulative trends over time by scan type and by theme. You can
+                    choose which series to display.
+                  </p>
+                </HelpAccordion>
+              </HelpSection>
+
+              <HelpSection
+                id="reports"
+                icon={FileDown}
+                title="Reports & Emails"
+                description={(
+                  <>
+                    DoppelSpotter can export completed scans and optionally email a summary when a scan finishes.
+                  </>
+                )}
+              >
+                <PlaceholderMedia className="aspect-[16/6]">
+                  [Placeholder: Screenshot of a completed scan row showing the CSV and PDF export buttons, plus
+                  a sample scan summary email or PDF cover page]
+                </PlaceholderMedia>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <p className="text-sm font-medium text-gray-900">CSV export</p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Exports every finding in the scan for spreadsheet-style review, including non-findings,
+                      notes, and review-state flags.
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <p className="text-sm font-medium text-gray-900">PDF export</p>
+                    <p className="mt-1 text-sm text-gray-500">
+                      Produces a branded report with the scan summary and actionable findings grouped by
+                      severity. It is designed for sharing with stakeholders, legal teams, or clients.
+                    </p>
+                  </div>
+                </div>
+
+                <HelpAccordion title="What gets exported" defaultOpen>
+                  <ul className="list-disc space-y-1.5 pl-5">
+                    <li><strong className="text-gray-700">CSV:</strong> full scan output for detailed review and spreadsheet analysis.</li>
+                    <li><strong className="text-gray-700">PDF:</strong> a presentation-friendly report focused on actionable findings and the scan-level AI summary.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Scan summary emails">
+                  <p>
+                    If the brand's <strong className="text-gray-700">Send scan summary emails</strong> setting is
+                    on, DoppelSpotter sends a summary email to your account email address after the scan is
+                    fully completed.
+                  </p>
+                </HelpAccordion>
+              </HelpSection>
+
+              <HelpSection
+                id="account"
+                icon={UserCog}
+                title="Account & Data Management"
+                description={(
+                  <>
+                    Use the user menu and Settings page for account tasks, and use the brand page or Brand
+                    Settings for cleanup actions like deleting scans or brands.
+                  </>
+                )}
+              >
+                <PlaceholderMedia className="aspect-[16/8]">
+                  [Placeholder: Screenshot of the user menu, Settings page, and destructive actions like Clear
+                  history, Delete scan, Delete brand, and Delete account]
+                </PlaceholderMedia>
+
+                <HelpAccordion title="Signing in, verification, and password recovery" defaultOpen>
+                  <ul className="list-disc space-y-1.5 pl-5">
+                    <li>New signups are invite-only.</li>
+                    <li>New accounts must verify their email before they can sign in.</li>
+                    <li>If you forget your password, use the <strong className="text-gray-700">Forgotten your password?</strong> link on the login screen to request a reset email.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Settings page">
+                  <p>
+                    Open <Link href="/settings" className={inlineLink}>Settings</Link> from the user menu to:
+                  </p>
+                  <ul className="mt-2 list-disc space-y-1.5 pl-5">
+                    <li>Change your password.</li>
+                    <li>Turn the domain-registration visit warning back on or off.</li>
+                    <li>Delete your entire account and all associated brands, scans, findings, and preferences.</li>
+                  </ul>
+                </HelpAccordion>
+
+                <HelpAccordion title="Brand cleanup actions">
+                  <ul className="list-disc space-y-1.5 pl-5">
+                    <li><strong className="text-gray-700">Delete scan:</strong> removes one scan and its findings from the brand page.</li>
+                    <li><strong className="text-gray-700">Clear history:</strong> removes all scan history and results for the current brand.</li>
+                    <li><strong className="text-gray-700">Delete brand:</strong> removes the brand and all of its scan history permanently from Brand Settings.</li>
+                  </ul>
+                  <p className="mt-2">
+                    These actions are destructive and cannot be undone. Some are disabled while a scan is
+                    running or while brand history is already being deleted.
+                  </p>
+                </HelpAccordion>
+
+                <HelpAccordion title="Signing out">
+                  <p>
+                    Use the user menu in the top-right corner of the navbar to sign out at any time.
+                  </p>
+                </HelpAccordion>
+              </HelpSection>
             </div>
           </div>
         </div>

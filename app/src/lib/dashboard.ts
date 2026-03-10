@@ -2,11 +2,14 @@ import type {
   DashboardBreakdownCategory,
   DashboardBreakdownRow,
   DashboardMetricTotals,
+  DashboardScanBreakdowns,
+  DashboardStoredBreakdownEntry,
   DashboardTimeline,
   DashboardTimelinePoint,
   DashboardTimelineSeries,
   Finding,
   FindingSource,
+  Scan,
   ScanSummary,
   ScanStatus,
 } from './types';
@@ -14,6 +17,7 @@ import { getFindingSourceLabel, SCAN_SOURCE_ORDER } from './scan-sources';
 
 export const TERMINAL_DASHBOARD_SCAN_STATUSES: ScanStatus[] = ['completed', 'cancelled', 'failed'];
 export const UNLABELLED_DASHBOARD_BREAKDOWN_BUCKET = 'Unlabelled';
+export const DASHBOARD_SCAN_BREAKDOWNS_VERSION = 1;
 
 const DASHBOARD_SOURCE_TIMELINE_COLORS: Record<Exclude<FindingSource, 'unknown'>, string> = {
   google: '#0284c7',
@@ -54,10 +58,10 @@ const DASHBOARD_THEME_TIMELINE_COLORS = [
   '#0f766e',
 ] as const;
 
-type DashboardFindingRecord = Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'theme'>;
-type DashboardSourceFindingRecord = Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'source'>;
-type DashboardTimelineFindingRecord = Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'source' | 'theme'>;
+type DashboardAggregateFindingRecord = Pick<Finding, 'source' | 'theme' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed'>;
 type DashboardCountSource = Pick<ScanSummary, 'highCount' | 'mediumCount' | 'lowCount' | 'nonHitCount'>;
+type DashboardBreakdownScanSource = Pick<Scan, 'id' | 'dashboardBreakdowns'>;
+type DashboardTimelineScanSource = Pick<Scan, 'id' | 'startedAt' | 'dashboardBreakdowns'>;
 
 export function emptyDashboardMetricTotals(): DashboardMetricTotals {
   return {
@@ -68,18 +72,22 @@ export function emptyDashboardMetricTotals(): DashboardMetricTotals {
   };
 }
 
+function emptyDashboardStoredBreakdownEntry(key: string): DashboardStoredBreakdownEntry {
+  return {
+    key,
+    ...emptyDashboardMetricTotals(),
+  };
+}
+
 function getDashboardActionableTotal(row: Pick<DashboardMetricTotals, 'high' | 'medium' | 'low'>): number {
   return row.high + row.medium + row.low;
 }
 
-function getDashboardActionableCategory(
-  finding: DashboardFindingRecord,
-): Exclude<DashboardBreakdownCategory, 'nonHit'> | null {
-  const category = getDashboardFindingCategory(finding);
-  return category && category !== 'nonHit' ? category : null;
+function getStoredEntryTotal(entry: DashboardStoredBreakdownEntry): number {
+  return entry.high + entry.medium + entry.low + entry.nonHit;
 }
 
-function getSortedDashboardTimelinePoints(scans: ScanSummary[]): DashboardTimelinePoint[] {
+function getSortedDashboardTimelinePoints(scans: Array<Pick<Scan, 'id' | 'startedAt'>>): DashboardTimelinePoint[] {
   return [...scans]
     .sort((left, right) => (
       left.startedAt.toMillis() - right.startedAt.toMillis()
@@ -118,7 +126,67 @@ function buildCumulativeDashboardTimelinePoints(
   });
 }
 
-export function getDashboardFindingCategory(finding: DashboardFindingRecord): DashboardBreakdownCategory | null {
+function isKnownFindingSource(value: string): value is FindingSource {
+  return value === 'unknown' || SCAN_SOURCE_ORDER.includes(value as Exclude<FindingSource, 'unknown'>);
+}
+
+function getDashboardSourceLabel(sourceKey: string): string {
+  return isKnownFindingSource(sourceKey) ? getFindingSourceLabel(sourceKey) : sourceKey;
+}
+
+function sortStoredSourceEntries(left: DashboardStoredBreakdownEntry, right: DashboardStoredBreakdownEntry): number {
+  const leftIndex = SCAN_SOURCE_ORDER.indexOf(left.key as Exclude<FindingSource, 'unknown'>);
+  const rightIndex = SCAN_SOURCE_ORDER.indexOf(right.key as Exclude<FindingSource, 'unknown'>);
+  const leftOrder = left.key === 'unknown' || leftIndex === -1 ? Number.POSITIVE_INFINITY : leftIndex;
+  const rightOrder = right.key === 'unknown' || rightIndex === -1 ? Number.POSITIVE_INFINITY : rightIndex;
+  return leftOrder - rightOrder || left.key.localeCompare(right.key);
+}
+
+function sortStoredThemeEntries(left: DashboardStoredBreakdownEntry, right: DashboardStoredBreakdownEntry): number {
+  return getDashboardActionableTotal(right) - getDashboardActionableTotal(left)
+    || getStoredEntryTotal(right) - getStoredEntryTotal(left)
+    || left.key.localeCompare(right.key);
+}
+
+function incrementStoredBreakdownEntry(
+  entry: DashboardStoredBreakdownEntry,
+  category: DashboardBreakdownCategory,
+): void {
+  entry[category] += 1;
+}
+
+function addStoredEntryToBreakdownRow(
+  row: DashboardBreakdownRow,
+  entry: DashboardStoredBreakdownEntry,
+  scanId: string,
+  scanOrderById?: ReadonlyMap<string, number>,
+): void {
+  const categories: DashboardBreakdownCategory[] = ['high', 'medium', 'low', 'nonHit'];
+  for (const category of categories) {
+    const count = entry[category];
+    if (count <= 0) continue;
+
+    row[category] += count;
+    const currentDrilldownScanId = row.drilldownScanIds?.[category];
+    const nextScanOrder = scanOrderById?.get(scanId) ?? Number.POSITIVE_INFINITY;
+    const currentScanOrder = currentDrilldownScanId
+      ? (scanOrderById?.get(currentDrilldownScanId) ?? Number.POSITIVE_INFINITY)
+      : Number.POSITIVE_INFINITY;
+
+    if (!currentDrilldownScanId || nextScanOrder < currentScanOrder) {
+      row.drilldownScanIds = {
+        ...row.drilldownScanIds,
+        [category]: scanId,
+      };
+    }
+  }
+
+  row.total += getStoredEntryTotal(entry);
+}
+
+export function getDashboardFindingCategory(
+  finding: Pick<Finding, 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed'>,
+): DashboardBreakdownCategory | null {
   if (finding.isFalsePositive) {
     return 'nonHit';
   }
@@ -128,6 +196,40 @@ export function getDashboardFindingCategory(finding: DashboardFindingRecord): Da
   }
 
   return finding.severity;
+}
+
+export function hasCurrentDashboardBreakdowns(scan: Pick<Scan, 'dashboardBreakdowns'>): boolean {
+  return scan.dashboardBreakdowns?.version === DASHBOARD_SCAN_BREAKDOWNS_VERSION
+    && Array.isArray(scan.dashboardBreakdowns.source)
+    && Array.isArray(scan.dashboardBreakdowns.theme);
+}
+
+export function buildDashboardScanBreakdowns(
+  findings: DashboardAggregateFindingRecord[],
+): DashboardScanBreakdowns {
+  const source = new Map<string, DashboardStoredBreakdownEntry>();
+  const theme = new Map<string, DashboardStoredBreakdownEntry>();
+
+  for (const finding of findings) {
+    const category = getDashboardFindingCategory(finding);
+    if (!category) continue;
+
+    const sourceKey = finding.source;
+    const sourceEntry = source.get(sourceKey) ?? emptyDashboardStoredBreakdownEntry(sourceKey);
+    incrementStoredBreakdownEntry(sourceEntry, category);
+    source.set(sourceKey, sourceEntry);
+
+    const themeKey = finding.theme?.trim() ? finding.theme.trim() : UNLABELLED_DASHBOARD_BREAKDOWN_BUCKET;
+    const themeEntry = theme.get(themeKey) ?? emptyDashboardStoredBreakdownEntry(themeKey);
+    incrementStoredBreakdownEntry(themeEntry, category);
+    theme.set(themeKey, themeEntry);
+  }
+
+  return {
+    version: DASHBOARD_SCAN_BREAKDOWNS_VERSION,
+    source: [...source.values()].sort(sortStoredSourceEntries),
+    theme: [...theme.values()].sort(sortStoredThemeEntries),
+  };
 }
 
 export function buildDashboardMetricTotalsFromScans(scans: DashboardCountSource[]): DashboardMetricTotals {
@@ -140,41 +242,25 @@ export function buildDashboardMetricTotalsFromScans(scans: DashboardCountSource[
 }
 
 export function buildDashboardBreakdownRows(
-  findings: DashboardFindingRecord[],
+  scans: DashboardBreakdownScanSource[],
   scanOrderById?: ReadonlyMap<string, number>,
 ): DashboardBreakdownRow[] {
   const rows = new Map<string, DashboardBreakdownRow>();
 
-  for (const finding of findings) {
-    const category = getDashboardFindingCategory(finding);
-    if (!category) continue;
-
-    const label = finding.theme?.trim() ? finding.theme.trim() : UNLABELLED_DASHBOARD_BREAKDOWN_BUCKET;
-    const existing = rows.get(label) ?? {
-      label,
-      filterValue: label,
-      ...emptyDashboardMetricTotals(),
-      total: 0,
-      drilldownScanIds: {},
-    };
-
-    existing[category] += 1;
-    existing.total += 1;
-
-    const currentDrilldownScanId = existing.drilldownScanIds?.[category];
-    const nextScanOrder = scanOrderById?.get(finding.scanId) ?? Number.POSITIVE_INFINITY;
-    const currentScanOrder = currentDrilldownScanId
-      ? (scanOrderById?.get(currentDrilldownScanId) ?? Number.POSITIVE_INFINITY)
-      : Number.POSITIVE_INFINITY;
-
-    if (!currentDrilldownScanId || nextScanOrder < currentScanOrder) {
-      existing.drilldownScanIds = {
-        ...existing.drilldownScanIds,
-        [category]: finding.scanId,
+  for (const scan of scans) {
+    const themeEntries = scan.dashboardBreakdowns?.theme ?? [];
+    for (const entry of themeEntries) {
+      const existing = rows.get(entry.key) ?? {
+        label: entry.key,
+        filterValue: entry.key,
+        ...emptyDashboardMetricTotals(),
+        total: 0,
+        drilldownScanIds: {},
       };
-    }
 
-    rows.set(label, existing);
+      addStoredEntryToBreakdownRow(existing, entry, scan.id, scanOrderById);
+      rows.set(entry.key, existing);
+    }
   }
 
   return [...rows.values()].sort((left, right) => (
@@ -185,40 +271,25 @@ export function buildDashboardBreakdownRows(
 }
 
 export function buildDashboardSourceBreakdownRows(
-  findings: DashboardSourceFindingRecord[],
+  scans: DashboardBreakdownScanSource[],
   scanOrderById?: ReadonlyMap<string, number>,
 ): DashboardBreakdownRow[] {
-  const rows = new Map<FindingSource, DashboardBreakdownRow>();
+  const rows = new Map<string, DashboardBreakdownRow>();
 
-  for (const finding of findings) {
-    const category = getDashboardFindingCategory(finding);
-    if (!category) continue;
-
-    const existing = rows.get(finding.source) ?? {
-      label: getFindingSourceLabel(finding.source),
-      filterValue: finding.source,
-      ...emptyDashboardMetricTotals(),
-      total: 0,
-      drilldownScanIds: {},
-    };
-
-    existing[category] += 1;
-    existing.total += 1;
-
-    const currentDrilldownScanId = existing.drilldownScanIds?.[category];
-    const nextScanOrder = scanOrderById?.get(finding.scanId) ?? Number.POSITIVE_INFINITY;
-    const currentScanOrder = currentDrilldownScanId
-      ? (scanOrderById?.get(currentDrilldownScanId) ?? Number.POSITIVE_INFINITY)
-      : Number.POSITIVE_INFINITY;
-
-    if (!currentDrilldownScanId || nextScanOrder < currentScanOrder) {
-      existing.drilldownScanIds = {
-        ...existing.drilldownScanIds,
-        [category]: finding.scanId,
+  for (const scan of scans) {
+    const sourceEntries = scan.dashboardBreakdowns?.source ?? [];
+    for (const entry of sourceEntries) {
+      const existing = rows.get(entry.key) ?? {
+        label: getDashboardSourceLabel(entry.key),
+        filterValue: entry.key,
+        ...emptyDashboardMetricTotals(),
+        total: 0,
+        drilldownScanIds: {},
       };
-    }
 
-    rows.set(finding.source, existing);
+      addStoredEntryToBreakdownRow(existing, entry, scan.id, scanOrderById);
+      rows.set(entry.key, existing);
+    }
   }
 
   return [...rows.values()].sort((left, right) => (
@@ -228,23 +299,27 @@ export function buildDashboardSourceBreakdownRows(
   ));
 }
 
-export function buildDashboardSourceTimeline(
-  scans: ScanSummary[],
-  findings: DashboardTimelineFindingRecord[],
-): DashboardTimeline | null {
+export function buildDashboardSourceTimeline(scans: DashboardTimelineScanSource[]): DashboardTimeline | null {
   const points = getSortedDashboardTimelinePoints(scans);
   const pointByScanId = new Map(points.map((point) => [point.scanId, point]));
   const totalsBySource = new Map<Exclude<FindingSource, 'unknown'>, number>();
 
-  for (const finding of findings) {
-    if (finding.source === 'unknown') continue;
-    if (!getDashboardActionableCategory(finding)) continue;
-
-    const point = pointByScanId.get(finding.scanId);
+  for (const scan of scans) {
+    const point = pointByScanId.get(scan.id);
     if (!point) continue;
 
-    point.values[finding.source] = (point.values[finding.source] ?? 0) + 1;
-    totalsBySource.set(finding.source, (totalsBySource.get(finding.source) ?? 0) + 1);
+    for (const entry of scan.dashboardBreakdowns?.source ?? []) {
+      if (!SCAN_SOURCE_ORDER.includes(entry.key as Exclude<FindingSource, 'unknown'>)) {
+        continue;
+      }
+
+      const actionableCount = entry.high + entry.medium + entry.low;
+      if (actionableCount <= 0) continue;
+
+      const source = entry.key as Exclude<FindingSource, 'unknown'>;
+      point.values[source] = actionableCount;
+      totalsBySource.set(source, (totalsBySource.get(source) ?? 0) + actionableCount);
+    }
   }
 
   const series: DashboardTimelineSeries[] = SCAN_SOURCE_ORDER
@@ -261,26 +336,22 @@ export function buildDashboardSourceTimeline(
     : null;
 }
 
-export function buildDashboardThemeTimeline(
-  scans: ScanSummary[],
-  findings: DashboardTimelineFindingRecord[],
-): DashboardTimeline | null {
+export function buildDashboardThemeTimeline(scans: DashboardTimelineScanSource[]): DashboardTimeline | null {
   const points = getSortedDashboardTimelinePoints(scans);
   const pointByScanId = new Map(points.map((point) => [point.scanId, point]));
   const totalsByTheme = new Map<string, number>();
   const countsByScanId = new Map<string, Map<string, number>>();
 
-  for (const finding of findings) {
-    if (!getDashboardActionableCategory(finding)) continue;
+  for (const scan of scans) {
+    for (const entry of scan.dashboardBreakdowns?.theme ?? []) {
+      const actionableCount = entry.high + entry.medium + entry.low;
+      if (actionableCount <= 0) continue;
 
-    const point = pointByScanId.get(finding.scanId);
-    if (!point) continue;
-
-    const themeLabel = finding.theme?.trim() ? finding.theme.trim() : UNLABELLED_DASHBOARD_BREAKDOWN_BUCKET;
-    const scanCounts = countsByScanId.get(finding.scanId) ?? new Map<string, number>();
-    scanCounts.set(themeLabel, (scanCounts.get(themeLabel) ?? 0) + 1);
-    countsByScanId.set(finding.scanId, scanCounts);
-    totalsByTheme.set(themeLabel, (totalsByTheme.get(themeLabel) ?? 0) + 1);
+      const scanCounts = countsByScanId.get(scan.id) ?? new Map<string, number>();
+      scanCounts.set(entry.key, actionableCount);
+      countsByScanId.set(scan.id, scanCounts);
+      totalsByTheme.set(entry.key, (totalsByTheme.get(entry.key) ?? 0) + actionableCount);
+    }
   }
 
   const rankedThemes = [...totalsByTheme.entries()]
@@ -289,8 +360,6 @@ export function buildDashboardThemeTimeline(
   if (rankedThemes.length === 0) {
     return null;
   }
-
-  const includedThemeLabels = new Set(rankedThemes.map(([label]) => label));
 
   const series: DashboardTimelineSeries[] = rankedThemes.map(([label, total], index) => ({
     key: buildDashboardTimelineSeriesKey('theme', index),
@@ -307,7 +376,7 @@ export function buildDashboardThemeTimeline(
 
     for (const [themeLabel, count] of themeCounts.entries()) {
       const seriesKey = seriesKeyByTheme.get(themeLabel);
-      if (seriesKey && includedThemeLabels.has(themeLabel)) {
+      if (seriesKey) {
         point.values[seriesKey] = count;
       }
     }

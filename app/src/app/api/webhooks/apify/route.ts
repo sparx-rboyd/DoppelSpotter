@@ -57,6 +57,7 @@ import type { BrandProfile, Finding, Scan, ActorRunInfo, GoogleScannerId } from 
 import {
   getEffectiveScanSettings,
 } from '@/lib/brands';
+import { rebuildAndPersistDashboardBreakdownsForScanIds } from '@/lib/dashboard-aggregates';
 import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
 import {
   buildGoogleScannerQuery,
@@ -4366,6 +4367,15 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
   }
 
   await finalizeScanWithSummary(scanRef, summary);
+  try {
+    await rebuildAndPersistDashboardBreakdownsForScanIds({
+      brandId: fresh.brandId,
+      userId: fresh.userId,
+      scanIds: [fresh.id],
+    });
+  } catch (err) {
+    console.error(`[webhook] Failed to persist dashboard breakdowns for scan ${fresh.id}:`, err);
+  }
   await sendCompletedScanSummaryEmailIfNeeded(scanRef);
 }
 

@@ -5,6 +5,7 @@ import type { ActorConfig } from './apify/actors';
 import { resolveBrandAnalysisSeverityDefinitions } from './analysis-severity';
 import { isBrandDeletionActive, isBrandHistoryDeletionActive } from './async-deletions';
 import { getEffectiveScanSettings } from './brands';
+import { DASHBOARD_SCAN_BREAKDOWNS_VERSION } from './dashboard';
 import {
   clearBrandActiveScanIfMatches,
   isPendingScanStale,
@@ -105,6 +106,11 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
     findingCount: 0,
     addressedCount: 0,
     skippedCount: 0,
+    dashboardBreakdowns: {
+      version: DASHBOARD_SCAN_BREAKDOWNS_VERSION,
+      source: [],
+      theme: [],
+    },
     userPreferenceHintsStatus: 'pending',
     userPreferenceHintsStartedAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
     startedAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,

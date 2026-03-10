@@ -15,14 +15,15 @@ import {
   buildDashboardSourceTimeline,
   buildDashboardSourceBreakdownRows,
   buildDashboardThemeTimeline,
+  hasCurrentDashboardBreakdowns,
   TERMINAL_DASHBOARD_SCAN_STATUSES,
 } from '@/lib/dashboard';
+import { rebuildAndPersistDashboardBreakdownsForScanIds } from '@/lib/dashboard-aggregates';
 import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
 import type {
   BrandProfile,
   DashboardActiveScanSummary,
   DashboardMetricsData,
-  Finding,
   Scan,
   ScanSummary,
 } from '@/lib/types';
@@ -73,6 +74,7 @@ export async function GET(request: NextRequest) {
       'addressedCount',
       'skippedCount',
       'aiSummary',
+      'dashboardBreakdowns',
     )
     .get();
 
@@ -87,33 +89,56 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  const terminalScans: ScanSummary[] = (historyDeletionInProgress ? [] : allScans)
+  const terminalDashboardScans: Scan[] = (historyDeletionInProgress ? [] : allScans)
     .filter((scan) => !isScanDeletionActive(scan))
-    .filter((scan) => TERMINAL_DASHBOARD_SCAN_STATUSES.includes(scan.status))
-    .map((scan) => ({
-      id: scan.id,
-      status: scan.status,
-      startedAt: scan.startedAt,
-      completedAt: scan.completedAt,
-      highCount: scan.highCount ?? 0,
-      mediumCount: scan.mediumCount ?? 0,
-      lowCount: scan.lowCount ?? 0,
-      nonHitCount: scan.nonHitCount ?? 0,
-      ignoredCount: scan.ignoredCount ?? 0,
-      addressedCount: scan.addressedCount ?? 0,
-      skippedCount: scan.skippedCount ?? 0,
-      aiSummary: scan.aiSummary,
-    }));
+    .filter((scan) => TERMINAL_DASHBOARD_SCAN_STATUSES.includes(scan.status));
+
+  const terminalScans: ScanSummary[] = terminalDashboardScans.map((scan) => ({
+    id: scan.id,
+    status: scan.status,
+    startedAt: scan.startedAt,
+    completedAt: scan.completedAt,
+    highCount: scan.highCount ?? 0,
+    mediumCount: scan.mediumCount ?? 0,
+    lowCount: scan.lowCount ?? 0,
+    nonHitCount: scan.nonHitCount ?? 0,
+    ignoredCount: scan.ignoredCount ?? 0,
+    addressedCount: scan.addressedCount ?? 0,
+    skippedCount: scan.skippedCount ?? 0,
+    aiSummary: scan.aiSummary,
+  }));
   const scanOrderById = new Map(terminalScans.map((scan, index) => [scan.id, index]));
 
   let selectedScanId: string | null = null;
-  let selectedScans = terminalScans;
+  let selectedScanSummaries = terminalScans;
+  let selectedDashboardScans = terminalDashboardScans;
 
   if (scanId) {
     const selectedScan = terminalScans.find((scan) => scan.id === scanId);
     if (selectedScan) {
       selectedScanId = selectedScan.id;
-      selectedScans = [selectedScan];
+      selectedScanSummaries = [selectedScan];
+      selectedDashboardScans = terminalDashboardScans.filter((scan) => scan.id === selectedScan.id);
+    }
+  }
+
+  const dashboardScansToEnsure = selectedScanId ? selectedDashboardScans : terminalDashboardScans;
+  const missingDashboardScanIds = dashboardScansToEnsure
+    .filter((scan) => !hasCurrentDashboardBreakdowns(scan))
+    .map((scan) => scan.id);
+
+  if (missingDashboardScanIds.length > 0) {
+    const rebuiltBreakdowns = await rebuildAndPersistDashboardBreakdownsForScanIds({
+      brandId,
+      userId: uid,
+      scanIds: missingDashboardScanIds,
+    });
+
+    for (const scan of terminalDashboardScans) {
+      const dashboardBreakdowns = rebuiltBreakdowns.get(scan.id);
+      if (dashboardBreakdowns) {
+        scan.dashboardBreakdowns = dashboardBreakdowns;
+      }
     }
   }
 
@@ -132,39 +157,17 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const terminalScanIds = new Set(terminalScans.map((scan) => scan.id));
-  let findingsForBreakdown: Array<Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'source' | 'theme'>> = [];
-
-  if (!historyDeletionInProgress && selectedScans.length > 0) {
-    let findingsQuery = db
-      .collection('findings')
-      .where('brandId', '==', brandId)
-      .where('userId', '==', uid);
-
-    if (selectedScanId) {
-      findingsQuery = findingsQuery.where('scanId', '==', selectedScanId);
-    }
-
-    const findingsSnap = await findingsQuery
-      .select('scanId', 'severity', 'isFalsePositive', 'isIgnored', 'isAddressed', 'source', 'theme')
-      .get();
-
-    findingsForBreakdown = findingsSnap.docs
-      .map((doc) => doc.data() as Pick<Finding, 'scanId' | 'severity' | 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'source' | 'theme'>)
-      .filter((finding) => selectedScanId ? true : terminalScanIds.has(finding.scanId));
-  }
-
   const data: DashboardMetricsData = {
     brandId,
     selectedScanId,
     hasTerminalScans: terminalScans.length > 0,
     activeScan,
     scanOptions: terminalScans,
-    totals: buildDashboardMetricTotalsFromScans(selectedScans),
-    sourceBreakdown: buildDashboardSourceBreakdownRows(findingsForBreakdown, scanOrderById),
-    themeBreakdown: buildDashboardBreakdownRows(findingsForBreakdown, scanOrderById),
-    sourceTimeline: selectedScanId ? null : buildDashboardSourceTimeline(terminalScans, findingsForBreakdown),
-    themeTimeline: selectedScanId ? null : buildDashboardThemeTimeline(terminalScans, findingsForBreakdown),
+    totals: buildDashboardMetricTotalsFromScans(selectedScanSummaries),
+    sourceBreakdown: buildDashboardSourceBreakdownRows(selectedDashboardScans, scanOrderById),
+    themeBreakdown: buildDashboardBreakdownRows(selectedDashboardScans, scanOrderById),
+    sourceTimeline: selectedScanId ? null : buildDashboardSourceTimeline(terminalDashboardScans),
+    themeTimeline: selectedScanId ? null : buildDashboardThemeTimeline(terminalDashboardScans),
   };
 
   return NextResponse.json({ data });

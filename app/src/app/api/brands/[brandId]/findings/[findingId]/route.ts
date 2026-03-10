@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { FieldValue, type DocumentSnapshot, type QueryDocumentSnapshot } from '@google-cloud/firestore';
 type FindingDocSnapshot = DocumentSnapshot | QueryDocumentSnapshot;
 import { db } from '@/lib/firestore';
+import { rebuildAndPersistDashboardBreakdownsForScanIds } from '@/lib/dashboard-aggregates';
 import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import type { Finding, FindingCategory, FindingSummary } from '@/lib/types';
@@ -327,6 +328,7 @@ export async function PATCH(request: NextRequest, { params }: Params) {
 
   let affectedFindings: FindingSummary[] = [];
   const affectedScanDeltas: Record<string, CountDelta> = {};
+  const dashboardScanIdsToRefresh = new Set<string>();
 
   if (hasReclassificationUpdate) {
     const reclassifiedCategory = body.reclassifiedCategory as FindingCategory;
@@ -370,6 +372,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           }),
         ),
     );
+
+    Object.keys(affectedScanDeltas).forEach((scanId) => dashboardScanIdsToRefresh.add(scanId));
   }
 
   if (hasAddressedUpdate) {
@@ -423,6 +427,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           }),
         ),
     );
+
+    Object.keys(affectedScanDeltas).forEach((scanId) => dashboardScanIdsToRefresh.add(scanId));
   }
 
   if (hasIgnoreUpdate) {
@@ -490,6 +496,8 @@ export async function PATCH(request: NextRequest, { params }: Params) {
             }),
           ),
         );
+
+        Array.from(byScanId.keys()).forEach((scanId) => dashboardScanIdsToRefresh.add(scanId));
       }
     } else {
       // No URL — update only this document.
@@ -510,8 +518,17 @@ export async function PATCH(request: NextRequest, { params }: Params) {
           [sevField]: FieldValue.increment(-multiplier),
           ignoredCount: FieldValue.increment(multiplier),
         });
+        dashboardScanIdsToRefresh.add(finding.scanId);
       }
     }
+  }
+
+  if (dashboardScanIdsToRefresh.size > 0) {
+    await rebuildAndPersistDashboardBreakdownsForScanIds({
+      brandId,
+      userId: uid,
+      scanIds: [...dashboardScanIdsToRefresh],
+    });
   }
 
   if (Object.keys(bookmarkUpdates).length > 0) {

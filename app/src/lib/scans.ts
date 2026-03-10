@@ -1,5 +1,6 @@
 import { FieldValue, type DocumentReference, type DocumentSnapshot, type QueryDocumentSnapshot, type Transaction } from '@google-cloud/firestore';
 import { db } from './firestore';
+import { rebuildAndPersistDashboardBreakdownsForScanIds } from './dashboard-aggregates';
 import type { BrandProfile, Scan, ScanStatus } from './types';
 
 type ScanSnapshot = DocumentSnapshot | QueryDocumentSnapshot;
@@ -136,7 +137,11 @@ export async function clearBrandActiveScanIfMatches(
  * wedged if the final LLM-based summary step fails after actor processing finished.
  */
 export async function recoverStuckSummarisingScan(scanRef: DocumentReference): Promise<boolean> {
-  return db.runTransaction(async (tx) => {
+  let recoveredScanId: string | null = null;
+  let recoveredBrandId: string | null = null;
+  let recoveredUserId: string | null = null;
+
+  const recovered = await db.runTransaction(async (tx) => {
     const scanSnap = await tx.get(scanRef);
     if (!scanSnap.exists) return false;
 
@@ -164,8 +169,25 @@ export async function recoverStuckSummarisingScan(scanRef: DocumentReference): P
     });
 
     await clearBrandActiveScanIfMatches(brandRef, scan.id, tx, brand);
+    recoveredScanId = scan.id;
+    recoveredBrandId = scan.brandId;
+    recoveredUserId = scan.userId;
     return true;
   });
+
+  if (recovered && recoveredScanId && recoveredBrandId && recoveredUserId) {
+    try {
+      await rebuildAndPersistDashboardBreakdownsForScanIds({
+        brandId: recoveredBrandId,
+        userId: recoveredUserId,
+        scanIds: [recoveredScanId],
+      });
+    } catch (error) {
+      console.error(`[scan] Failed to rebuild dashboard breakdowns for recovered scan ${recoveredScanId}:`, error);
+    }
+  }
+
+  return recovered;
 }
 
 /**

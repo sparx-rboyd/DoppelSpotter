@@ -430,6 +430,8 @@ export interface Scan {
   addressedCount?: number;
   /** Number of duplicate URLs skipped because they already appeared in previous scans. */
   skippedCount?: number;
+  /** Precomputed dashboard source/theme breakdowns used to avoid loading raw findings on dashboard reads. */
+  dashboardBreakdowns?: DashboardScanBreakdowns;
   /** Whether the scan-level soft user-preference hints are still being prepared. */
   userPreferenceHintsStatus?: UserPreferenceHintsStatus;
   /** Tiny scan-level soft guidance derived from prior explicit user-review signals. */
@@ -483,6 +485,16 @@ export interface DashboardMetricTotals {
   medium: number;
   low: number;
   nonHit: number;
+}
+
+export interface DashboardStoredBreakdownEntry extends DashboardMetricTotals {
+  key: string;
+}
+
+export interface DashboardScanBreakdowns {
+  version: number;
+  source: DashboardStoredBreakdownEntry[];
+  theme: DashboardStoredBreakdownEntry[];
 }
 
 export type DashboardBreakdownCategory = keyof DashboardMetricTotals;
