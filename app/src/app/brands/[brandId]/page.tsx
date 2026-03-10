@@ -508,6 +508,7 @@ export default function BrandDetailPage() {
   const [selectedFindingSource, setSelectedFindingSource] = useState<FindingSourceFilter | null>(initialFindingSource);
   const [selectedFindingTheme, setSelectedFindingTheme] = useState(initialFindingTheme);
   const [selectedFindingIds, setSelectedFindingIds] = useState<string[]>([]);
+  const [isBulkActionPanelExpanded, setIsBulkActionPanelExpanded] = useState(false);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [isBulkReclassifyDialogOpen, setIsBulkReclassifyDialogOpen] = useState(false);
   const [selectedBulkReclassificationCategory, setSelectedBulkReclassificationCategory] = useState<FindingCategory | null>(null);
@@ -1972,6 +1973,7 @@ export default function BrandDetailPage() {
 
   useEffect(() => {
     if (selectedFindings.length > 0) return;
+    setIsBulkActionPanelExpanded(false);
     setIsBulkReclassifyDialogOpen(false);
     setSelectedBulkReclassificationCategory(null);
   }, [selectedFindings.length]);
@@ -4218,18 +4220,41 @@ export default function BrandDetailPage() {
                       </p>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={clearSelectedFindings}
-                    disabled={bulkActionLoading}
-                    className="inline-flex items-center gap-1.5 self-start sm:self-center rounded-lg px-3 py-2 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <X className="h-4 w-4" />
-                    Clear selection
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => setIsBulkActionPanelExpanded((current) => !current)}
+                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 sm:hidden"
+                      aria-expanded={isBulkActionPanelExpanded}
+                      aria-controls="bulk-action-panel-content"
+                    >
+                      {isBulkActionPanelExpanded ? 'Hide actions' : 'Show actions'}
+                      <ChevronDown
+                        className={cn(
+                          'h-4 w-4 transition-transform',
+                          isBulkActionPanelExpanded ? 'rotate-180' : 'rotate-0',
+                        )}
+                      />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearSelectedFindings}
+                      disabled={bulkActionLoading}
+                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <X className="h-4 w-4" />
+                      Clear selection
+                    </button>
+                  </div>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-2">
+                <div
+                  id="bulk-action-panel-content"
+                  className={cn(
+                    'gap-4 lg:grid-cols-2',
+                    isBulkActionPanelExpanded ? 'grid' : 'hidden sm:grid',
+                  )}
+                >
                   <div className="rounded-xl bg-slate-50 p-4 border border-slate-200/60">
                     <p className="mb-3 text-[10px] font-bold uppercase tracking-widest text-slate-500">
                       Apply actions
