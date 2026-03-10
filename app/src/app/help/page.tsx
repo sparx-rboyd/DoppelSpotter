@@ -3,7 +3,6 @@
 import { type ElementType, type ReactNode, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
-  Bell,
   CheckCircle2,
   ChevronRight,
   Compass,
@@ -262,7 +261,7 @@ export default function HelpPage() {
                 )}
               >
                 <PlaceholderMedia className="aspect-[16/8]">
-                  [Placeholder: Screenshot of the "Add Brand" or "Brand Settings" page showing Brand name,
+                  [Placeholder: Screenshot of the &quot;Add Brand&quot; or &quot;Brand Settings&quot; page showing Brand name,
                   Keywords, Official domains, Watch words, Safe words, scan settings, and scan types]
                 </PlaceholderMedia>
 
@@ -418,7 +417,7 @@ export default function HelpPage() {
                 )}
               >
                 <PlaceholderMedia className="aspect-[16/8]">
-                  [Placeholder: GIF of opening the "Run scan" menu, choosing between Scan defaults and Custom
+                  [Placeholder: GIF of opening the &quot;Run scan&quot; menu, choosing between Scan defaults and Custom
                   scan, then showing the live progress panel]
                 </PlaceholderMedia>
 
@@ -512,7 +511,7 @@ export default function HelpPage() {
                   <ul className="list-disc space-y-1.5 pl-5">
                     <li><strong className="text-gray-700">Ignored</strong> is for real findings you have dismissed. Ignored items live in the Ignored tab and in per-scan Ignored sections.</li>
                     <li><strong className="text-gray-700">Addressed</strong> is for real findings you acted on and want to keep out of the active queue.</li>
-                    <li><strong className="text-gray-700">Bookmarks</strong> are follow-up markers only. They do not change the finding's severity or review state.</li>
+                    <li><strong className="text-gray-700">Bookmarks</strong> are follow-up markers only. They do not change the finding&apos;s severity or review state.</li>
                     <li>Ignored and addressed behavior is applied across matching findings for the same URL, while bookmarks and notes stay on the individual finding record.</li>
                   </ul>
                 </HelpAccordion>
@@ -690,7 +689,7 @@ export default function HelpPage() {
 
                 <HelpAccordion title="Scan summary emails">
                   <p>
-                    If the brand's <strong className="text-gray-700">Send scan summary emails</strong> setting is
+                    If the brand&apos;s <strong className="text-gray-700">Send scan summary emails</strong> setting is
                     on, DoppelSpotter sends a summary email to your account email address after the scan is
                     fully completed.
                   </p>
