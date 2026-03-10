@@ -3027,7 +3027,7 @@ export default function BrandDetailPage() {
                               <span className="min-w-0">
                                 <span className="block text-sm font-medium text-gray-900">Scan defaults</span>
                                 <span className="mt-1 block text-xs leading-5 text-gray-500">
-                                  Uses the defualts you've set in Brand Settings.
+                                  Uses the defaults you've set in Brand Settings.
                                 </span>
                               </span>
                             </button>
