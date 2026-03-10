@@ -2,7 +2,7 @@
 
 import type { LucideIcon } from 'lucide-react';
 import { Card } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
+import { cn, formatInteger } from '@/lib/utils';
 
 type DashboardMetricCardTone = 'danger' | 'warning' | 'success' | 'neutral';
 
@@ -70,7 +70,7 @@ export function DashboardMetricCard({
       >
         <div className="space-y-2">
           <p className="text-sm font-medium text-gray-500">{label}</p>
-          <p className="text-3xl font-semibold tracking-tight text-gray-900">{value}</p>
+          <p className="text-3xl font-semibold tracking-tight text-gray-900">{formatInteger(value)}</p>
           <p className="text-sm text-gray-500">{description}</p>
         </div>
         <div className={cn('flex h-11 w-11 flex-none aspect-square items-center justify-center rounded-full', toneClass.badge)}>

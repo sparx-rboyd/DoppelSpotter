@@ -76,6 +76,17 @@ export function formatScanDate(date: AnyTimestamp | null | undefined): string {
 }
 
 /**
+ * Format an integer count with locale-aware thousands separators.
+ * Output: "1,798"
+ */
+export function formatInteger(value: number): string {
+  if (!Number.isFinite(value)) return '0';
+  return new Intl.NumberFormat('en-GB', {
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+/**
  * Capitalise the first letter of a string.
  */
 export function capitalise(str: string): string {
