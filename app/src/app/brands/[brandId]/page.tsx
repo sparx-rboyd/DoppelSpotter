@@ -3027,7 +3027,7 @@ export default function BrandDetailPage() {
                               <span className="min-w-0">
                                 <span className="block text-sm font-medium text-gray-900">Scan defaults</span>
                                 <span className="mt-1 block text-xs leading-5 text-gray-500">
-                                  Uses the saved scan depth, deep-search settings, and scan types from Brand Settings.
+                                  Uses the defualts you've set in Brand Settings.
                                 </span>
                               </span>
                             </button>
@@ -3042,7 +3042,7 @@ export default function BrandDetailPage() {
                               <span className="min-w-0">
                                 <span className="block text-sm font-medium text-gray-900">Custom scan</span>
                                 <span className="mt-1 block text-xs leading-5 text-gray-500">
-                                  Override scan depth, deep search, and scan types for this run only.
+                                  Choose custom scan settings for this scan only.
                                 </span>
                               </span>
                             </button>
