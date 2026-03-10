@@ -128,7 +128,7 @@ export function BrandScanTuningFields({
         <div className="flex items-start gap-2.5 rounded-lg border border-brand-100 bg-brand-50 px-4 py-3">
           <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-500" />
           <p className="text-sm text-brand-700">
-            When you first create a brand, we recommend that you run a few scans with a 1 year lookback to build a solid base of findings. After this point, it&apos;s likely that a 1 year lookback will return many duplicate findings, at which point you should reduce the lookback period. This will make your scans, and they'll return higher quality results.
+            When you first create a brand, we recommend that you run a few scans with a 1 year lookback to build a solid base of findings. After this point, it&apos;s likely that a 1 year lookback will return many duplicate findings, at which point you should reduce the lookback period. This will make your scans, and they&apos;ll return higher quality results.
           </p>
         </div>
       </div>
