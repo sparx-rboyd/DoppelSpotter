@@ -74,6 +74,26 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
   let preparedScan: PreparedScanStart | null = null;
   let scheduledSkipResult: StartScanForBrandResult | null = null;
 
+  // Pre-transaction: find the last completed scan so we can resolve 'since_last_scan' lookback date.
+  // Done outside the transaction because Firestore transactions cannot contain non-transactional reads.
+  let lastScanCompletedAt: Date | undefined;
+  try {
+    const lastScanSnapshot = await db
+      .collection('scans')
+      .where('brandId', '==', params.brandId)
+      .where('status', '==', 'completed')
+      .orderBy('completedAt', 'desc')
+      .limit(1)
+      .select('completedAt')
+      .get();
+    if (!lastScanSnapshot.empty) {
+      const completedAt = lastScanSnapshot.docs[0].data().completedAt;
+      lastScanCompletedAt = completedAt?.toDate?.() ?? undefined;
+    }
+  } catch (error) {
+    console.error(`[scan] Failed to query last completed scan for brand ${params.brandId}:`, error);
+  }
+
   const scan: Omit<Scan, 'id'> = {
     brandId: params.brandId,
     userId: '',
@@ -159,7 +179,7 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
     }
 
     scan.userId = brandData.userId;
-    const effectiveSettings = getEffectiveScanSettings(brandData, params.customSettings);
+    const effectiveSettings = getEffectiveScanSettings(brandData, params.customSettings, lastScanCompletedAt);
     const targetActors = getTargetActorConfigs(effectiveSettings.scanSources);
     if (targetActors.length === 0) {
       throw new ScanStartError('At least one scan source must be enabled', 400);

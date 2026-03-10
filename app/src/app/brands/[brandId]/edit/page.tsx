@@ -16,12 +16,14 @@ import { TagInput } from '@/components/ui/tag-input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { InfoTooltip } from '@/components/ui/tooltip';
 import {
+  DEFAULT_LOOKBACK_PERIOD,
   DEFAULT_SEARCH_RESULT_PAGES,
   DEFAULT_ALLOW_AI_DEEP_SEARCHES,
   DEFAULT_BRAND_SCAN_SOURCES,
   normalizeSearchResultPages,
   normalizeAllowAiDeepSearches,
   normalizeBrandScanSources,
+  normalizeLookbackPeriod,
   normalizeMaxAiDeepSearches,
   DEFAULT_MAX_AI_DEEP_SEARCHES,
   hasEnabledBrandScanSource,
@@ -37,7 +39,7 @@ import {
   getScheduleInputFromBrandSchedule,
   isScheduleStartInPast,
 } from '@/lib/scan-schedules';
-import type { BrandAnalysisSeverityDefinitions, BrandProfile, BrandScanScheduleInput } from '@/lib/types';
+import type { BrandAnalysisSeverityDefinitions, BrandProfile, BrandScanScheduleInput, LookbackPeriod } from '@/lib/types';
 
 export default function EditBrandPage() {
   const { brandId } = useParams<{ brandId: string }>();
@@ -57,6 +59,7 @@ export default function EditBrandPage() {
   const [safeWordInput, setSafeWordInput] = useState('');
   const [safeWords, setSafeWords] = useState<string[]>([]);
   const [sendScanSummaryEmails, setSendScanSummaryEmails] = useState(true);
+  const [lookbackPeriod, setLookbackPeriod] = useState<LookbackPeriod>(DEFAULT_LOOKBACK_PERIOD);
   const [searchResultPages, setSearchResultPages] = useState(DEFAULT_SEARCH_RESULT_PAGES);
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
   const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
@@ -94,6 +97,7 @@ export default function EditBrandPage() {
         setKeywords(brand.keywords);
         setDomains(brand.officialDomains);
         setSendScanSummaryEmails(brand.sendScanSummaryEmails ?? true);
+        setLookbackPeriod(normalizeLookbackPeriod(brand.lookbackPeriod));
         setSearchResultPages(normalizeSearchResultPages(brand.searchResultPages));
         setAllowAiDeepSearches(normalizeAllowAiDeepSearches(brand.allowAiDeepSearches));
         setMaxAiDeepSearches(normalizeMaxAiDeepSearches(brand.maxAiDeepSearches));
@@ -236,6 +240,7 @@ export default function EditBrandPage() {
           keywords,
           officialDomains: domains,
           searchResultPages,
+          lookbackPeriod,
           sendScanSummaryEmails,
           allowAiDeepSearches,
           maxAiDeepSearches,
@@ -454,6 +459,8 @@ export default function EditBrandPage() {
                   />
 
                   <BrandScanTuningFields
+                    lookbackPeriod={lookbackPeriod}
+                    onLookbackPeriodChange={setLookbackPeriod}
                     searchResultPages={searchResultPages}
                     onSearchResultPagesChange={setSearchResultPages}
                     allowAiDeepSearches={allowAiDeepSearches}

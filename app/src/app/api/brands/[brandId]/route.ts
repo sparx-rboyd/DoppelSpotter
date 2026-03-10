@@ -18,6 +18,7 @@ import {
   hasEnabledBrandScanSource,
   isValidAllowAiDeepSearches,
   isValidBrandScanSources,
+  isValidLookbackPeriod,
   isValidMaxAiDeepSearches,
   isValidSearchResultPages,
   MAX_AI_DEEP_SEARCHES,
@@ -104,6 +105,12 @@ export async function PATCH(request: NextRequest, { params }: Params) {
       );
     }
     updates.searchResultPages = body.searchResultPages;
+  }
+  if (body.lookbackPeriod !== undefined) {
+    if (!isValidLookbackPeriod(body.lookbackPeriod)) {
+      return errorResponse('lookbackPeriod must be one of: 1year, 1month, 1week, since_last_scan');
+    }
+    updates.lookbackPeriod = body.lookbackPeriod;
   }
   if (body.allowAiDeepSearches !== undefined) {
     if (!isValidAllowAiDeepSearches(body.allowAiDeepSearches)) {

@@ -327,6 +327,7 @@ export function buildGoogleScannerQuery(
 export function sanitizeGoogleQueryForDisplay(query: string): string {
   const sanitized = query
     .replace(/(^|\s)-?site:[^\s]+/gi, ' ')
+    .replace(/(^|\s)after:\d{4}-\d{2}-\d{2}/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 

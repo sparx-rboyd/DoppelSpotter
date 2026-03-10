@@ -4331,6 +4331,11 @@ export default function BrandDetailPage() {
                 <div className="space-y-6">
                   <div className="rounded-2xl border border-gray-200 bg-white p-6">
                     <BrandScanTuningFields
+                      hideDivider
+                      lookbackPeriod={customScanSettings.lookbackPeriod}
+                      onLookbackPeriodChange={(value) => {
+                        setCustomScanSettings((current) => ({ ...current, lookbackPeriod: value }));
+                      }}
                       searchResultPages={customScanSettings.searchResultPages}
                       onSearchResultPagesChange={(value) => {
                         setCustomScanSettings((current) => ({ ...current, searchResultPages: value }));

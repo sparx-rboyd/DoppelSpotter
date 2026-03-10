@@ -112,10 +112,13 @@ upserts and historical repeat suppression, and maps the brand-page `Search depth
 Apify `maxTotalChargeUsd` cap from `$0.20` to `$0.60` per run.
 
 `github-repos` is a repository-level source. It queries public GitHub repository search through
-the Apify actor, maps the brand-page `Search depth` setting from `1..5` to `maxResults = 50..250`,
-stores one finding per repository, derives `https://github.com/<fullName>` as the user-visible
-URL, uses repo `fullName` (`owner/repo`) as the canonical identity for per-scan upserts and
-historical repeat suppression, and does **not** support deep-search follow-up runs.
+the Apify actor with one actor run per search term using the format
+`<keyword> in:name,description pushed:>YYYY-MM-DD`. The brand-page `Search depth` setting
+(`1..5`) maps to a total `maxResults` budget of `50..250` divided evenly across keyword runs
+(minimum 10 results per keyword). Stores one finding per repository, derives
+`https://github.com/<fullName>` as the user-visible URL, uses repo `fullName` (`owner/repo`) as
+the canonical identity for per-scan upserts and historical repeat suppression, and does **not**
+support deep-search follow-up runs.
 
 `x-search` is a tweet-level source. It uses `searchTerms` only, maps the brand-page `Search depth`
 setting from `1..5` to `maxItems = 50..250`, stores one finding per tweet, uses tweet `id` as
@@ -136,7 +139,8 @@ and historical repeat suppression, and does **not** support deep-search follow-u
 ```
 Brand add/edit pages
  └─ persist `brands.sendScanSummaryEmails` to opt the brand into post-scan summary emails
- └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Domain registrations map it to requested domain volume (`100..500`), Discord maps it to an Apify spend cap (`$0.20..$0.60` per run), GitHub maps it to requested repo volume (`50..250`), and X maps it to requested tweet volume (`50..250`)
+ └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Domain registrations map it to requested domain volume (`100..500`), Discord maps it to an Apify spend cap (`$0.20..$0.60` per run), GitHub maps it to a per-keyword result budget from a `50..250` total (minimum 10 per keyword), and X maps it to requested tweet volume (`50..250`)
+ └─ persist `brands.lookbackPeriod` as the user-facing `Lookback period` setting (`1year` | `1month` | `1week` | `since_last_scan`, default `1year`); at scan-start time this is resolved to a concrete `YYYY-MM-DD` date (with a 1-day buffer) and snapshotted as `scans.effectiveSettings.lookbackDate`; Google-backed scans append `after:YYYY-MM-DD` to the search query, Domain registrations use it as the `date` filter, GitHub appends `created:>YYYY-MM-DD pushed:>YYYY-MM-DD` qualifiers, X passes it as `tweetDateSince`; Discord does not support date filtering and is unaffected; the `since_last_scan` option resolves to the brand's last completed scan date, falling back to 1 year when no prior scan exists
  └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches on supported Google-backed scan types
  └─ persist `brands.maxAiDeepSearches` as the user-facing `Google deep search breadth` setting; it caps AI-requested follow-up searches from 1-5 on supported Google-backed scan types
  └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|telegram|apple_app_store|google_play|domains|discord|github|x` so each scan surface can be enabled or disabled per brand
@@ -163,7 +167,8 @@ POST /api/scan
  └─ also snapshots the resolved `scans.analysisSeverityDefinitions` so classification thresholds stay deterministic if the brand settings are edited mid-scan
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
  └─ resolves the scan's enabled logical scanners (`google-web`, `google-reddit`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `google-apple-app-store`, `google-play`, `domain-registrations`, `discord-servers`, `github-repos`, `x-search`) from `scans.effectiveSettings.scanSources`
- └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Domain registrations map the same setting to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to `maxResults = 50..250`; X maps it to `maxItems = 50..250`
+ └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Domain registrations map the same setting to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to a per-keyword `maxResults` from a `50..250` total budget (minimum 10 per keyword); X maps it to `maxItems = 50..250`
+ └─ applies `scans.effectiveSettings.lookbackDate` (pre-resolved YYYY-MM-DD with 1-day buffer) to time-constrain actor queries: Google appends `after:YYYY-MM-DD`, Domain registrations pass it as the `date` + `gte` filter, GitHub appends `created:>` + `pushed:>` qualifiers, X passes `tweetDateSince`; Discord is unaffected
  └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
  └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
  └─ once the scan-level preference hints are ready (or deliberately fail open), replays any deferred succeeded webhooks and then flips the scan to `running`
@@ -554,7 +559,7 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | `users` | id, email, passwordHash, **sessionVersion?**, **lastSeenAt?**, **passwordChangedAt?**, **dashboardPreferences?** (`selectedBrandId?`), createdAt |
 | `inviteCodes` | id (`sha256(code)`), codeHash, createdAt, **usedAt?**, **usedByEmail?**, **usedByUserId?** |
 | `authRateLimits` | id (`<scope>:<sha256(client-identifier)>`), scope, keyHash, attemptCount, windowStartedAt, lastAttemptAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `apple_app_store`, `google_play`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), createdAt, updatedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **lookbackPeriod?** (`1year`\|`1month`\|`1week`\|`since_last_scan`, default `1year`), **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `apple_app_store`, `google_play`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), **deletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), actorIds[], actorRuns{} (`scannerId`, `source`, `status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`, `displayQuery?`, `deepSearchSuggestionsProcessed?`, `suggestedSearches?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`apple_app_store`\|`google_play`\|`domains`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 

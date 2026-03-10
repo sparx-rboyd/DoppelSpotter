@@ -52,6 +52,10 @@ export interface SignupRateLimitRecord {
   lastAttemptAt: Timestamp;
 }
 
+// ─── Lookback Period ─────────────────────────────────────────────────────────
+
+export type LookbackPeriod = '1year' | '1month' | '1week' | 'since_last_scan';
+
 // ─── Scheduling ─────────────────────────────────────────────────────────────
 
 export type ScanScheduleFrequency = 'daily' | 'weekly' | 'fortnightly' | 'monthly';
@@ -134,6 +138,8 @@ export interface BrandProfile {
   officialDomains: string[];
   /** User-configured scan depth (1-5); Google-backed scans currently map this to search result pages. */
   searchResultPages?: number;
+  /** How far back in time scans should look for findings. */
+  lookbackPeriod?: LookbackPeriod;
   /** Whether completed scans should send a summary email to the brand owner's account email. */
   sendScanSummaryEmails?: boolean;
   /** Whether AI analysis may trigger follow-up deep-search runs for supported Google-backed scans for this brand. */
@@ -165,6 +171,7 @@ export interface BrandProfileCreateInput {
   keywords?: string[];
   officialDomains?: string[];
   searchResultPages?: number;
+  lookbackPeriod?: LookbackPeriod;
   sendScanSummaryEmails?: boolean;
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
@@ -180,6 +187,7 @@ export interface BrandProfileUpdateInput {
   keywords?: string[];
   officialDomains?: string[];
   searchResultPages?: number;
+  lookbackPeriod?: LookbackPeriod;
   sendScanSummaryEmails?: boolean;
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
@@ -192,6 +200,9 @@ export interface BrandProfileUpdateInput {
 
 export interface EffectiveScanSettings {
   searchResultPages: number;
+  lookbackPeriod: LookbackPeriod;
+  /** Pre-resolved YYYY-MM-DD date string (with 1-day buffer) for time-constraining actor queries. */
+  lookbackDate: string;
   allowAiDeepSearches: boolean;
   maxAiDeepSearches: number;
   scanSources: BrandScanSources;
@@ -199,6 +210,7 @@ export interface EffectiveScanSettings {
 
 export interface ScanSettingsInput {
   searchResultPages?: number;
+  lookbackPeriod?: LookbackPeriod;
   allowAiDeepSearches?: boolean;
   maxAiDeepSearches?: number;
   scanSources?: BrandScanSources;

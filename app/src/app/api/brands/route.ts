@@ -15,10 +15,12 @@ import {
   isScanDeletionActive,
 } from '@/lib/async-deletions';
 import {
+  DEFAULT_LOOKBACK_PERIOD,
   DEFAULT_SEARCH_RESULT_PAGES,
   DEFAULT_ALLOW_AI_DEEP_SEARCHES,
   DEFAULT_BRAND_SCAN_SOURCES,
   hasEnabledBrandScanSource,
+  isValidLookbackPeriod,
   isValidSearchResultPages,
   isValidAllowAiDeepSearches,
   isValidBrandScanSources,
@@ -155,6 +157,7 @@ export async function POST(request: NextRequest) {
     keywords = [],
     officialDomains = [],
     searchResultPages = DEFAULT_SEARCH_RESULT_PAGES,
+    lookbackPeriod = DEFAULT_LOOKBACK_PERIOD,
     sendScanSummaryEmails = true,
     watchWords = [],
     safeWords = [],
@@ -177,6 +180,10 @@ export async function POST(request: NextRequest) {
     return errorResponse(
       `searchResultPages must be a whole number from ${MIN_SEARCH_RESULT_PAGES} to ${MAX_SEARCH_RESULT_PAGES}`,
     );
+  }
+
+  if (!isValidLookbackPeriod(lookbackPeriod)) {
+    return errorResponse('lookbackPeriod must be one of: 1year, 1month, 1week, since_last_scan');
   }
 
   if (typeof sendScanSummaryEmails !== 'boolean') {
@@ -218,6 +225,7 @@ export async function POST(request: NextRequest) {
     keywords: keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean),
     officialDomains: officialDomains.map((d) => String(d).trim().toLowerCase()).filter(Boolean),
     searchResultPages,
+    lookbackPeriod,
     sendScanSummaryEmails,
     allowAiDeepSearches,
     maxAiDeepSearches,

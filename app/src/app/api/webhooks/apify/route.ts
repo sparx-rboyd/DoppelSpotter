@@ -3050,6 +3050,7 @@ async function triggerDeepSearches({
         actor: scannerConfig,
         query,
         searchResultPages: effectiveSettings.searchResultPages,
+        lookbackDate: scan.effectiveSettings?.lookbackDate ?? effectiveSettings.lookbackDate,
         webhookUrl,
       });
 

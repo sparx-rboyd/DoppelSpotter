@@ -1,5 +1,7 @@
 'use client';
 
+import { Info } from 'lucide-react';
+import { SelectDropdown, type SelectDropdownOption } from '@/components/ui/select-dropdown';
 import { InfoTooltip } from '@/components/ui/tooltip';
 import {
   MAX_AI_DEEP_SEARCHES,
@@ -7,14 +9,25 @@ import {
   MIN_AI_DEEP_SEARCHES,
   MIN_SEARCH_RESULT_PAGES,
 } from '@/lib/brands';
+import type { LookbackPeriod } from '@/lib/types';
+
+const LOOKBACK_PERIOD_OPTIONS: SelectDropdownOption[] = [
+  { value: '1year', label: '1 year' },
+  { value: '1month', label: '1 month' },
+  { value: '1week', label: '1 week' },
+  { value: 'since_last_scan', label: 'Since last scan' },
+];
 
 type BrandScanTuningFieldsProps = {
+  lookbackPeriod: LookbackPeriod;
+  onLookbackPeriodChange: (value: LookbackPeriod) => void;
   searchResultPages: number;
   onSearchResultPagesChange: (value: number) => void;
   allowAiDeepSearches: boolean;
   onAllowAiDeepSearchesChange: (value: boolean) => void;
   maxAiDeepSearches: number;
   onMaxAiDeepSearchesChange: (value: number) => void;
+  hideDivider?: boolean;
 };
 
 type SliderFieldProps = {
@@ -84,15 +97,41 @@ function SliderField({
 }
 
 export function BrandScanTuningFields({
+  lookbackPeriod,
+  onLookbackPeriodChange,
   searchResultPages,
   onSearchResultPagesChange,
   allowAiDeepSearches,
   onAllowAiDeepSearchesChange,
   maxAiDeepSearches,
   onMaxAiDeepSearchesChange,
+  hideDivider = false,
 }: BrandScanTuningFieldsProps) {
   return (
-    <div className="space-y-4 border-t border-gray-100 pt-6">
+    <div className={`space-y-4 ${hideDivider ? '' : 'border-t border-gray-100 pt-6'}`}>
+      <div className="space-y-3 pb-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-700">
+            Lookback period
+            <InfoTooltip content="How far back (in time) scans should look for findings." />
+          </div>
+          <div className="w-44 flex-shrink-0">
+            <SelectDropdown
+              id="lookback-period"
+              value={lookbackPeriod}
+              options={LOOKBACK_PERIOD_OPTIONS}
+              onChange={(value) => onLookbackPeriodChange(value as LookbackPeriod)}
+              ariaLabel="Lookback period"
+            />
+          </div>
+        </div>
+        <div className="flex items-start gap-2.5 rounded-lg border border-brand-100 bg-brand-50 px-4 py-3">
+          <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-500" />
+          <p className="text-sm text-brand-700">
+            When you first create a brand, we recommend that you run a few scans with a 1 year lookback to build a solid base of findings. After this point, it&apos;s likely that a 1 year lookback will return many duplicate findings, at which point you should reduce the lookback period. This will make your scans, and they'll return higher quality results.
+          </p>
+        </div>
+      </div>
       <div className="pb-4">
         <SliderField
           id="search-result-pages"

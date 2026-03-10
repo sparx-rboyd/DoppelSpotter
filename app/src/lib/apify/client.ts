@@ -48,8 +48,7 @@ type PreparedActorInput = {
 
 type ActorRunBrandContext = Pick<BrandProfile, 'name' | 'keywords'>;
 
-const GITHUB_MAX_BOOLEAN_OPERATORS = 5;
-const GITHUB_MAX_OR_TERMS_PER_QUERY = GITHUB_MAX_BOOLEAN_OPERATORS + 1;
+const GITHUB_MIN_RESULTS_PER_KEYWORD = 10;
 
 /**
  * Build a source-specific actor input payload for a brand profile.
@@ -78,7 +77,7 @@ function buildActorInputs(
       input: {
         apiKey: getRequiredEnvVar('CODEPUNCH_API_KEY'),
         apiSecret: getRequiredEnvVar('CODEPUNCH_API_SECRET'),
-        date: getRecentDomainRegistrationDateUtc(),
+        date: settings.lookbackDate,
         dateComparison: 'gte',
         keywords: searchTerms,
         enhancedAnalysisEnabled: true,
@@ -107,6 +106,7 @@ function buildActorInputs(
         maxItems: getInitialXMaxItems(settings.searchResultPages),
         sort: 'Latest',
         includeSearchTerms: true,
+        tweetDateSince: settings.lookbackDate,
       },
       query,
       displayQuery: query,
@@ -114,29 +114,28 @@ function buildActorInputs(
   }
 
   if (actor.kind === 'github') {
-    const searchTermGroups = chunkValues(searchTerms, GITHUB_MAX_OR_TERMS_PER_QUERY);
-    const maxResultsByGroup = splitResultBudget(
-      getInitialGitHubMaxResults(settings.searchResultPages),
-      searchTermGroups.length,
+    const maxResultsPerTerm = Math.max(
+      GITHUB_MIN_RESULTS_PER_KEYWORD,
+      Math.floor(getInitialGitHubMaxResults(settings.searchResultPages) / searchTerms.length),
     );
 
-    return searchTermGroups.map((group, index) => {
-      const displayQuery = joinSearchTermsForDisplay(group);
-      const query = buildGitHubRepoSearchQuery(group);
+    return searchTerms.map((term) => {
+      const query = `${term} in:name,description pushed:>${settings.lookbackDate}`;
       return {
         input: {
           query,
           sortBy: 'best-match',
-          maxResults: maxResultsByGroup[index],
+          maxResults: maxResultsPerTerm,
         },
         query,
-        displayQuery,
+        displayQuery: term,
       };
     });
   }
 
   const primaryQuery = searchTerms.join(' OR ');
-  const query = buildGoogleScannerQuery(actor.source, primaryQuery);
+  const baseGoogleQuery = buildGoogleScannerQuery(actor.source, primaryQuery);
+  const query = `${baseGoogleQuery} after:${settings.lookbackDate}`;
   const googlePageCount = getInitialGooglePageCount(settings.searchResultPages);
 
   return [{
@@ -204,10 +203,11 @@ export async function startDeepSearchRun(
     actor: ActorConfig;
     query: string;
     searchResultPages: number | undefined;
+    lookbackDate: string | undefined;
     webhookUrl: string;
   },
 ): Promise<{ runId: string; query: string; displayQuery: string }> {
-  const { actor, query, searchResultPages, webhookUrl } = params;
+  const { actor, query, searchResultPages, lookbackDate, webhookUrl } = params;
   const client = getClient();
 
   const trimmedQuery = query.trim();
@@ -233,7 +233,8 @@ export async function startDeepSearchRun(
   };
 
   if (actor.kind === 'google') {
-    executableQuery = buildGoogleScannerQuery(actor.source, trimmedQuery);
+    const baseQuery = buildGoogleScannerQuery(actor.source, trimmedQuery);
+    executableQuery = lookbackDate ? `${baseQuery} after:${lookbackDate}` : baseQuery;
     runInput = {
       queries: executableQuery,
       maxPagesPerQuery: getDeepSearchGooglePageCount(searchResultPages),
@@ -336,12 +337,6 @@ function joinSearchTermsForDisplay(values: string[]): string {
   return values.join(' | ');
 }
 
-function buildGitHubRepoSearchQuery(values: string[]): string {
-  return values
-    .map((value) => `"${value.replace(/"/g, '\\"')}"`)
-    .join(' OR ');
-}
-
 function buildActorStartOptions(
   actor: ActorConfig,
   settings: EffectiveScanSettings,
@@ -364,33 +359,6 @@ function buildActorStartOptions(
   return startOptions;
 }
 
-function splitResultBudget(total: number, partCount: number): number[] {
-  const safeTotal = Math.max(1, Math.floor(total));
-  const safePartCount = Math.max(1, Math.floor(partCount));
-  const base = Math.floor(safeTotal / safePartCount);
-  let remainder = safeTotal % safePartCount;
-
-  return Array.from({ length: safePartCount }, () => {
-    const next = base + (remainder > 0 ? 1 : 0);
-    if (remainder > 0) {
-      remainder -= 1;
-    }
-    return Math.max(1, next);
-  });
-}
-
-function chunkValues<T>(values: T[], chunkSize: number): T[][] {
-  if (chunkSize <= 0) {
-    throw new Error(`chunkSize must be positive, received ${chunkSize}`);
-  }
-
-  const chunks: T[][] = [];
-  for (let index = 0; index < values.length; index += chunkSize) {
-    chunks.push(values.slice(index, index + chunkSize));
-  }
-  return chunks;
-}
-
 function getRequiredEnvVar(name: 'CODEPUNCH_API_KEY' | 'CODEPUNCH_API_SECRET' | 'OPENROUTER_API_KEY'): string {
   const value = process.env[name]?.trim();
   if (!value) {
@@ -399,10 +367,3 @@ function getRequiredEnvVar(name: 'CODEPUNCH_API_KEY' | 'CODEPUNCH_API_SECRET' | 
   return value;
 }
 
-function getRecentDomainRegistrationDateUtc(now = new Date()): string {
-  const year = now.getUTCFullYear();
-  const month = now.getUTCMonth();
-  const day = now.getUTCDate();
-  const oneMonthAgo = new Date(Date.UTC(year, month - 1, day));
-  return oneMonthAgo.toISOString().slice(0, 10);
-}

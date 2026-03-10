@@ -1,4 +1,7 @@
-import type { BrandProfile, BrandScanSources, EffectiveScanSettings, ScanSettingsInput } from '@/lib/types';
+import type { BrandProfile, BrandScanSources, EffectiveScanSettings, LookbackPeriod, ScanSettingsInput } from '@/lib/types';
+
+export const DEFAULT_LOOKBACK_PERIOD: LookbackPeriod = '1year';
+export const LOOKBACK_PERIOD_VALUES: LookbackPeriod[] = ['1year', '1month', '1week', 'since_last_scan'];
 
 export const DEFAULT_SEARCH_RESULT_PAGES = 3;
 export const MIN_SEARCH_RESULT_PAGES = 1;
@@ -165,17 +168,68 @@ export function hasEnabledBrandScanSource(value: unknown): boolean {
   );
 }
 
+export function isValidLookbackPeriod(value: unknown): value is LookbackPeriod {
+  return typeof value === 'string' && (LOOKBACK_PERIOD_VALUES as string[]).includes(value);
+}
+
+export function normalizeLookbackPeriod(value: unknown): LookbackPeriod {
+  return isValidLookbackPeriod(value) ? value : DEFAULT_LOOKBACK_PERIOD;
+}
+
+/**
+ * Resolves the lookback period to a concrete YYYY-MM-DD date string.
+ * Applies a 1-day buffer (subtracts an extra day) so edge-case results at the
+ * exact period boundary are not missed.
+ * Falls back to "1 year" when `since_last_scan` is selected but no prior scan exists.
+ */
+export function resolveLookbackDate(
+  period: LookbackPeriod,
+  lastScanCompletedAt?: Date,
+  now = new Date(),
+): string {
+  let boundary: Date;
+  const year = now.getUTCFullYear();
+  const month = now.getUTCMonth();
+  const day = now.getUTCDate();
+
+  if (period === '1year') {
+    boundary = new Date(Date.UTC(year - 1, month, day - 1));
+  } else if (period === '1month') {
+    boundary = new Date(Date.UTC(year, month - 1, day - 1));
+  } else if (period === '1week') {
+    boundary = new Date(Date.UTC(year, month, day - 7 - 1));
+  } else {
+    // since_last_scan — fall back to 1 year if no prior scan
+    if (lastScanCompletedAt) {
+      const ly = lastScanCompletedAt.getUTCFullYear();
+      const lm = lastScanCompletedAt.getUTCMonth();
+      const ld = lastScanCompletedAt.getUTCDate();
+      boundary = new Date(Date.UTC(ly, lm, ld - 1));
+    } else {
+      boundary = new Date(Date.UTC(year - 1, month, day - 1));
+    }
+  }
+
+  return boundary.toISOString().slice(0, 10);
+}
+
 export function getEffectiveScanSettings(
-  source?: Pick<BrandProfile, 'searchResultPages' | 'allowAiDeepSearches' | 'maxAiDeepSearches' | 'scanSources'> | null,
+  source?: Pick<BrandProfile, 'searchResultPages' | 'lookbackPeriod' | 'allowAiDeepSearches' | 'maxAiDeepSearches' | 'scanSources'> | null,
   overrides?: ScanSettingsInput,
+  lastScanCompletedAt?: Date,
 ): EffectiveScanSettings {
   const baseSearchResultPages = overrides?.searchResultPages ?? source?.searchResultPages;
+  const baseLookbackPeriod = overrides?.lookbackPeriod ?? source?.lookbackPeriod;
   const baseAllowAiDeepSearches = overrides?.allowAiDeepSearches ?? source?.allowAiDeepSearches;
   const baseMaxAiDeepSearches = overrides?.maxAiDeepSearches ?? source?.maxAiDeepSearches;
   const baseScanSources = overrides?.scanSources ?? source?.scanSources;
 
+  const lookbackPeriod = normalizeLookbackPeriod(baseLookbackPeriod);
+
   return {
     searchResultPages: normalizeSearchResultPages(baseSearchResultPages),
+    lookbackPeriod,
+    lookbackDate: resolveLookbackDate(lookbackPeriod, lastScanCompletedAt),
     allowAiDeepSearches: normalizeAllowAiDeepSearches(baseAllowAiDeepSearches),
     maxAiDeepSearches: normalizeMaxAiDeepSearches(baseMaxAiDeepSearches),
     scanSources: normalizeBrandScanSources(baseScanSources),

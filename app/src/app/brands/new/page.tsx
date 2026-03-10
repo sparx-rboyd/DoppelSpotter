@@ -16,6 +16,7 @@ import { TagInput } from '@/components/ui/tag-input';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { InfoTooltip } from '@/components/ui/tooltip';
 import {
+  DEFAULT_LOOKBACK_PERIOD,
   DEFAULT_SEARCH_RESULT_PAGES,
   DEFAULT_ALLOW_AI_DEEP_SEARCHES,
   DEFAULT_BRAND_SCAN_SOURCES,
@@ -29,7 +30,7 @@ import {
   getDefaultScheduleStartInput,
   isScheduleStartInPast,
 } from '@/lib/scan-schedules';
-import type { BrandAnalysisSeverityDefinitions, BrandScanScheduleInput } from '@/lib/types';
+import type { BrandAnalysisSeverityDefinitions, BrandScanScheduleInput, LookbackPeriod } from '@/lib/types';
 
 export default function NewBrandPage() {
   const router = useRouter();
@@ -45,6 +46,7 @@ export default function NewBrandPage() {
   const [safeWordInput, setSafeWordInput] = useState('');
   const [safeWords, setSafeWords] = useState<string[]>([]);
   const [sendScanSummaryEmails, setSendScanSummaryEmails] = useState(true);
+  const [lookbackPeriod, setLookbackPeriod] = useState<LookbackPeriod>(DEFAULT_LOOKBACK_PERIOD);
   const [searchResultPages, setSearchResultPages] = useState(DEFAULT_SEARCH_RESULT_PAGES);
   const [allowAiDeepSearches, setAllowAiDeepSearches] = useState(DEFAULT_ALLOW_AI_DEEP_SEARCHES);
   const [maxAiDeepSearches, setMaxAiDeepSearches] = useState(DEFAULT_MAX_AI_DEEP_SEARCHES);
@@ -160,6 +162,7 @@ export default function NewBrandPage() {
           keywords,
           officialDomains: domains,
           searchResultPages,
+          lookbackPeriod,
           sendScanSummaryEmails,
           allowAiDeepSearches,
           maxAiDeepSearches,
@@ -334,6 +337,8 @@ export default function NewBrandPage() {
                 />
 
                 <BrandScanTuningFields
+                  lookbackPeriod={lookbackPeriod}
+                  onLookbackPeriodChange={setLookbackPeriod}
                   searchResultPages={searchResultPages}
                   onSearchResultPagesChange={setSearchResultPages}
                   allowAiDeepSearches={allowAiDeepSearches}
