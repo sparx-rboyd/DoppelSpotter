@@ -216,9 +216,9 @@ function SeverityGroup({
           className="flex items-center gap-2 flex-1 px-4 py-3 text-left min-w-0"
           aria-expanded={expanded}
         >
-          {expanded
+          {!forceExpanded && (expanded
             ? <ChevronDown className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />
-            : <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />}
+            : <ChevronRight className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />)}
           <Badge variant={variant} className={SEVERITY_BADGE_CLASSES[severity]}>
             <Icon className="w-3.5 h-3.5" />
             {label}
@@ -3681,9 +3681,9 @@ export default function BrandDetailPage() {
                                               showLiveNonHitsSection ? "border-b border-gray-100 bg-gray-50" : "hover:bg-gray-50",
                                             )}
                                           >
-                                            {showLiveNonHitsSection
+                                            {!isAnyFindingFilterActive && (showLiveNonHitsSection
                                               ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-                                              : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
+                                              : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />)}
                                             <span className="text-sm font-medium text-gray-500">
                                               Non-findings
                                               <span className="ml-1.5 text-xs font-normal text-gray-400">
@@ -3840,9 +3840,9 @@ export default function BrandDetailPage() {
                                       className="flex min-w-0 flex-1 items-start gap-4 text-left"
                                       aria-expanded={isExpanded}
                                     >
-                                      {isExpanded
+                                      {!isAnyFindingFilterActive && (isExpanded
                                         ? <ChevronDown className="mt-0.5 w-4 h-4 text-gray-400 flex-shrink-0" />
-                                        : <ChevronRight className="mt-0.5 w-4 h-4 text-gray-400 flex-shrink-0" />}
+                                        : <ChevronRight className="mt-0.5 w-4 h-4 text-gray-400 flex-shrink-0" />)}
                                       <span className="flex min-w-0 flex-1 flex-col gap-2.5">
                                         <span className="flex flex-wrap items-center gap-2">
                                           <span className="text-sm font-semibold text-gray-500">
@@ -4082,9 +4082,9 @@ export default function BrandDetailPage() {
                                                 showNonHits ? "border-b border-gray-100 bg-gray-50" : "hover:bg-gray-50",
                                               )}
                                             >
-                                              {showNonHits
+                                              {!isAnyFindingFilterActive && (showNonHits
                                                 ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-                                                : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
+                                                : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />)}
                                               <span className="text-sm font-medium text-gray-500">
                                                 Non-findings
                                                 <span className="ml-1.5 text-xs font-normal text-gray-400">
@@ -4134,9 +4134,9 @@ export default function BrandDetailPage() {
                                                 showIgnored ? "border-b border-gray-100 bg-gray-50" : "hover:bg-gray-50",
                                               )}
                                             >
-                                              {showIgnored
+                                              {!isAnyFindingFilterActive && (showIgnored
                                                 ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" />
-                                                : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
+                                                : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />)}
                                               <EyeOff className="w-3.5 h-3.5 text-gray-400" />
                                               <span className="text-sm font-medium text-gray-500">
                                                 Ignored
