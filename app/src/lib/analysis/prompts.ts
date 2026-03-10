@@ -62,7 +62,7 @@ Rules for "items":
 - If none fit well, create a new short label rather than forcing a poor match.
 - Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
 - You MUST not create very niche theme labels that few results would likely be linked with over time. 
-- Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
+- Never create generic theme labels like 'Unknown', 'Unlabelled' or 'Unrelated' - if you don't feel it's appropriate to use an existing label not create a new one, always use 'Other'.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current result.
 
 Severity assignment:

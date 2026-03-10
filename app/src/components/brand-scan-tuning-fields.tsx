@@ -145,8 +145,8 @@ export function BrandScanTuningFields({
         <div className="-mx-6 border-t border-gray-100 bg-gray-50 px-6 py-4">
           <SliderField
             id="max-ai-deep-searches"
-            label="Google deep search breadth"
-            tooltip="Controls how many follow-up searches AI analysis may request when it spots something concerning on Google-backed scan types. More deep searches increase coverage, but scans will be slower."
+            label="Deep search breadth"
+            tooltip="Controls how many follow-up searches AI analysis may request when it spots something concerning. More deep searches increase coverage, but scans will be slower."
             value={maxAiDeepSearches}
             min={MIN_AI_DEEP_SEARCHES}
             max={MAX_AI_DEEP_SEARCHES}
