@@ -269,6 +269,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and scanner-specific focus, and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
 └─ AI-requested deep-search eligibility, breadth, and Google page depth are read from `scans.effectiveSettings` when present, falling back to brand defaults only for older scans
 └─ before each finding-level classification pass, the webhook loads the brand's existing finding `theme` labels so the LLM can preferentially reuse them
+└─ for every chunked classification source, a failed or incomplete LLM chunk is retried once; if the retry also fails, that chunk's candidates are discarded entirely rather than stored as manual-review fallbacks
  └─ each classification prompt also receives the scan's resolved high/medium/low severity definitions, falling back to the current brand defaults only for older scans that predate the snapshot
  └─ one Finding written per normalized URL per scan (deterministic upsert; repeated URLs merged)
 └─ each LLM-classified finding may also store a short primary `theme` label (prefer 1 word, hard max 3 words)

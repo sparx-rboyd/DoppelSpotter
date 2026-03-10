@@ -819,7 +819,7 @@ async function analyseAndWriteGoogleBatch({
   const chunkResults = await mapWithConcurrency(
     chunks,
     GOOGLE_ANALYSIS_CONCURRENCY,
-    async (chunk, chunkIndex): Promise<GoogleChunkAnalysisResult> => {
+    async (chunk, chunkIndex): Promise<GoogleChunkAnalysisResult | null> => {
       const prompt = buildGoogleChunkAnalysisPrompt({
         scanner: scannerConfig,
         brandName: brand.name,
@@ -837,31 +837,17 @@ async function analyseAndWriteGoogleBatch({
       const llmAnalysisPrompt = formatLlmPromptForDebug(GOOGLE_CLASSIFICATION_SYSTEM_PROMPT, prompt);
 
       try {
-        const chunkResult = await analyseGoogleChunk({
-          candidates: chunk,
-          prompt,
-          llmAnalysisPrompt,
+        return await retryChunkAnalysisOnce({
+          sourceLabel: 'Google',
+          datasetId,
+          chunkIndex,
+          totalChunks: chunks.length,
+          analyse: () => analyseGoogleChunk({
+            candidates: chunk,
+            prompt,
+            llmAnalysisPrompt,
+          }),
         });
-
-        return chunkResult;
-      } catch (err) {
-        console.error(`[webhook] Google chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
-
-        const fallbackOutcomes = new Map<string, { candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>();
-        for (const candidate of chunk) {
-          fallbackOutcomes.set(candidate.normalizedUrl, {
-            candidate,
-            outcome: buildGoogleFallbackOutcome(
-              'AI analysis failed for this chunk. Raw data is preserved for manual review.',
-              undefined,
-              llmAnalysisPrompt,
-            ),
-          });
-        }
-
-        return {
-          outcomes: fallbackOutcomes,
-        };
       } finally {
         await scanDoc.ref.update({
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
@@ -871,6 +857,7 @@ async function analyseAndWriteGoogleBatch({
   );
 
   for (const chunkResult of chunkResults) {
+    if (!chunkResult) continue;
     for (const [normalizedUrl, value] of chunkResult.outcomes.entries()) {
       outcomes.set(normalizedUrl, value);
     }
@@ -979,7 +966,7 @@ async function analyseAndWriteDiscordBatch({
   const chunkResults = await mapWithConcurrency(
     chunks,
     DISCORD_ANALYSIS_CONCURRENCY,
-    async (chunk, chunkIndex): Promise<DiscordChunkAnalysisResult> => {
+    async (chunk, chunkIndex): Promise<DiscordChunkAnalysisResult | null> => {
       const prompt = buildDiscordChunkAnalysisPrompt({
         brandName: brand.name,
         keywords: brand.keywords,
@@ -996,29 +983,17 @@ async function analyseAndWriteDiscordBatch({
       const llmAnalysisPrompt = formatLlmPromptForDebug(DISCORD_CLASSIFICATION_SYSTEM_PROMPT, prompt);
 
       try {
-        return await analyseDiscordChunk({
-          candidates: chunk,
-          prompt,
-          llmAnalysisPrompt,
+        return await retryChunkAnalysisOnce({
+          sourceLabel: 'Discord',
+          datasetId,
+          chunkIndex,
+          totalChunks: chunks.length,
+          analyse: () => analyseDiscordChunk({
+            candidates: chunk,
+            prompt,
+            llmAnalysisPrompt,
+          }),
         });
-      } catch (err) {
-        console.error(`[webhook] Discord chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
-
-        const fallbackOutcomes = new Map<string, { candidate: DiscordServerCandidate; outcome: DiscordFindingOutcome }>();
-        for (const candidate of chunk) {
-          fallbackOutcomes.set(candidate.serverId, {
-            candidate,
-            outcome: buildDiscordFallbackOutcome(
-              'AI analysis failed for this chunk. Raw data is preserved for manual review.',
-              undefined,
-              llmAnalysisPrompt,
-            ),
-          });
-        }
-
-        return {
-          outcomes: fallbackOutcomes,
-        };
       } finally {
         await scanDoc.ref.update({
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
@@ -1028,6 +1003,7 @@ async function analyseAndWriteDiscordBatch({
   );
 
   for (const chunkResult of chunkResults) {
+    if (!chunkResult) continue;
     for (const [serverId, value] of chunkResult.outcomes.entries()) {
       outcomes.set(serverId, value);
     }
@@ -1127,7 +1103,7 @@ async function analyseAndWriteDomainRegistrationBatch({
   const chunkResults = await mapWithConcurrency(
     chunks,
     DOMAIN_REGISTRATION_ANALYSIS_CONCURRENCY,
-    async (chunk, chunkIndex): Promise<DomainRegistrationChunkAnalysisResult> => {
+    async (chunk, chunkIndex): Promise<DomainRegistrationChunkAnalysisResult | null> => {
       const prompt = buildDomainRegistrationChunkAnalysisPrompt({
         brandName: brand.name,
         keywords: brand.keywords,
@@ -1144,29 +1120,17 @@ async function analyseAndWriteDomainRegistrationBatch({
       const llmAnalysisPrompt = formatLlmPromptForDebug(DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT, prompt);
 
       try {
-        return await analyseDomainRegistrationChunk({
-          candidates: chunk,
-          prompt,
-          llmAnalysisPrompt,
+        return await retryChunkAnalysisOnce({
+          sourceLabel: 'Domain-registration',
+          datasetId,
+          chunkIndex,
+          totalChunks: chunks.length,
+          analyse: () => analyseDomainRegistrationChunk({
+            candidates: chunk,
+            prompt,
+            llmAnalysisPrompt,
+          }),
         });
-      } catch (err) {
-        console.error(`[webhook] Domain-registration chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
-
-        const fallbackOutcomes = new Map<string, { candidate: DomainRegistrationCandidate; outcome: DomainRegistrationFindingOutcome }>();
-        for (const candidate of chunk) {
-          fallbackOutcomes.set(candidate.domain, {
-            candidate,
-            outcome: buildDomainRegistrationFallbackOutcome(
-              'AI analysis failed for this chunk. Raw data is preserved for manual review.',
-              undefined,
-              llmAnalysisPrompt,
-            ),
-          });
-        }
-
-        return {
-          outcomes: fallbackOutcomes,
-        };
       } finally {
         await scanDoc.ref.update({
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
@@ -1176,6 +1140,7 @@ async function analyseAndWriteDomainRegistrationBatch({
   );
 
   for (const chunkResult of chunkResults) {
+    if (!chunkResult) continue;
     for (const [domain, value] of chunkResult.outcomes.entries()) {
       outcomes.set(domain, value);
     }
@@ -1274,7 +1239,7 @@ async function analyseAndWriteXBatch({
   const chunkResults = await mapWithConcurrency(
     chunks,
     X_ANALYSIS_CONCURRENCY,
-    async (chunk, chunkIndex): Promise<XChunkAnalysisResult> => {
+    async (chunk, chunkIndex): Promise<XChunkAnalysisResult | null> => {
       const prompt = buildXChunkAnalysisPrompt({
         brandName: brand.name,
         keywords: brand.keywords,
@@ -1291,29 +1256,17 @@ async function analyseAndWriteXBatch({
       const llmAnalysisPrompt = formatLlmPromptForDebug(X_CLASSIFICATION_SYSTEM_PROMPT, prompt);
 
       try {
-        return await analyseXChunk({
-          candidates: chunk,
-          prompt,
-          llmAnalysisPrompt,
+        return await retryChunkAnalysisOnce({
+          sourceLabel: 'X',
+          datasetId,
+          chunkIndex,
+          totalChunks: chunks.length,
+          analyse: () => analyseXChunk({
+            candidates: chunk,
+            prompt,
+            llmAnalysisPrompt,
+          }),
         });
-      } catch (err) {
-        console.error(`[webhook] X chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
-
-        const fallbackOutcomes = new Map<string, { candidate: XTweetCandidate; outcome: XFindingOutcome }>();
-        for (const candidate of chunk) {
-          fallbackOutcomes.set(candidate.tweetId, {
-            candidate,
-            outcome: buildXFallbackOutcome(
-              'AI analysis failed for this chunk. Raw data is preserved for manual review.',
-              undefined,
-              llmAnalysisPrompt,
-            ),
-          });
-        }
-
-        return {
-          outcomes: fallbackOutcomes,
-        };
       } finally {
         await scanDoc.ref.update({
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
@@ -1323,6 +1276,7 @@ async function analyseAndWriteXBatch({
   );
 
   for (const chunkResult of chunkResults) {
+    if (!chunkResult) continue;
     for (const [tweetId, value] of chunkResult.outcomes.entries()) {
       outcomes.set(tweetId, value);
     }
@@ -1421,7 +1375,7 @@ async function analyseAndWriteGitHubBatch({
   const chunkResults = await mapWithConcurrency(
     chunks,
     GITHUB_ANALYSIS_CONCURRENCY,
-    async (chunk, chunkIndex): Promise<GitHubChunkAnalysisResult> => {
+    async (chunk, chunkIndex): Promise<GitHubChunkAnalysisResult | null> => {
       const prompt = buildGitHubChunkAnalysisPrompt({
         brandName: brand.name,
         keywords: brand.keywords,
@@ -1438,29 +1392,17 @@ async function analyseAndWriteGitHubBatch({
       const llmAnalysisPrompt = formatLlmPromptForDebug(GITHUB_CLASSIFICATION_SYSTEM_PROMPT, prompt);
 
       try {
-        return await analyseGitHubChunk({
-          candidates: chunk,
-          prompt,
-          llmAnalysisPrompt,
+        return await retryChunkAnalysisOnce({
+          sourceLabel: 'GitHub',
+          datasetId,
+          chunkIndex,
+          totalChunks: chunks.length,
+          analyse: () => analyseGitHubChunk({
+            candidates: chunk,
+            prompt,
+            llmAnalysisPrompt,
+          }),
         });
-      } catch (err) {
-        console.error(`[webhook] GitHub chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${chunks.length}):`, err);
-
-        const fallbackOutcomes = new Map<string, { candidate: GitHubRepoCandidate; outcome: GitHubFindingOutcome }>();
-        for (const candidate of chunk) {
-          fallbackOutcomes.set(candidate.fullName, {
-            candidate,
-            outcome: buildGitHubFallbackOutcome(
-              'AI analysis failed for this chunk. Raw data is preserved for manual review.',
-              undefined,
-              llmAnalysisPrompt,
-            ),
-          });
-        }
-
-        return {
-          outcomes: fallbackOutcomes,
-        };
       } finally {
         await scanDoc.ref.update({
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
@@ -1470,6 +1412,7 @@ async function analyseAndWriteGitHubBatch({
   );
 
   for (const chunkResult of chunkResults) {
+    if (!chunkResult) continue;
     for (const [fullName, value] of chunkResult.outcomes.entries()) {
       outcomes.set(fullName, value);
     }
@@ -1601,6 +1544,59 @@ type ScanSummaryFindingInput = Pick<Finding, 'severity' | 'title' | 'llmAnalysis
 type MarkActorRunCompleteResult = {
   needsSummary: boolean;
 };
+
+async function retryChunkAnalysisOnce<Result>({
+  sourceLabel,
+  datasetId,
+  chunkIndex,
+  totalChunks,
+  analyse,
+}: {
+  sourceLabel: string;
+  datasetId: string;
+  chunkIndex: number;
+  totalChunks: number;
+  analyse: () => Promise<Result>;
+}): Promise<Result | null> {
+  const maxAttempts = 2;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await analyse();
+    } catch (err) {
+      const prefix = `[webhook] ${sourceLabel} chunk analysis failed for dataset ${datasetId} (chunk ${chunkIndex + 1}/${totalChunks}, attempt ${attempt}/${maxAttempts})`;
+      if (attempt < maxAttempts) {
+        console.warn(`${prefix}; retrying chunk once:`, err);
+        continue;
+      }
+
+      console.error(`${prefix}; dropping chunk results:`, err);
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function assertChunkAnalysisCoveredCandidates<Item extends { resultId: string }>(
+  sourceLabel: string,
+  candidates: Array<{ resultId: string }>,
+  byResultId: Map<string, Item>,
+): void {
+  const missingResultIds = candidates
+    .map((candidate) => candidate.resultId)
+    .filter((resultId) => !byResultId.has(resultId));
+
+  if (missingResultIds.length === 0) {
+    return;
+  }
+
+  const preview = missingResultIds.slice(0, 3).join(', ');
+  const suffix = missingResultIds.length > 3 ? ', ...' : '';
+  throw new Error(
+    `${sourceLabel} chunk analysis omitted ${missingResultIds.length} of ${candidates.length} candidates: ${preview}${suffix}`,
+  );
+}
 
 function normalizeGoogleSerpRun({
   source,
@@ -2079,19 +2075,14 @@ async function analyseGoogleChunk({
   }
 
   const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  assertChunkAnalysisCoveredCandidates('Google', candidates, byResultId);
   const outcomes = new Map<string, { candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>();
 
   for (const candidate of candidates) {
-    const item = byResultId.get(candidate.resultId);
+    const item = byResultId.get(candidate.resultId)!;
     outcomes.set(candidate.normalizedUrl, {
       candidate,
-      outcome: item
-        ? buildGoogleFindingOutcome(item, raw, llmAnalysisPrompt)
-        : buildGoogleFallbackOutcome(
-            'AI analysis returned no assessment for this result. Raw data is preserved for manual review.',
-            raw,
-            llmAnalysisPrompt,
-          ),
+      outcome: buildGoogleFindingOutcome(item, raw, llmAnalysisPrompt),
     });
   }
 
@@ -2118,19 +2109,14 @@ async function analyseDiscordChunk({
   }
 
   const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  assertChunkAnalysisCoveredCandidates('Discord', candidates, byResultId);
   const outcomes = new Map<string, { candidate: DiscordServerCandidate; outcome: DiscordFindingOutcome }>();
 
   for (const candidate of candidates) {
-    const item = byResultId.get(candidate.resultId);
+    const item = byResultId.get(candidate.resultId)!;
     outcomes.set(candidate.serverId, {
       candidate,
-      outcome: item
-        ? buildDiscordFindingOutcome(item, raw, llmAnalysisPrompt)
-        : buildDiscordFallbackOutcome(
-            'AI analysis returned no assessment for this server. Raw data is preserved for manual review.',
-            raw,
-            llmAnalysisPrompt,
-          ),
+      outcome: buildDiscordFindingOutcome(item, raw, llmAnalysisPrompt),
     });
   }
 
@@ -2157,19 +2143,14 @@ async function analyseDomainRegistrationChunk({
   }
 
   const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  assertChunkAnalysisCoveredCandidates('Domain-registration', candidates, byResultId);
   const outcomes = new Map<string, { candidate: DomainRegistrationCandidate; outcome: DomainRegistrationFindingOutcome }>();
 
   for (const candidate of candidates) {
-    const item = byResultId.get(candidate.resultId);
+    const item = byResultId.get(candidate.resultId)!;
     outcomes.set(candidate.domain, {
       candidate,
-      outcome: item
-        ? buildDomainRegistrationFindingOutcome(item, raw, llmAnalysisPrompt)
-        : buildDomainRegistrationFallbackOutcome(
-            'AI analysis returned no assessment for this domain. Raw data is preserved for manual review.',
-            raw,
-            llmAnalysisPrompt,
-          ),
+      outcome: buildDomainRegistrationFindingOutcome(item, raw, llmAnalysisPrompt),
     });
   }
 
@@ -2196,19 +2177,14 @@ async function analyseXChunk({
   }
 
   const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  assertChunkAnalysisCoveredCandidates('X', candidates, byResultId);
   const outcomes = new Map<string, { candidate: XTweetCandidate; outcome: XFindingOutcome }>();
 
   for (const candidate of candidates) {
-    const item = byResultId.get(candidate.resultId);
+    const item = byResultId.get(candidate.resultId)!;
     outcomes.set(candidate.tweetId, {
       candidate,
-      outcome: item
-        ? buildXFindingOutcome(item, raw, llmAnalysisPrompt)
-        : buildXFallbackOutcome(
-            'AI analysis returned no assessment for this post. Raw data is preserved for manual review.',
-            raw,
-            llmAnalysisPrompt,
-          ),
+      outcome: buildXFindingOutcome(item, raw, llmAnalysisPrompt),
     });
   }
 
@@ -2235,19 +2211,14 @@ async function analyseGitHubChunk({
   }
 
   const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  assertChunkAnalysisCoveredCandidates('GitHub', candidates, byResultId);
   const outcomes = new Map<string, { candidate: GitHubRepoCandidate; outcome: GitHubFindingOutcome }>();
 
   for (const candidate of candidates) {
-    const item = byResultId.get(candidate.resultId);
+    const item = byResultId.get(candidate.resultId)!;
     outcomes.set(candidate.fullName, {
       candidate,
-      outcome: item
-        ? buildGitHubFindingOutcome(item, raw, llmAnalysisPrompt)
-        : buildGitHubFallbackOutcome(
-            'AI analysis returned no assessment for this repository. Raw data is preserved for manual review.',
-            raw,
-            llmAnalysisPrompt,
-          ),
+      outcome: buildGitHubFindingOutcome(item, raw, llmAnalysisPrompt),
     });
   }
 
@@ -3188,86 +3159,6 @@ function buildGitHubFindingOutcome(
     llmAnalysisPrompt,
     rawLlmResponse,
     classificationSource: 'llm',
-  };
-}
-
-function buildGoogleFallbackOutcome(
-  message: string,
-  rawLlmResponse?: string,
-  llmAnalysisPrompt?: string,
-): GoogleFindingOutcome {
-  return {
-    severity: 'medium',
-    title: 'Unanalysed result — review manually',
-    analysis: message,
-    isFalsePositive: false,
-    llmAnalysisPrompt,
-    rawLlmResponse,
-    classificationSource: 'fallback',
-  };
-}
-
-function buildDiscordFallbackOutcome(
-  message: string,
-  rawLlmResponse?: string,
-  llmAnalysisPrompt?: string,
-): DiscordFindingOutcome {
-  return {
-    severity: 'medium',
-    title: 'Unanalysed server - review manually',
-    analysis: message,
-    isFalsePositive: false,
-    llmAnalysisPrompt,
-    rawLlmResponse,
-    classificationSource: 'fallback',
-  };
-}
-
-function buildDomainRegistrationFallbackOutcome(
-  message: string,
-  rawLlmResponse?: string,
-  llmAnalysisPrompt?: string,
-): DomainRegistrationFindingOutcome {
-  return {
-    severity: 'medium',
-    title: 'Unanalysed domain - review manually',
-    analysis: message,
-    isFalsePositive: false,
-    llmAnalysisPrompt,
-    rawLlmResponse,
-    classificationSource: 'fallback',
-  };
-}
-
-function buildXFallbackOutcome(
-  message: string,
-  rawLlmResponse?: string,
-  llmAnalysisPrompt?: string,
-): XFindingOutcome {
-  return {
-    severity: 'medium',
-    title: 'Unanalysed post - review manually',
-    analysis: message,
-    isFalsePositive: false,
-    llmAnalysisPrompt,
-    rawLlmResponse,
-    classificationSource: 'fallback',
-  };
-}
-
-function buildGitHubFallbackOutcome(
-  message: string,
-  rawLlmResponse?: string,
-  llmAnalysisPrompt?: string,
-): GitHubFindingOutcome {
-  return {
-    severity: 'medium',
-    title: 'Unanalysed repo - review manually',
-    analysis: message,
-    isFalsePositive: false,
-    llmAnalysisPrompt,
-    rawLlmResponse,
-    classificationSource: 'fallback',
   };
 }
 
