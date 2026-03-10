@@ -162,6 +162,8 @@ export interface BrandProfile {
   historyDeletion?: AsyncDeletionState;
   /** Async brand deletion job state, if this brand is being removed entirely. */
   brandDeletion?: AsyncDeletionState;
+  /** Set to true once the user has seen (and dismissed) the lookback-period nudge modal. */
+  lookbackNudgeDismissed?: boolean;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -196,6 +198,8 @@ export interface BrandProfileUpdateInput {
   watchWords?: string[];
   safeWords?: string[];
   scanSchedule?: BrandScanScheduleInput;
+  /** Set to true to record that the user has seen and dismissed the lookback-period nudge. */
+  lookbackNudgeDismissed?: boolean;
 }
 
 export interface EffectiveScanSettings {

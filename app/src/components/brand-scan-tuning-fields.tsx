@@ -28,6 +28,7 @@ type BrandScanTuningFieldsProps = {
   maxAiDeepSearches: number;
   onMaxAiDeepSearchesChange: (value: number) => void;
   hideDivider?: boolean;
+  hideInfoMessage?: boolean;
 };
 
 type SliderFieldProps = {
@@ -106,6 +107,7 @@ export function BrandScanTuningFields({
   maxAiDeepSearches,
   onMaxAiDeepSearchesChange,
   hideDivider = false,
+  hideInfoMessage = false,
 }: BrandScanTuningFieldsProps) {
   return (
     <div className={`space-y-4 ${hideDivider ? '' : 'border-t border-gray-100 pt-6'}`}>
@@ -125,12 +127,14 @@ export function BrandScanTuningFields({
             />
           </div>
         </div>
-        <div className="flex items-start gap-2.5 rounded-lg border border-brand-100 bg-brand-50 px-4 py-3">
-          <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-500" />
-          <p className="text-sm text-brand-700">
-            When you first create a brand, we recommend that you run a few scans with a 1 year lookback to build a solid base of findings. After this point, it&apos;s likely that a 1 year lookback will return many duplicate findings, at which point you should reduce the lookback period. This will make your scans, and they&apos;ll return higher quality results.
-          </p>
-        </div>
+        {!hideInfoMessage && (
+          <div className="flex items-start gap-2.5 rounded-lg border border-brand-100 bg-brand-50 px-4 py-3">
+            <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-500" />
+            <p className="text-sm text-brand-700">
+              When you first create a brand, we recommend running a few scans with a 1 year lookback to build a solid base of findings. After this point, a 1 year lookback is likely to return many duplicate findings that will be skipped. Switching to &lsquo;Since last scan&rsquo; focuses each scan on genuinely new activity, giving you higher quality, more recent findings.
+            </p>
+          </div>
+        )}
       </div>
       <div className="pb-4">
         <SliderField

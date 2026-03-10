@@ -146,6 +146,9 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
   if (body.watchWords !== undefined) updates.watchWords = body.watchWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
   if (body.safeWords !== undefined) updates.safeWords = body.safeWords.map((w) => w.trim().toLowerCase()).filter(Boolean);
+  if (body.lookbackNudgeDismissed === true) {
+    updates.lookbackNudgeDismissed = true;
+  }
   if (body.scanSchedule !== undefined) {
     const existingScheduleInput = existingBrand.scanSchedule
       ? getScheduleInputFromBrandSchedule(existingBrand.scanSchedule)

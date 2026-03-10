@@ -78,6 +78,7 @@ export default function EditBrandPage() {
     };
   });
   const [initialScanSchedule, setInitialScanSchedule] = useState<BrandScanScheduleInput | null>(null);
+  const [lookbackNudgeDismissed, setLookbackNudgeDismissed] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -108,6 +109,7 @@ export default function EditBrandPage() {
         const resolvedScanSchedule = getScheduleInputFromBrandSchedule(brand.scanSchedule);
         setScanSchedule(resolvedScanSchedule);
         setInitialScanSchedule(resolvedScanSchedule);
+        setLookbackNudgeDismissed(brand.lookbackNudgeDismissed === true);
       } catch (err) {
         setLoadError(err instanceof Error ? err.message : 'Failed to load brand');
       } finally {
@@ -467,6 +469,7 @@ export default function EditBrandPage() {
                     onAllowAiDeepSearchesChange={setAllowAiDeepSearches}
                     maxAiDeepSearches={maxAiDeepSearches}
                     onMaxAiDeepSearchesChange={setMaxAiDeepSearches}
+                    hideInfoMessage={lookbackNudgeDismissed}
                   />
                 </CardContent>
               </Card>

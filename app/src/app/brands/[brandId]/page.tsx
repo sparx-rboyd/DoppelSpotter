@@ -19,6 +19,7 @@ import { ScanSourceIcon } from '@/components/scan-source-icon';
 import { SelectDropdown } from '@/components/ui/select-dropdown';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Toast } from '@/components/ui/toast';
 import { Input } from '@/components/ui/input';
 import { InfoTooltip, Tooltip } from '@/components/ui/tooltip';
 import { getEffectiveScanSettings, hasEnabledBrandScanSource } from '@/lib/brands';
@@ -516,6 +517,10 @@ export default function BrandDetailPage() {
   const [exportingPdfScanId, setExportingPdfScanId] = useState<string | null>(null);
   const [copiedScanLinkId, setCopiedScanLinkId] = useState<string | null>(null);
 
+  const [isLookbackNudgeOpen, setIsLookbackNudgeOpen] = useState(false);
+  const [lookbackNudgeLoading, setLookbackNudgeLoading] = useState(false);
+  const [lookbackNudgeSuccessMessage, setLookbackNudgeSuccessMessage] = useState('');
+
   const [loading, setLoading] = useState(true);
   const [scanning, setScanning] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -535,6 +540,7 @@ export default function BrandDetailPage() {
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const copiedScanLinkResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lookbackNudgeSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressScanKeyRef = useRef<string | null>(null);
   const pendingScanFindingsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanNonHitsLoadsRef = useRef<Record<string, Promise<void>>>({});
@@ -1976,6 +1982,9 @@ export default function BrandDetailPage() {
       if (copiedScanLinkResetTimeoutRef.current) {
         clearTimeout(copiedScanLinkResetTimeoutRef.current);
       }
+      if (lookbackNudgeSuccessTimeoutRef.current) {
+        clearTimeout(lookbackNudgeSuccessTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -2003,6 +2012,83 @@ export default function BrandDetailPage() {
       setConfirmClear(false);
       setConfirmDeleteScanId(null);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lookback period nudge
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (loading) return;
+    if (!brand) return;
+    if (brand.lookbackNudgeDismissed) return;
+    if ((brand.lookbackPeriod ?? '1year') !== '1year') return;
+    if (scans.length < 3) return;
+    setIsLookbackNudgeOpen(true);
+  }, [loading, brand, scans.length]);
+
+  useEffect(() => {
+    if (!isLookbackNudgeOpen) return undefined;
+
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !lookbackNudgeLoading) {
+        setIsLookbackNudgeOpen(false);
+        setBrand((prev) => prev ? { ...prev, lookbackNudgeDismissed: true } : prev);
+        void fetch(`/api/brands/${brandId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ lookbackNudgeDismissed: true }),
+        }).catch(() => { /* non-critical */ });
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [brandId, lookbackNudgeLoading, isLookbackNudgeOpen]);
+
+  async function handleLookbackNudgeAccept() {
+    if (!brand || lookbackNudgeLoading) return;
+    setLookbackNudgeLoading(true);
+    setIsLookbackNudgeOpen(false);
+    setBrand((prev) => prev ? { ...prev, lookbackPeriod: 'since_last_scan', lookbackNudgeDismissed: true } : prev);
+    try {
+      await fetch(`/api/brands/${brandId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ lookbackPeriod: 'since_last_scan', lookbackNudgeDismissed: true }),
+      });
+      if (lookbackNudgeSuccessTimeoutRef.current) {
+        clearTimeout(lookbackNudgeSuccessTimeoutRef.current);
+      }
+      setLookbackNudgeSuccessMessage('The lookback period for this brand has been updated to \u2018Since last scan\u2019.');
+      lookbackNudgeSuccessTimeoutRef.current = setTimeout(() => {
+        setLookbackNudgeSuccessMessage('');
+      }, 6000);
+    } catch {
+      setError('Failed to update lookback period. Please update it in Brand Settings.');
+    } finally {
+      setLookbackNudgeLoading(false);
+    }
+  }
+
+  function handleLookbackNudgeDismiss() {
+    if (lookbackNudgeLoading) return;
+    setIsLookbackNudgeOpen(false);
+    setBrand((prev) => prev ? { ...prev, lookbackNudgeDismissed: true } : prev);
+    void fetch(`/api/brands/${brandId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ lookbackNudgeDismissed: true }),
+    }).catch(() => { /* non-critical */ });
   }
 
   // ---------------------------------------------------------------------------
@@ -4294,6 +4380,70 @@ export default function BrandDetailPage() {
           document.body,
         )}
 
+        {lookbackNudgeSuccessMessage && (
+          <Toast
+            message={lookbackNudgeSuccessMessage}
+            onClose={() => setLookbackNudgeSuccessMessage('')}
+          />
+        )}
+
+        {isLookbackNudgeOpen && createPortal(
+          <div
+            className="fixed inset-0 z-[90] flex items-center justify-center bg-gray-950/60 px-4"
+            onClick={() => {
+              if (!lookbackNudgeLoading) handleLookbackNudgeDismiss();
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="lookback-nudge-title"
+              aria-describedby="lookback-nudge-description"
+              className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="flex items-start gap-4">
+                <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-full bg-brand-100">
+                  <RotateCcw className="h-5 w-5 text-brand-700" />
+                </div>
+                <div className="min-w-0">
+                  <h2 id="lookback-nudge-title" className="text-lg font-semibold text-gray-900">
+                    Change your lookback period?
+                  </h2>
+                  <div id="lookback-nudge-description" className="mt-3 space-y-3 text-sm leading-6 text-gray-600">
+                    <p>
+                      You&apos;ve now performed a few scans for this brand with a 1 year lookback period. This is a great way to establish a broad and solid base of findings; however, if you leave the lookback period set to 1 year, future scans are likely to include a large number of findings that duplicate existing ones, so they&apos;ll be skipped.
+                    </p>
+                    <p>
+                      We recommend switching to <strong className="font-medium text-gray-800">Since last scan</strong>. This focuses each scan on genuinely new activity, giving you higher quality, more recent findings.
+                    </p>
+                    <p>Would you like to switch the lookback period for this brand?</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end gap-3">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={handleLookbackNudgeDismiss}
+                  disabled={lookbackNudgeLoading}
+                >
+                  No thanks
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => void handleLookbackNudgeAccept()}
+                  loading={lookbackNudgeLoading}
+                >
+                  Yes
+                </Button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+
         {isCustomScanDialogOpen && (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/60 px-4 py-8"
@@ -4332,6 +4482,7 @@ export default function BrandDetailPage() {
                   <div className="rounded-2xl border border-gray-200 bg-white p-6">
                     <BrandScanTuningFields
                       hideDivider
+                      hideInfoMessage={brand?.lookbackNudgeDismissed === true}
                       lookbackPeriod={customScanSettings.lookbackPeriod}
                       onLookbackPeriodChange={(value) => {
                         setCustomScanSettings((current) => ({ ...current, lookbackPeriod: value }));
