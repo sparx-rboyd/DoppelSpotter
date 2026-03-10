@@ -21,6 +21,8 @@ export interface UserRecord {
    * undefined / missing means verified (backwards-compat for existing accounts).
    */
   emailVerified?: boolean;
+  /** Monotonic version embedded in email-verification JWTs so only the latest unredeemed link is valid. */
+  emailVerificationVersion?: number;
   /** Set the first time emailVerified is flipped to true. */
   emailVerifiedAt?: Timestamp;
   createdAt: Timestamp;

@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { FieldValue } from '@google-cloud/firestore';
-import { verifyEmailVerificationToken, signToken, AUTH_COOKIE_NAME } from '@/lib/auth/jwt';
+import { verifyEmailVerificationToken } from '@/lib/auth/jwt';
 import { errorResponse } from '@/lib/api-utils';
 import { db } from '@/lib/firestore';
 import type { UserRecord } from '@/lib/types';
@@ -25,39 +25,48 @@ export async function POST(request: NextRequest) {
     return errorResponse(INVALID_LINK_MESSAGE, 400);
   }
 
-  const userRef = db.collection('users').doc(payload.userId);
-  const userDoc = await userRef.get();
-
-  if (!userDoc.exists) {
+  if (
+    typeof payload.sessionVersion !== 'number' ||
+    typeof payload.emailVerificationVersion !== 'number'
+  ) {
     return errorResponse(INVALID_LINK_MESSAGE, 400);
   }
 
-  const userData = userDoc.data() as Pick<UserRecord, 'email' | 'sessionVersion' | 'emailVerified'>;
+  try {
+    await db.runTransaction(async (tx) => {
+      const userRef = db.collection('users').doc(payload.userId);
+      const userDoc = await tx.get(userRef);
 
-  // Guard against token reuse if the account email ever changes
-  if (userData.email !== payload.email) {
-    return errorResponse(INVALID_LINK_MESSAGE, 400);
-  }
+      if (!userDoc.exists) {
+        throw new Error(INVALID_LINK_MESSAGE);
+      }
 
-  // Idempotent: clicking the link a second time still succeeds
-  if (userData.emailVerified !== true) {
-    await userRef.update({
-      emailVerified: true,
-      emailVerifiedAt: FieldValue.serverTimestamp(),
+      const userData = userDoc.data() as Pick<
+        UserRecord,
+        'email' | 'sessionVersion' | 'emailVerified' | 'emailVerificationVersion'
+      >;
+
+      const userSessionVersion = userData.sessionVersion ?? 0;
+      const userEmailVerificationVersion = userData.emailVerificationVersion ?? 0;
+
+      if (
+        userData.email !== payload.email ||
+        userData.emailVerified === true ||
+        userSessionVersion !== payload.sessionVersion ||
+        userEmailVerificationVersion !== payload.emailVerificationVersion
+      ) {
+        throw new Error(INVALID_LINK_MESSAGE);
+      }
+
+      tx.update(userRef, {
+        emailVerified: true,
+        emailVerifiedAt: FieldValue.serverTimestamp(),
+        emailVerificationVersion: userEmailVerificationVersion + 1,
+      });
     });
+  } catch {
+    return errorResponse(INVALID_LINK_MESSAGE, 400);
   }
 
-  const sessionVersion = userData.sessionVersion ?? 0;
-  const authToken = signToken(payload.userId, payload.email, sessionVersion);
-
-  const response = NextResponse.json({ userId: payload.userId, email: payload.email });
-  response.cookies.set(AUTH_COOKIE_NAME, authToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 60 * 60 * 24 * 7,
-    path: '/',
-  });
-
-  return response;
+  return NextResponse.json({ ok: true, email: payload.email });
 }

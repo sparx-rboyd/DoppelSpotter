@@ -37,11 +37,43 @@ export async function POST(request: NextRequest) {
 
     if (!snapshot.empty) {
       const userDoc = snapshot.docs[0];
-      const user = userDoc.data() as Pick<UserRecord, 'emailVerified'>;
+      const user = userDoc.data() as Pick<
+        UserRecord,
+        'emailVerified' | 'sessionVersion' | 'emailVerificationVersion'
+      >;
 
       // Only resend if the account is explicitly unverified — never resend to already-verified users
       if (user.emailVerified === false) {
-        const verificationToken = signEmailVerificationToken(userDoc.id, normalizedEmail);
+        const tokenState = await db.runTransaction(async (tx) => {
+          const currentUserDoc = await tx.get(userDoc.ref);
+          const currentUser = currentUserDoc.data() as Pick<
+            UserRecord,
+            'emailVerified' | 'sessionVersion' | 'emailVerificationVersion'
+          > | undefined;
+
+          if (!currentUserDoc.exists || currentUser?.emailVerified !== false) {
+            return null;
+          }
+
+          const nextEmailVerificationVersion = (currentUser.emailVerificationVersion ?? 0) + 1;
+          tx.update(userDoc.ref, {
+            emailVerificationVersion: nextEmailVerificationVersion,
+          });
+
+          return {
+            sessionVersion: currentUser.sessionVersion ?? 0,
+            emailVerificationVersion: nextEmailVerificationVersion,
+          };
+        });
+
+        if (!tokenState) {
+          return NextResponse.json({ message: EMAIL_VERIFICATION_REQUEST_SUCCESS_MESSAGE });
+        }
+
+        const verificationToken = signEmailVerificationToken(userDoc.id, normalizedEmail, {
+          sessionVersion: tokenState.sessionVersion,
+          emailVerificationVersion: tokenState.emailVerificationVersion,
+        });
         const verificationLink = buildEmailVerificationLink(verificationToken);
         const content = buildEmailVerificationContent(verificationLink);
 

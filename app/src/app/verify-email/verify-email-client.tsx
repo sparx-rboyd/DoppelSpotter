@@ -4,8 +4,6 @@ import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Mail, ScanEye } from 'lucide-react';
-import { useAuth } from '@/lib/auth/auth-context';
-import { broadcastAuthSyncEvent } from '@/lib/auth/auth-context';
 import { EMAIL_VERIFICATION_TOKEN_MAX_AGE_LABEL, EMAIL_VERIFICATION_REQUEST_SUCCESS_MESSAGE } from '@/lib/email-verification';
 
 type PageState = 'pending' | 'check-email' | 'success';
@@ -13,10 +11,17 @@ type PageState = 'pending' | 'check-email' | 'success';
 export default function VerifyEmailClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const { refreshSession } = useAuth();
 
   const token = useMemo(() => searchParams.get('token')?.trim() ?? '', [searchParams]);
   const emailFromUrl = useMemo(() => searchParams.get('email')?.trim() ?? '', [searchParams]);
+  const [verifiedEmail, setVerifiedEmail] = useState('');
+  const loginHref = useMemo(() => {
+    const email = verifiedEmail || emailFromUrl;
+    if (!email) return '/login';
+
+    const params = new URLSearchParams({ email });
+    return `/login?${params.toString()}`;
+  }, [emailFromUrl, verifiedEmail]);
 
   const [state, setState] = useState<PageState>(token ? 'pending' : 'check-email');
   const [verifyError, setVerifyError] = useState('');
@@ -48,21 +53,21 @@ export default function VerifyEmailClient() {
           return;
         }
 
-        await refreshSession();
-        broadcastAuthSyncEvent('signed-in');
+        const data = await res.json().catch(() => ({}));
+        setVerifiedEmail(data.email ?? '');
         setState('success');
       } catch {
         setVerifyError('Unable to verify your email right now. Please try again.');
         setState('check-email');
       }
     })();
-  }, [token, refreshSession]);
+  }, [token]);
 
   useEffect(() => {
     if (state !== 'success') return;
-    const timer = setTimeout(() => router.replace('/dashboard'), 1500);
+    const timer = setTimeout(() => router.replace(loginHref), 1500);
     return () => clearTimeout(timer);
-  }, [state, router]);
+  }, [state, router, loginHref]);
 
   async function handleResend(e: FormEvent) {
     e.preventDefault();
@@ -106,7 +111,13 @@ export default function VerifyEmailClient() {
           {state === 'success' && (
             <div className="text-center py-4 space-y-3">
               <p className="text-xl font-bold text-gray-900">Email verified!</p>
-              <p className="text-sm text-gray-600">Redirecting you to the dashboard…</p>
+              <p className="text-sm text-gray-600">Redirecting you to sign in…</p>
+              <Link
+                href={loginHref}
+                className="inline-flex items-center justify-center rounded-full bg-brand-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-700"
+              >
+                Continue to sign in
+              </Link>
             </div>
           )}
 

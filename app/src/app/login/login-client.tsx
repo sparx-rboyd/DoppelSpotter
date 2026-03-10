@@ -12,11 +12,17 @@ export default function LoginClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [email, setEmail] = useState('');
+  const emailFromUrl = searchParams.get('email')?.trim() ?? '';
+  const [email, setEmail] = useState(emailFromUrl);
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const returnTo = resolveSafeReturnTo(searchParams.get('returnTo'));
+
+  useEffect(() => {
+    if (!emailFromUrl) return;
+    setEmail(emailFromUrl);
+  }, [emailFromUrl]);
 
   useEffect(() => {
     if (authLoading || !user) return;

@@ -92,11 +92,15 @@ export async function POST(request: NextRequest) {
       }
 
       const userRef = db.collection('users').doc();
+      const sessionVersion = 0;
+      const emailVerificationVersion = 1;
+
       tx.set(userRef, {
         email: normalizedEmail,
         passwordHash,
-        sessionVersion: 0,
+        sessionVersion,
         emailVerified: false,
+        emailVerificationVersion,
         createdAt: FieldValue.serverTimestamp(),
       });
       tx.update(inviteRef, {
@@ -105,10 +109,13 @@ export async function POST(request: NextRequest) {
         usedByUserId: userRef.id,
       });
 
-      return { userId: userRef.id };
+      return { userId: userRef.id, sessionVersion, emailVerificationVersion };
     });
 
-    const verificationToken = signEmailVerificationToken(result.userId, normalizedEmail);
+    const verificationToken = signEmailVerificationToken(result.userId, normalizedEmail, {
+      sessionVersion: result.sessionVersion,
+      emailVerificationVersion: result.emailVerificationVersion,
+    });
     const verificationLink = buildEmailVerificationLink(verificationToken);
     const content = buildEmailVerificationContent(verificationLink);
 

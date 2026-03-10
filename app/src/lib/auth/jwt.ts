@@ -24,6 +24,8 @@ export interface PasswordResetTokenPayload {
 export interface EmailVerificationTokenPayload {
   userId: string;
   email: string;
+  sessionVersion?: number;
+  emailVerificationVersion?: number;
   purpose: 'email-verification';
   iat?: number;
   exp?: number;
@@ -77,9 +79,18 @@ export function verifyPasswordResetToken(token: string): PasswordResetTokenPaylo
   }
 }
 
-export function signEmailVerificationToken(userId: string, email: string): string {
+export function signEmailVerificationToken(
+  userId: string,
+  email: string,
+  options: {
+    sessionVersion?: number;
+    emailVerificationVersion: number;
+  },
+): string {
+  const { sessionVersion = 0, emailVerificationVersion } = options;
+
   return jwt.sign(
-    { userId, email, purpose: 'email-verification' },
+    { userId, email, sessionVersion, emailVerificationVersion, purpose: 'email-verification' },
     getEmailVerificationJwtSecret(),
     { expiresIn: EMAIL_VERIFICATION_TOKEN_MAX_AGE_SECONDS },
   );

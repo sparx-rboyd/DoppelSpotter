@@ -557,7 +557,7 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 
 | Collection | Key Fields |
 |---|---|
-| `users` | id, email, passwordHash, **sessionVersion?**, **lastSeenAt?**, **passwordChangedAt?**, **dashboardPreferences?** (`selectedBrandId?`), createdAt |
+| `users` | id, email, passwordHash, **sessionVersion?**, **lastSeenAt?**, **passwordChangedAt?**, **dashboardPreferences?** (`selectedBrandId?`), **emailVerified?**, **emailVerificationVersion?**, **emailVerifiedAt?**, createdAt |
 | `inviteCodes` | id (`sha256(code)`), codeHash, createdAt, **usedAt?**, **usedByEmail?**, **usedByUserId?** |
 | `authRateLimits` | id (`<scope>:<sha256(client-identifier)>`), scope, keyHash, attemptCount, windowStartedAt, lastAttemptAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **lookbackPeriod?** (`1year`\|`1month`\|`1week`\|`since_last_scan`, default `1year`), **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `apple_app_store`, `google_play`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), **lookbackNudgeDismissed?**, createdAt, updatedAt |
@@ -588,6 +588,15 @@ npm run add-invite-code -- --count 5
 ```
 
 Script: `app/scripts/add-invite-code.ts`. Invite codes are 10-character lowercase alphanumeric values, stored hashed in Firestore, and burned on first successful signup.
+
+New signups must also verify their email address before they can sign in. The verification flow:
+
+- stores `users.emailVerified = false` plus a monotonic `users.emailVerificationVersion`
+- signs verification JWTs with both `sessionVersion` and `emailVerificationVersion`
+- treats resend requests as rotation events by incrementing `emailVerificationVersion`, so only the newest unredeemed link remains valid
+- redeems verification links inside a Firestore transaction that checks email, `sessionVersion`, `emailVerificationVersion`, and `emailVerified == false`
+- marks the account verified and bumps `emailVerificationVersion` on success, making the redeemed link one-time use
+- does not authenticate the browser during verification; the user must sign in normally after their email is confirmed
 
 Authenticated users can open the top-right user menu to change their password. The password-change flow:
 
