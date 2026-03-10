@@ -4412,7 +4412,7 @@ async function buildScanAiSummary(scan: Scan): Promise<string> {
     const raw = await chatCompletion([
       { role: 'system', content: SCAN_SUMMARY_SYSTEM_PROMPT },
       { role: 'user', content: prompt },
-    ]);
+    ], { temperature: 1.5 });
 
     const parsed = parseScanSummaryOutput(raw);
     if (!parsed) {

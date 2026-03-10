@@ -5,7 +5,11 @@ import type {
   UserPreferenceHints,
 } from '@/lib/types';
 import { MAX_FINDING_TAXONOMY_WORDS } from '@/lib/findings-taxonomy';
-import type { GoogleScannerConfig } from '@/lib/scan-sources';
+import {
+  getFindingSourceLabel,
+  SCAN_SOURCE_ORDER,
+  type GoogleScannerConfig,
+} from '@/lib/scan-sources';
 import {
   buildGoogleClassificationSurfaceLine,
   buildGoogleDeepSearchSystemPolicy,
@@ -291,7 +295,13 @@ Rules:
 - Focus on patterns and overall risk, not a finding-by-finding list.
 - Prioritise high-severity findings first, then medium, then low.
 - Only describe evidence contained in the provided findings.
-- Keep the tone neutral, analyst-style, and succinct.`;
+- Keep the tone neutral, analyst-style, and succinct.
+- Calibrate claims tightly to the evidence. Large finding counts alone do not prove a severe, widespread, coordinated, or systemic threat.
+- Reserve strong descriptors such as "severe", "widespread", "systemic", "coordinated", "critical", or "direct attack" for cases where the findings clearly justify them across multiple distinct sources or repeated concrete abuse patterns.
+- Prefer measured wording such as "notable", "recurring", "concentrated", "mixed", or "limited" when the evidence is narrower or less definitive.
+- Do not imply intent, coordination, or business impact unless the provided findings explicitly support that conclusion.
+- Distinguish between discussion, promotion, tooling, impersonation, and confirmed fraud; do not collapse them into a stronger claim than the evidence supports.
+- Vary phrasing naturally and avoid stock opening lines or repeated alarmist formulations.`;
 
 /**
  * Format the exact chat messages sent to the LLM into a readable transcript
@@ -799,6 +809,17 @@ export function buildScanSummaryPrompt(params: {
   }>;
 }): string {
   const { brandName, counts, findings } = params;
+  const sourceCounts = findings.reduce(
+    (acc, finding) => {
+      acc[finding.source] = (acc[finding.source] ?? 0) + 1;
+      return acc;
+    },
+    {} as Partial<Record<FindingSource, number>>,
+  );
+  const sourceBreakdown = SCAN_SOURCE_ORDER
+    .map((source) => ({ source, count: sourceCounts[source] ?? 0 }))
+    .filter((entry) => entry.count > 0)
+    .map((entry) => `${getFindingSourceLabel(entry.source)}: ${entry.count}`);
 
   return `Brand being protected: "${brandName}"
 
@@ -807,6 +828,10 @@ Actionable finding counts:
 - Medium: ${counts.medium}
 - Low: ${counts.low}
 
+Actionable source spread:
+- Distinct sources with actionable findings: ${sourceBreakdown.length}
+${sourceBreakdown.length > 0 ? sourceBreakdown.map((line) => `- ${line}`).join('\n') : '- None'}
+
 Actionable findings for this scan (${findings.length}):
 ${JSON.stringify(findings, null, 2)}
 
@@ -814,7 +839,13 @@ Write a concise overall summary of this scan (max 600 characters).
 
 Highlight recurring themes, repeated abuse patterns, or notably worrying trends if present.
 
-Take care not to over-emphasise risk - especially when only medium and/or low risk findings are presented.`;
+Take care not to over-emphasise risk - especially when only medium and/or low risk findings are presented.
+
+Do not describe the threat as widespread, systemic, coordinated, or severe unless the findings clearly support that level of language.
+
+If the evidence is concentrated in only one or two sources, say so plainly rather than implying broad cross-platform spread.
+
+If the findings show a mix of stronger and weaker signals, reflect that mix instead of describing the entire scan at the highest intensity.`;
 }
 
 function buildUserPreferenceHintsSection(

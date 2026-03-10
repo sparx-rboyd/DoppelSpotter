@@ -27,15 +27,23 @@ export interface OpenRouterResponse {
 
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 
+export interface ChatCompletionOptions {
+  temperature?: number;
+}
+
 /**
  * Send a chat completion request to OpenRouter.
  * Uses the model specified in OPENROUTER_MODEL env var (default: anthropic/claude-3.5-haiku).
  */
-export async function chatCompletion(messages: ChatMessage[]): Promise<string> {
+export async function chatCompletion(
+  messages: ChatMessage[],
+  options: ChatCompletionOptions = {},
+): Promise<string> {
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
 
   const model = process.env.OPENROUTER_MODEL ?? 'anthropic/claude-3.5-haiku';
+  const temperature = options.temperature ?? 0.2;
 
   const res = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: 'POST',
@@ -49,7 +57,7 @@ export async function chatCompletion(messages: ChatMessage[]): Promise<string> {
       model,
       messages,
       response_format: { type: 'json_object' },
-      temperature: 0.2,
+      temperature,
       max_tokens: 8192,
     }),
   });
