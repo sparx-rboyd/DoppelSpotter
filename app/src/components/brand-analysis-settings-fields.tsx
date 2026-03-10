@@ -74,7 +74,7 @@ export function BrandAnalysisSettingsFields({
     <>
       <div className="space-y-5">
         <p className="text-sm text-gray-500">
-          Use these definitions in the AI classification prompts for this brand. Leave customisation off to keep the default thresholds.
+          Customise the definitions that DoppelSpotter's AI analysis uses to categorise findings.
         </p>
 
         {ANALYSIS_SEVERITY_ORDER.map((severity) => {
@@ -149,10 +149,10 @@ export function BrandAnalysisSettingsFields({
           >
             <div className="space-y-2">
               <h2 id="disable-analysis-customisation-title" className="text-lg font-semibold text-gray-900">
-                Revert {pendingDisableSeverity} severity?
+                Revert definition?
               </h2>
               <p id="disable-analysis-customisation-description" className="text-sm leading-6 text-gray-600">
-                Your custom definition will be removed and this severity will go back to the default DoppelSpotter prompt.
+                Your custom definition will be removed and the default DoppelSpotter definition will be used.
               </p>
             </div>
 

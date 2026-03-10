@@ -360,7 +360,6 @@ export default function NewBrandPage() {
               <CardHeader className="px-6 py-5">
                 <div className="inline-flex items-center gap-1.5">
                   <h2 className="font-semibold text-gray-900">Analysis settings</h2>
-                  <InfoTooltip content="Customise how DoppelSpotter distinguishes high, medium, and low severity findings for this brand." />
                 </div>
               </CardHeader>
               <CardContent className="p-6">

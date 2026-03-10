@@ -48,7 +48,7 @@ export function buildBrandedEmailFrame({ title, bodyHtml }: BrandedEmailFrameInp
             height="28"
             style="display:block;height:auto;max-width:176px;width:100%;"
           />
-          <h1 style="margin:14px 0 0;font-size:28px;line-height:1.15;font-weight:700;color:#ffffff;">${escapeHtml(title)}</h1>
+          <h1 style="margin:14px 0 0;font-size:28px;line-height:1.15;font-weight:400;color:#ffffff;">${escapeHtml(title)}</h1>
         </div>
         <div style="padding:28px 24px 24px;">
           ${bodyHtml}

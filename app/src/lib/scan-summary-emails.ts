@@ -94,13 +94,13 @@ function buildScanSummaryEmailContent(scan: Scan, brand: BrandProfile) {
     bodyHtml: `
       <div style="margin:0 0 18px;border:1px solid #dbeafe;border-radius:16px;background:linear-gradient(180deg,#f8fbff 0%,#eff6ff 100%);padding:18px 18px 16px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#0369a1;">Brand</div>
-        <div style="margin-top:6px;font-size:22px;line-height:1.2;font-weight:700;color:#0f172a;">${escapeHtml(brand.name)}</div>
-        <div style="margin-top:8px;font-size:13px;line-height:1.5;color:#475569;">Scan completed: <span style="color:#0f172a;font-weight:600;">${escapeHtml(completedLabel)}</span></div>
+        <div style="margin-top:6px;font-size:22px;line-height:1.2;font-weight:400;color:#0369a1;">${escapeHtml(brand.name)}</div>
+        <div style="margin-top:8px;font-size:13px;line-height:1.5;color:#677180;"><span style="font-weight:600;">Scan completed:</span> ${escapeHtml(completedLabel)}</div>
       </div>
 
       <div style="margin-bottom:18px;border:1px solid #dbeafe;border-radius:14px;background:#f8fbff;padding:16px 18px;">
         <div style="font-size:11px;font-weight:700;letter-spacing:0.12em;text-transform:uppercase;color:#0369a1;">AI summary</div>
-        <p style="margin:10px 0 0;font-size:14px;line-height:1.65;color:#334155;">${escapeHtml(summary)}</p>
+        <p style="margin:10px 0 0;font-size:14px;line-height:1.5;color:#677180;">${escapeHtml(summary)}</p>
       </div>
 
       <div style="margin-bottom:20px;">
@@ -112,12 +112,12 @@ function buildScanSummaryEmailContent(scan: Scan, brand: BrandProfile) {
                 <tr>
                   <td style="${index < countRows.length - 1 ? 'border-bottom:1px solid #edf2f7;' : ''}padding:11px 14px;font-size:14px;color:#475569;">
                     <span
-                      style="display:inline-block;border:1px solid ${getCountRowStyles(row.tone).chipBorder};border-radius:9999px;background:${getCountRowStyles(row.tone).chipBackground};padding:5px 9px;font-size:12px;font-weight:700;line-height:1.2;color:${getCountRowStyles(row.tone).chipText};"
+                      style="display:inline-block;border:1px solid ${getCountRowStyles(row.tone).chipBorder};border-radius:5px;background:${getCountRowStyles(row.tone).chipBackground};padding:5px 9px;font-size:12px;font-weight:700;line-height:1.2;color:${getCountRowStyles(row.tone).chipText};"
                     >
                       ${escapeHtml(row.label)}
                     </span>
                   </td>
-                  <td style="${index < countRows.length - 1 ? 'border-bottom:1px solid #edf2f7;' : ''}padding:11px 14px;text-align:right;font-size:20px;line-height:1.1;font-weight:700;color:${row.label === 'Skipped' ? '#0f172a' : getCountRowStyles(row.tone).chipText};">${row.value}</td>
+                  <td style="${index < countRows.length - 1 ? 'border-bottom:1px solid #edf2f7;' : ''}padding:11px 14px;text-align:right;font-size:16px;line-height:1.1;font-weight:500;color:${row.label === 'Skipped' ? '#0f172a' : getCountRowStyles(row.tone).chipText};">${row.value}</td>
                 </tr>
               `).join('')}
             </tbody>
