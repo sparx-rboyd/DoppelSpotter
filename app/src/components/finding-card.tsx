@@ -104,6 +104,12 @@ function extractDomainLabel(url?: string) {
   return trimmedUrl;
 }
 
+function formatXHandleLabel(handle?: string) {
+  const trimmedHandle = handle?.trim();
+  if (!trimmedHandle) return null;
+  return trimmedHandle.startsWith('@') ? trimmedHandle : `@${trimmedHandle}`;
+}
+
 function truncateMiddle(value: string, maxLength = 44, headLength = 18, tailLength = 23) {
   if (value.length <= maxLength) {
     return value;
@@ -393,9 +399,17 @@ export function FindingCard({
     && highlightQuery?.trim()
     && finding.url.toLowerCase().includes(highlightQuery.trim().toLowerCase()),
   );
-  const domainLabel = finding.source === 'domains' ? extractDomainLabel(finding.url) : null;
-  const truncatedDomainLabel = domainLabel ? truncateMiddle(domainLabel) : null;
-  const isDomainLabelTruncated = Boolean(domainLabel && truncatedDomainLabel && domainLabel !== truncatedDomainLabel);
+  const secondaryLabel = finding.source === 'domains'
+    ? extractDomainLabel(finding.url)
+    : finding.source === 'x'
+      ? formatXHandleLabel(finding.xAuthorHandle)
+      : null;
+  const truncatedSecondaryLabel = secondaryLabel ? truncateMiddle(secondaryLabel) : null;
+  const isSecondaryLabelTruncated = Boolean(
+    secondaryLabel
+    && truncatedSecondaryLabel
+    && secondaryLabel !== truncatedSecondaryLabel,
+  );
   const shouldWarnBeforeDomainVisit = finding.source === 'domains'
     && user?.preferences?.skipDomainRegistrationVisitWarning !== true;
 
@@ -692,11 +706,11 @@ export function FindingCard({
                     </Tooltip>
                   )}
                 </div>
-                {domainLabel && (
+                {secondaryLabel && (
                   <div className="min-w-0">
-                    {isDomainLabelTruncated ? (
+                    {isSecondaryLabelTruncated ? (
                       <Tooltip
-                        content={domainLabel}
+                        content={secondaryLabel}
                         contentClassName="max-w-sm whitespace-normal break-all"
                       >
                         <span
@@ -705,7 +719,7 @@ export function FindingCard({
                             muted ? 'text-gray-400' : 'text-gray-500',
                           )}
                         >
-                          {truncatedDomainLabel}
+                          {renderHighlightedText(truncatedSecondaryLabel ?? '', highlightQuery)}
                         </span>
                       </Tooltip>
                     ) : (
@@ -715,7 +729,7 @@ export function FindingCard({
                           muted ? 'text-gray-400' : 'text-gray-500',
                         )}
                       >
-                        {truncatedDomainLabel}
+                        {renderHighlightedText(truncatedSecondaryLabel ?? '', highlightQuery)}
                       </span>
                     )}
                   </div>

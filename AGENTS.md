@@ -228,7 +228,7 @@ DELETE /api/brands/[brandId]/findings
 GET /api/brands/[brandId]/findings/search?q=...
  └─ authenticated brand-scoped text search over lightweight finding summaries used by the brand page when the search box is non-empty
  └─ accepts optional `scanId`, `category`, `source`, `theme`, `limit`, and `cursor`
- └─ applies exact Firestore filters first where available, then server-side substring matching on `title`, `url`, and `llmAnalysis`
+ └─ applies exact Firestore filters first where available, then server-side substring matching on `title`, `url`, `llmAnalysis`, and denormalized X handles
  └─ returns flat paginated matches annotated with `displayBucket` (`hit` | `non-hit` | `ignored` | `addressed`) plus scan-level context (`scanStartedAt`, `scanStatus`)
  └─ excludes matches from scans that are currently being deleted
  └─ includes cursor pagination and a scan-budget cap so very broad queries degrade gracefully instead of freezing the browser
@@ -266,6 +266,9 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ dedupes repeated tweet ids within the run before analysis
       └─ skips tweet ids that already appeared in previous scans for the same brand before any LLM analysis
       └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
+      └─ X chunk output also labels whether the risk comes from the account handle, the tweet content, both, or neither
+      └─ handle-only X hits are written the first time an account is seen, then suppressed on later tweets from the same previously-seen real-hit account unless the new tweet text is itself infringing
+      └─ X findings denormalize `xAuthorId`, `xAuthorHandle`, `xAuthorUrl`, and `xMatchBasis` for lightweight list/search/UI use
       └─ does not run deep-search suggestion generation or follow-up runs
  └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and scanner-specific focus, and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
 └─ AI-requested deep-search eligibility, breadth, and Google page depth are read from `scans.effectiveSettings` when present, falling back to brand defaults only for older scans
@@ -309,7 +312,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **Historical URL suppression:** Google runs load previously seen normalized finding URLs for the brand and filter them out before any LLM classification begins
 - **Historical Discord suppression:** Discord runs load previously seen Discord server ids for the brand and filter them out before any LLM classification begins
 - **Historical GitHub suppression:** GitHub runs load previously seen repository `fullName` values for the brand and filter them out before any LLM classification begins
-- **Historical X suppression:** X runs load previously seen tweet ids for the brand and filter them out before any LLM classification begins
+- **Historical X suppression:** X runs load previously seen tweet ids for the brand and filter them out before any LLM classification begins; after classification, handle-only hits are additionally suppressed for accounts that already have a previous real X finding for the brand
 - **User preference hints:** each scan prepares a tiny LLM-authored soft-guidance summary from explicit user-review signals before actor-run analysis begins; this is now the only historical-review context sent into classification prompts
 - **Existing taxonomy hints:** prompts receive the current brand's distinct `theme` labels so the LLM can reuse them exactly where appropriate, while still inventing a new short label when none fit
 - **Scanner-aware prompt policy:** specialist Google scans reuse the same shared prompt builders, but small scanner-policy helpers inject specialist-focus instructions instead of duplicating whole prompt families
@@ -350,7 +353,9 @@ the full raw actor response.
 X results arrive as public tweet records. The webhook normalizes them into compact tweet
 candidates, dedupes by tweet `id`, and classifies those candidates in bounded chunks. X findings
 store a compact normalized debug payload (`kind: 'x-normalized'`) with tweet metadata, author
-metadata, and run-level query context rather than the full raw actor response.
+metadata, run-level query context, and the stored `xMatchBasis` rather than the full raw actor
+response. The stored finding document also denormalizes `xAuthorId`, `xAuthorHandle`, and
+`xAuthorUrl` so the UI can show handles under the title and include them in lightweight search.
 
 ### Deep search (`suggestedSearches`)
 
@@ -565,7 +570,7 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | `authRateLimits` | id (`<scope>:<sha256(client-identifier)>`), scope, keyHash, attemptCount, windowStartedAt, lastAttemptAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **lookbackPeriod?** (`1year`\|`1month`\|`1week`\|`since_last_scan`, default `1year`), **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `apple_app_store`, `google_play`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), **lookbackNudgeDismissed?**, createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), **deletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), actorIds[], actorRuns{} (`scannerId`, `source`, `status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`, `displayQuery?`, `deepSearchSuggestionsProcessed?`, `suggestedSearches?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, dashboardBreakdowns?** (`version`, `source[]`, `theme[]` compact dashboard chart summaries), **userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`apple_app_store`\|`google_play`\|`domains`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
+| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`apple_app_store`\|`google_play`\|`domains`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, **xAuthorId?**, **xAuthorHandle?**, **xAuthorUrl?**, **xMatchBasis?** (`none`\|`handle_only`\|`content_only`\|`handle_and_content`), rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 
 ---
 
@@ -647,7 +652,7 @@ The findings API is optimised to minimise Firestore reads and HTTP round-trips o
 - **Eager cross-scan bookmark fetch** — the brand page separately loads `GET /api/brands/[brandId]/findings?bookmarkedOnly=true` on mount so the bookmark follow-up panel is immediately available without expanding individual scans
 - **Eager cross-scan addressed fetch** — the brand page separately loads `GET /api/brands/[brandId]/findings?addressedOnly=true` on mount so addressed findings are available in their dedicated tab without loading individual scan accordions
 - **Dedicated taxonomy bootstrap** — the brand page loads `GET /api/brands/[brandId]/findings/taxonomy` on mount (and after scan-history changes) so the theme filter dropdown can populate without hydrating every scan bucket first
-- **Dedicated server-backed text search** — when the brand-page search box is non-empty, the UI now calls `GET /api/brands/[brandId]/findings/search` instead of hydrating every scan bucket into the browser. The route pages through lightweight `FindingSummary` projections server-side, applies substring matching on `title`, `url`, and `llmAnalysis`, honours the active severity/source/theme filters, and returns flat paginated results with bucket metadata for a dedicated search-results mode.
+- **Dedicated server-backed text search** — when the brand-page search box is non-empty, the UI now calls `GET /api/brands/[brandId]/findings/search` instead of hydrating every scan bucket into the browser. The route pages through lightweight `FindingSummary` projections server-side, applies substring matching on `title`, `url`, `llmAnalysis`, and denormalized X handles, honours the active severity/source/theme filters, and returns flat paginated results with bucket metadata for a dedicated search-results mode.
 - **Lightweight list payloads** — the findings list endpoints (`GET /api/brands/[brandId]/findings` and `GET /api/findings`) return a compact `FindingSummary` shape via Firestore `.select(...)`, excluding `rawData`, `llmAnalysisPrompt`, `rawLlmResponse`, and other fields not needed for normal rendering. This avoids repeatedly shipping the full SERP batch payload on every finding card.
 - **Dedicated scan export paths** — `GET /api/brands/[brandId]/scans/[scanId]/export` performs a single scan-scoped findings query and returns a CSV attachment containing hits, non-hits, notes, and review-state flags, while `GET /api/brands/[brandId]/scans/[scanId]/export/pdf` returns a branded PDF report containing the scan AI summary, actionable high/medium/low findings, notes, and a dedicated addressed-findings section. Neither path forces the UI to eagerly load every findings bucket first.
 - **Dashboard bootstrap + metrics split** — the main dashboard uses `GET /api/dashboard/bootstrap` for brand selection state and `GET /api/dashboard/metrics` for brand/scan-scoped analytics, instead of reusing the lightweight recent-findings feed.

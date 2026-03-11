@@ -1,4 +1,4 @@
-import type { FindingSource, GoogleScannerId, ScannerId, Severity } from '@/lib/types';
+import type { FindingSource, GoogleScannerId, ScannerId, Severity, XFindingMatchBasis } from '@/lib/types';
 import { normalizeFindingTaxonomyLabel } from '@/lib/findings-taxonomy';
 
 /**
@@ -422,6 +422,7 @@ export interface XChunkAnalysisItem {
   theme?: string;
   analysis: string;
   isFalsePositive: boolean;
+  matchBasis: XFindingMatchBasis;
 }
 
 /**
@@ -475,6 +476,7 @@ export interface XStoredFindingRawData extends Record<string, unknown> {
     searchDepth: number;
     searchQuery?: string;
     displayQuery?: string;
+    matchBasis?: XFindingMatchBasis;
   };
 }
 
@@ -535,8 +537,53 @@ export function parseXChunkAnalysisOutput(
   raw: string,
   validResultIds: Set<string>,
 ): XChunkAnalysisOutput | null {
-  const items = parseChunkAnalysisItems(raw, validResultIds);
-  return items ? { items } : null;
+  try {
+    const stripped = stripJsonFences(raw);
+    const parsed = JSON.parse(stripped);
+
+    if (!Array.isArray(parsed.items) || parsed.items.length === 0) {
+      return null;
+    }
+
+    const validSeverities = ['high', 'medium', 'low'];
+    const validMatchBases = ['none', 'handle_only', 'content_only', 'handle_and_content'];
+    const seenResultIds = new Set<string>();
+    const items: XChunkAnalysisItem[] = parsed.items
+      .filter(
+        (item: unknown): item is Record<string, unknown> =>
+          typeof item === 'object' && item !== null,
+      )
+      .filter(
+        (item: Record<string, unknown>) =>
+          typeof item.resultId === 'string' &&
+          validResultIds.has((item.resultId as string).trim()) &&
+          !seenResultIds.has((item.resultId as string).trim()) &&
+          typeof item.title === 'string' &&
+          typeof item.severity === 'string' &&
+          validSeverities.includes(item.severity as string) &&
+          typeof item.analysis === 'string' &&
+          typeof item.isFalsePositive === 'boolean' &&
+          typeof item.matchBasis === 'string' &&
+          validMatchBases.includes(item.matchBasis as string),
+      )
+      .map((item: Record<string, unknown>) => {
+        const resultId = (item.resultId as string).trim();
+        seenResultIds.add(resultId);
+        return {
+          resultId,
+          title: (item.title as string).trim(),
+          severity: item.severity as Severity,
+          theme: normalizeFindingTaxonomyLabel(item.theme),
+          analysis: (item.analysis as string).trim(),
+          isFalsePositive: item.isFalsePositive as boolean,
+          matchBasis: item.matchBasis as XFindingMatchBasis,
+        };
+      });
+
+    return items.length > 0 ? { items } : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

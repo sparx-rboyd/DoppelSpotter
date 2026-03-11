@@ -53,7 +53,7 @@ import {
   type XStoredFindingRawData,
   type XTweetCandidate,
 } from '@/lib/analysis/types';
-import type { BrandProfile, Finding, Scan, ActorRunInfo, GoogleScannerId } from '@/lib/types';
+import type { BrandProfile, Finding, Scan, ActorRunInfo, GoogleScannerId, XFindingMatchBasis } from '@/lib/types';
 import {
   getEffectiveScanSettings,
 } from '@/lib/brands';
@@ -388,6 +388,13 @@ async function handleSucceededRun({
       currentScanId: scan.id ?? scanDoc.id,
     })
     : undefined;
+  const previousXAccountKeys = scannerConfig.kind === 'x'
+    ? await loadPreviousXAccountKeys({
+      brandId: scan.brandId,
+      userId: scan.userId,
+      currentScanId: scan.id ?? scanDoc.id,
+    })
+    : undefined;
   const existingTaxonomy = await loadBrandFindingTaxonomy({
     brandId: scan.brandId,
     userId: scan.userId,
@@ -511,6 +518,7 @@ async function handleSucceededRun({
       displayQuery,
       userPreferenceHints,
       previousTweetIds: previousXTweetIds,
+      previousAccountKeys: previousXAccountKeys,
       existingTaxonomy,
       scannerConfig,
     });
@@ -737,6 +745,48 @@ async function loadPreviousXTweetIds({
   }
 
   return tweetIds;
+}
+
+async function loadPreviousXAccountKeys({
+  brandId,
+  userId,
+  currentScanId,
+}: {
+  brandId: string;
+  userId: string;
+  currentScanId: string;
+}): Promise<Set<string>> {
+  const previousFindingsSnap = await db
+    .collection('findings')
+    .where('brandId', '==', brandId)
+    .where('userId', '==', userId)
+    .select('scanId', 'rawData', 'isFalsePositive', 'xAuthorId', 'xAuthorHandle')
+    .get();
+
+  const accountKeys = new Set<string>();
+  for (const doc of previousFindingsSnap.docs) {
+    const data = doc.data() as {
+      scanId?: string;
+      rawData?: Record<string, unknown>;
+      isFalsePositive?: boolean;
+      xAuthorId?: string;
+      xAuthorHandle?: string;
+    };
+    if (data.scanId === currentScanId || data.isFalsePositive === true) {
+      continue;
+    }
+
+    const storedRawData = readXStoredFindingRawData(data.rawData);
+    const accountKey = buildXAccountKey({
+      authorId: data.xAuthorId ?? storedRawData?.tweet.author.id,
+      authorHandle: data.xAuthorHandle ?? storedRawData?.tweet.author.userName,
+    });
+    if (accountKey) {
+      accountKeys.add(accountKey);
+    }
+  }
+
+  return accountKeys;
 }
 
 /**
@@ -1188,6 +1238,7 @@ async function analyseAndWriteXBatch({
   displayQuery,
   userPreferenceHints,
   previousTweetIds,
+  previousAccountKeys,
   existingTaxonomy,
 }: {
   scanDoc: ScanDocHandle;
@@ -1204,6 +1255,7 @@ async function analyseAndWriteXBatch({
   displayQuery?: string;
   userPreferenceHints?: Scan['userPreferenceHints'];
   previousTweetIds?: ReadonlySet<string>;
+  previousAccountKeys?: ReadonlySet<string>;
   existingTaxonomy: { themes: string[] };
 }): Promise<{
   findingCount: number;
@@ -1283,7 +1335,16 @@ async function analyseAndWriteXBatch({
     }
   }
 
+  const seenRealAccountKeys = new Set(previousAccountKeys ?? []);
   for (const { candidate, outcome } of outcomes.values()) {
+    const accountKey = buildXAccountKey({
+      authorId: candidate.author.id,
+      authorHandle: candidate.author.userName,
+    });
+    if (outcome.matchBasis === 'handle_only' && accountKey && seenRealAccountKeys.has(accountKey)) {
+      continue;
+    }
+
     const delta = await upsertXFinding({
       scanDoc,
       scan,
@@ -1304,6 +1365,10 @@ async function analyseAndWriteXBatch({
     counts.medium += delta.counts.medium;
     counts.low += delta.counts.low;
     counts.nonHit += delta.counts.nonHit;
+
+    if (!outcome.isFalsePositive && accountKey) {
+      seenRealAccountKeys.add(accountKey);
+    }
   }
 
   return { findingCount, counts, skippedDuplicateCount };
@@ -1511,6 +1576,7 @@ type XFindingOutcome = {
   theme?: string;
   analysis: string;
   isFalsePositive: boolean;
+  matchBasis: XFindingMatchBasis;
   llmAnalysisPrompt?: string;
   rawLlmResponse?: string;
   classificationSource: 'llm' | 'fallback';
@@ -2726,6 +2792,7 @@ async function upsertXFinding({
       searchDepth,
       searchQuery,
       displayQuery,
+      matchBasis: preferredOutcome.matchBasis,
       classificationSource: preferredOutcome.classificationSource,
     });
     const preferredSource = choosePreferredFindingSource(existing?.source, source);
@@ -2746,6 +2813,10 @@ async function upsertXFinding({
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.url,
+        ...(candidate.author.id ? { xAuthorId: candidate.author.id } : {}),
+        ...(candidate.author.userName ? { xAuthorHandle: candidate.author.userName } : {}),
+        ...(candidate.author.twitterUrl ? { xAuthorUrl: candidate.author.twitterUrl } : {}),
+        xMatchBasis: preferredOutcome.matchBasis,
         rawData: mergedRawData,
         isFalsePositive: preferredOutcome.isFalsePositive,
         ...(preferredOutcome.isFalsePositive && {
@@ -2773,6 +2844,10 @@ async function upsertXFinding({
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.url,
+      xAuthorId: candidate.author.id ?? existing.xAuthorId ?? FieldValue.delete(),
+      xAuthorHandle: candidate.author.userName ?? existing.xAuthorHandle ?? FieldValue.delete(),
+      xAuthorUrl: candidate.author.twitterUrl ?? existing.xAuthorUrl ?? FieldValue.delete(),
+      xMatchBasis: preferredOutcome.matchBasis,
       rawData: mergedRawData,
       isFalsePositive: preferredOutcome.isFalsePositive,
     };
@@ -3134,12 +3209,19 @@ function buildXFindingOutcome(
   rawLlmResponse: string,
   llmAnalysisPrompt: string,
 ): XFindingOutcome {
+  const matchBasis = item.isFalsePositive
+    ? 'none'
+    : item.matchBasis === 'none'
+      ? 'content_only'
+      : item.matchBasis;
+
   return {
     severity: item.severity,
     title: item.title,
     theme: item.theme,
     analysis: item.analysis,
     isFalsePositive: item.isFalsePositive,
+    matchBasis,
     llmAnalysisPrompt,
     rawLlmResponse,
     classificationSource: 'llm',
@@ -3540,6 +3622,7 @@ function buildXStoredFindingRawData({
   searchDepth,
   searchQuery,
   displayQuery,
+  matchBasis,
   classificationSource,
 }: {
   existingRawData?: Record<string, unknown>;
@@ -3551,6 +3634,7 @@ function buildXStoredFindingRawData({
   searchDepth: number;
   searchQuery?: string;
   displayQuery?: string;
+  matchBasis: XFindingMatchBasis;
   classificationSource: 'llm' | 'fallback';
 }): XStoredFindingRawData {
   const existing = readXStoredFindingRawData(existingRawData);
@@ -3598,6 +3682,7 @@ function buildXStoredFindingRawData({
       findingSource: source,
       scannerId: scannerConfig.id,
       searchDepth,
+      matchBasis,
       ...(searchQuery ? { searchQuery } : {}),
       ...(displayQuery ? { displayQuery } : {}),
     },
@@ -3666,6 +3751,7 @@ function readXStoredFindingRawData(rawData?: Record<string, unknown>): XStoredFi
       findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'x',
       scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'x-search',
       searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
+      matchBasis: isXFindingMatchBasis(analysis.matchBasis) ? analysis.matchBasis : undefined,
       searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
       displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
     },
@@ -4028,13 +4114,15 @@ function choosePreferredDomainRegistrationOutcome(
 function choosePreferredXOutcome(existing: Finding | null, next: XFindingOutcome): XFindingOutcome {
   if (!existing) return next;
 
-  const existingSource = readXStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
+  const existingRawData = readXStoredFindingRawData(existing.rawData);
+  const existingSource = existingRawData?.analysis.source ?? 'llm';
   const existingOutcome: XFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
     theme: existing.theme,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,
+    matchBasis: existing.xMatchBasis ?? existingRawData?.analysis.matchBasis ?? 'none',
     llmAnalysisPrompt: existing.llmAnalysisPrompt,
     rawLlmResponse: existing.rawLlmResponse,
     classificationSource: existingSource,
@@ -4658,6 +4746,33 @@ function readXAuthor(value: unknown): XTweetCandidate['author'] {
     ...(readOptionalFiniteNumber(author.followers) !== undefined ? { followers: readOptionalFiniteNumber(author.followers) } : {}),
     ...(readOptionalFiniteNumber(author.following) !== undefined ? { following: readOptionalFiniteNumber(author.following) } : {}),
   };
+}
+
+function buildXAccountKey({
+  authorId,
+  authorHandle,
+}: {
+  authorId?: string;
+  authorHandle?: string;
+}): string | null {
+  const trimmedId = authorId?.trim();
+  if (trimmedId) {
+    return `id:${trimmedId}`;
+  }
+
+  const trimmedHandle = authorHandle?.trim().toLowerCase();
+  if (trimmedHandle) {
+    return `handle:${trimmedHandle}`;
+  }
+
+  return null;
+}
+
+function isXFindingMatchBasis(value: unknown): value is XFindingMatchBasis {
+  return value === 'none'
+    || value === 'handle_only'
+    || value === 'content_only'
+    || value === 'handle_and_content';
 }
 
 function readOptionalTrimmedString(value: unknown): string | undefined {

@@ -123,7 +123,11 @@ function getFindingSearchPriority(finding: FindingSummary) {
 }
 
 function buildFindingSearchText(finding: FindingSummary) {
-  return normalizeSearchText(`${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis}`);
+  const xHandleSearchText = finding.xAuthorHandle
+    ? `${finding.xAuthorHandle} @${finding.xAuthorHandle}`
+    : '';
+
+  return normalizeSearchText(`${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis} ${xHandleSearchText}`);
 }
 
 function matchesSearchFilters(
@@ -279,6 +283,10 @@ export async function GET(request: NextRequest, { params }: Params) {
       'theme',
       'llmAnalysis',
       'url',
+      'xAuthorId',
+      'xAuthorHandle',
+      'xAuthorUrl',
+      'xMatchBasis',
       'isFalsePositive',
       'isIgnored',
       'isAddressed',

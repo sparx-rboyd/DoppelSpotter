@@ -270,6 +270,12 @@ export type FindingSource =
   | 'x'
   | 'unknown';
 
+export type XFindingMatchBasis =
+  | 'none'
+  | 'handle_only'
+  | 'content_only'
+  | 'handle_and_content';
+
 export interface FindingSummary {
   id: string;
   scanId: string;
@@ -281,6 +287,14 @@ export interface FindingSummary {
   theme?: string;
   llmAnalysis: string;
   url?: string;
+  /** Denormalized X account id for account-level dedupe and UI subtext. */
+  xAuthorId?: string;
+  /** Denormalized X handle without the leading @. */
+  xAuthorHandle?: string;
+  /** Canonical X profile URL for the matched author, when available. */
+  xAuthorUrl?: string;
+  /** Why an X finding was considered a real hit. */
+  xMatchBasis?: XFindingMatchBasis;
   /** Set to true for AI-classified false positives (not real threats). */
   isFalsePositive?: boolean;
   /** Set to true when the user manually dismisses this finding. */

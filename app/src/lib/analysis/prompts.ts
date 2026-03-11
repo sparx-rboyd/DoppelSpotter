@@ -247,7 +247,8 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
       "severity": "high" | "medium" | "low",
       "theme": "Short theme label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
       "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
-      "isFalsePositive": boolean
+      "isFalsePositive": boolean,
+      "matchBasis": "none" | "handle_only" | "content_only" | "handle_and_content"
     }
   ]
 }
@@ -255,7 +256,7 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
 Rules for "items":
 - Include exactly one item for every input post and reuse the exact same resultId.
 - Assess only the provided posts. Do not add extra items and do not omit any candidate.
-- Each item must have all six fields: resultId, title, severity, theme, analysis, isFalsePositive.
+- Each item must have all seven fields: resultId, title, severity, theme, analysis, isFalsePositive, matchBasis.
 - Each individual analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
 - This applies to both the title and the analysis text.
 - Always return a concise "theme" label. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case.
@@ -264,6 +265,10 @@ Rules for "items":
 - Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
 - Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
 - If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current post.
+- Set matchBasis to "handle_only" when the account handle or display name is itself infringing, but the current post text is otherwise benign or unrelated.
+- Set matchBasis to "content_only" when the post text itself contains the infringing or risky material, even if the handle is not the main issue.
+- Set matchBasis to "handle_and_content" when both the account identity and the post text are materially part of the risk.
+- Set matchBasis to "none" only when isFalsePositive is true and the post should not be treated as a real finding.
 
 Severity assignment:
 - The user prompt will include this brand's definitions for "high", "medium", and "low".
