@@ -61,6 +61,7 @@
                     <span class="font-bold text-xl tracking-tight text-white">DoppelSpotter</span>
                 </div>
                 <div class="hidden lg:flex items-center gap-8">
+                    <a href="#demo" class="text-white hover:text-brand-100 font-medium transition">Demo</a>
                     <a href="#problem" class="text-white hover:text-brand-100 font-medium transition">The Problem</a>
                     <a href="#solution" class="text-white hover:text-brand-100 font-medium transition">Solution</a>
                     <a href="#architecture" class="text-white hover:text-brand-100 font-medium transition">Architecture</a>
@@ -104,104 +105,36 @@
                 <p class="text-lg sm:text-xl text-gray-600 mb-8 sm:mb-10 max-w-2xl mx-auto leading-relaxed">
                     An AI-powered autonomous pipeline that uses live web data to detect lookalike domains, fake social accounts, and clone apps. Built for SMEs who can't afford enterprise protection.
                 </p>
-                
-                <div class="flex flex-col sm:flex-row gap-4 justify-center">
-                    <a href="#architecture" class="flex items-center justify-center gap-2 rounded-full border border-brand-700 bg-brand-600 px-8 py-3 font-medium text-white transition hover:bg-brand-700">
-                        <i data-lucide="cpu" class="w-5 h-5"></i> View Architecture
-                    </a>
-                    <a href="#alignment" class="flex items-center justify-center gap-2 rounded-full border border-brand-100 bg-white px-8 py-3 font-medium text-brand-700 transition hover:bg-brand-50">
-                        <i data-lucide="target" class="w-5 h-5"></i> Challenge Alignment
-                    </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Demo Video Section -->
+    <section id="demo" class="py-20 bg-gray-100 border-t border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="max-w-4xl mx-auto text-center mb-10">
+                <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 text-brand-700 text-xs sm:text-sm font-semibold border border-brand-100 mb-5">
+                    <i data-lucide="play-circle" class="w-4 h-4"></i>
+                    <span>Product demo</span>
                 </div>
+                <h2 class="text-3xl sm:text-4xl font-bold tracking-tight text-gray-900 mb-4">See DoppelSpotter action</h2>
+                <p class="text-lg text-gray-600 leading-relaxed">
+                    See how DoppelSpotter turns live web data into structured, reviewable brand-protection intelligence.
+                </p>
             </div>
 
-            <!-- Dashboard Mockup -->
-            <div class="mt-20 relative mx-auto max-w-5xl overflow-hidden rounded-2xl border border-gray-200/50 bg-white ring-1 ring-gray-900/5 shadow-xl shadow-gray-200/40">
-                <div class="bg-gray-50 border-b border-gray-100 px-4 py-3 flex items-center gap-2">
-                    <div class="flex gap-1.5 flex-shrink-0">
-                        <div class="w-3 h-3 rounded-full bg-red-400"></div>
-                        <div class="w-3 h-3 rounded-full bg-amber-400"></div>
-                        <div class="w-3 h-3 rounded-full bg-green-400"></div>
-                    </div>
-                    <div class="mx-auto min-w-0 rounded-md border border-gray-200 bg-white px-4 py-1.5 text-xs text-gray-500 sm:px-12 flex items-center gap-2 shadow-sm">
-                        <i data-lucide="lock" class="w-3 h-3 flex-shrink-0 text-gray-400"></i>
-                        <span class="truncate font-medium">app.doppelspotter.com</span>
-                    </div>
-                </div>
-                <div class="p-4 sm:p-8 bg-gray-50/30">
-                    <div class="flex items-center justify-between mb-4 gap-4">
-                        <div>
-                            <h3 class="text-base sm:text-xl font-semibold text-gray-900">Recent Threats Detected</h3>
-                            <p class="text-xs sm:text-sm text-gray-500">Live web data retrieved via Apify Actors</p>
-                        </div>
-                        <span class="flex items-center gap-1.5 flex-shrink-0">
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border border-red-300 bg-red-200 text-red-900">
-                                <i data-lucide="alert-circle" class="w-3 h-3"></i> 1 High
-                            </span>
-                            <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border border-amber-300 bg-amber-200 text-amber-900">
-                                <i data-lucide="alert-triangle" class="w-3 h-3"></i> 1 Medium
-                            </span>
-                        </span>
-                    </div>
-
-                    <div class="mb-6 rounded-xl border border-brand-100 bg-brand-50/70 px-4 py-4 border-l-2 border-l-brand-500 shadow-sm">
-                        <div class="flex items-start gap-3">
-                            <i data-lucide="sparkles" class="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-500"></i>
-                            <div class="min-w-0">
-                                <p class="text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-700/80">
-                                    AI summary
-                                </p>
-                                <p class="mt-1 text-sm leading-6 text-gray-700">
-                                    This scan identified a high-risk lookalike domain that has just been registered and is already resolving to a cloned login portal. Additionally, a suspicious Discord server has been detected offering "cracked" versions of your software. Immediate takedown action is recommended.
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="space-y-4">
-                        <!-- Mock Item 1 -->
-                        <div class="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 transition hover:border-brand-300 shadow-sm sm:gap-5 sm:p-5">
-                            <div class="bg-red-50 border border-red-100 p-2 sm:p-3 rounded-lg text-red-600 flex-shrink-0">
-                                <i data-lucide="globe" class="w-5 h-5 sm:w-6 sm:h-6"></i>
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <h4 class="font-semibold text-gray-900 text-sm sm:text-base">Lookalike Domain Registered</h4>
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border border-red-300 bg-red-200 text-red-900">High</span>
-                                    <span class="text-[11px] text-gray-400 font-mono hidden sm:inline">via doppelspotter/recent-domain-registrations</span>
-                                </div>
-                                <p class="text-xs sm:text-sm text-gray-500 mb-3"><code>yourbränd-support.com</code> was registered 4 hours ago via Namecheap.</p>
-                                <div class="bg-gray-50 rounded-lg p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
-                                    <i data-lucide="bot" class="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0"></i>
-                                    <div>
-                                        <p><strong>LLM Analysis:</strong> This domain employs a homoglyph substitution ('ä' instead of 'a') and targets the "support" keyword. Combined with the recent registration date and the AI-enriched homepage analysis from the actor showing a cloned login screen, there is a 98% probability this is a live phishing campaign.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Mock Item 2 -->
-                        <div class="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-200 bg-white p-4 transition hover:border-brand-300 shadow-sm sm:gap-5 sm:p-5">
-                            <div class="bg-amber-50 border border-amber-100 p-2 sm:p-3 rounded-lg text-amber-600 flex-shrink-0">
-                                <i data-lucide="message-square" class="w-5 h-5 sm:w-6 sm:h-6"></i>
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <h4 class="font-semibold text-gray-900 text-sm sm:text-base">Fake Community Server</h4>
-                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-full border border-amber-300 bg-amber-200 text-amber-900">Medium</span>
-                                    <span class="text-[11px] text-gray-400 font-mono hidden sm:inline">via louisdeconinck/discord-server-scraper</span>
-                                </div>
-                                <p class="text-xs sm:text-sm text-gray-500 mb-3">Discord server <code>Official YourBrand Hub</code> with 450 members.</p>
-                                <div class="bg-gray-50 rounded-lg p-3 text-xs sm:text-sm text-gray-600 border border-gray-100 flex items-start gap-2">
-                                    <i data-lucide="bot" class="w-4 h-4 text-brand-500 mt-0.5 flex-shrink-0"></i>
-                                    <div>
-                                        <p><strong>LLM Analysis:</strong> Server is using your official logo and name, but discussions indicate it is being used to distribute unauthorised "cracked" versions of your software. Intent is clearly illicit distribution and brand impersonation.</p>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            <div class="max-w-5xl mx-auto overflow-hidden rounded-3xl border border-gray-200 bg-gray-950 shadow-2xl shadow-gray-200/70">
+                <video
+                    class="block w-full h-auto"
+                    controls
+                    playsinline
+                    preload="metadata"
+                    poster="doppelspotter-pitch.mp4.png"
+                >
+                    <source src="doppelspotter-pitch.mp4" type="video/mp4">
+                    Your browser does not support inline video playback.
+                    <a href="doppelspotter-pitch.mp4" class="text-brand-300 underline">Download the demo video</a>.
+                </video>
             </div>
         </div>
     </section>
