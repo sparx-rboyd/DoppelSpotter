@@ -555,6 +555,8 @@ export default function BrandDetailPage() {
   const normalizedFindingsSearchQuery = normalizeFindingsSearchText(debouncedFindingsSearchQuery);
   const normalizedSelectedFindingTheme = normalizeFindingsTaxonomyValue(selectedFindingTheme);
   const isFindingsSearchActive = normalizedFindingsSearchInput.length > 0;
+  const shouldUseServerFindingSearch = activeTab === 'scans' && isFindingsSearchActive;
+  const shouldUseLocalTabFindingSearch = activeTab !== 'scans' && isFindingsSearchActive;
   const canRunServerFindingSearch = normalizedFindingsSearchQuery.length >= FINDING_SEARCH_MIN_QUERY_LENGTH;
   const hasActiveFindingCategoryFilter = selectedFindingCategory !== null;
   const hasActiveFindingSourceFilter = selectedFindingSource !== null;
@@ -568,8 +570,10 @@ export default function BrandDetailPage() {
     || hasActiveFindingCategoryFilter
     || hasActiveFindingSourceFilter
     || hasActiveFindingThemeFilter;
-  const activeHighlightQuery = canRunServerFindingSearch ? debouncedFindingsSearchQuery : undefined;
-  const findingsSearchLoading = isFindingsSearchActive ? serverSearchLoading : filterHydrationLoading;
+  const activeHighlightQuery = shouldUseServerFindingSearch
+    ? (canRunServerFindingSearch ? debouncedFindingsSearchQuery : undefined)
+    : (shouldUseLocalTabFindingSearch ? findingsSearchQuery : undefined);
+  const findingsSearchLoading = shouldUseServerFindingSearch ? serverSearchLoading : filterHydrationLoading;
 
   useEffect(() => {
     if (!isAnyFindingFilterActive) return;
@@ -713,6 +717,7 @@ export default function BrandDetailPage() {
     const params = new URLSearchParams({
       q: debouncedFindingsSearchQuery.trim(),
       limit: `${FINDING_SEARCH_RESULTS_PAGE_SIZE}`,
+      tab: activeTab,
     });
 
     if (options?.cursor) {
@@ -759,6 +764,7 @@ export default function BrandDetailPage() {
     setSearchResultsTruncated(responseData.truncated === true);
     setSearchResultsError('');
   }, [
+    activeTab,
     brandId,
     debouncedFindingsSearchQuery,
     selectedFindingCategory,
@@ -1012,11 +1018,75 @@ export default function BrandDetailPage() {
     return changed ? next : record;
   }
 
-  function getFindingDisplayBucket(finding: FindingSummary) {
+  function getFindingDisplayBucket(finding: Pick<FindingSummary, 'isFalsePositive' | 'isIgnored' | 'isAddressed'>) {
     if (finding.isFalsePositive === true) return 'non-hit' as const;
     if (finding.isIgnored === true) return 'ignored' as const;
     if (finding.isAddressed === true) return 'addressed' as const;
     return 'hit' as const;
+  }
+
+  function matchesSearchTabScope(
+    finding: Pick<FindingSummary, 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'isBookmarked'>,
+    tab: 'scans' | 'bookmarks' | 'ignored' | 'addressed',
+  ) {
+    if (tab === 'bookmarks') {
+      return finding.isBookmarked === true;
+    }
+
+    const displayBucket = getFindingDisplayBucket(finding);
+    if (tab === 'scans') {
+      return displayBucket === 'hit' || displayBucket === 'non-hit';
+    }
+    if (tab === 'ignored') {
+      return displayBucket === 'ignored';
+    }
+    return displayBucket === 'addressed';
+  }
+
+  function buildFindingSearchText(finding: FindingSummary) {
+    const xHandleSearchText = finding.xAuthorHandle
+      ? `${finding.xAuthorHandle} @${finding.xAuthorHandle}`
+      : '';
+
+    return normalizeFindingsSearchText(`${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis} ${xHandleSearchText}`);
+  }
+
+  function buildSearchResult(
+    finding: FindingSummary,
+    previous?: FindingSearchResult,
+  ): FindingSearchResult {
+    return {
+      ...finding,
+      displayBucket: getFindingDisplayBucket(finding),
+      ...(previous?.scanStartedAt ? { scanStartedAt: previous.scanStartedAt } : {}),
+      ...(previous?.scanStatus ? { scanStatus: previous.scanStatus } : {}),
+    };
+  }
+
+  function updateVisibleSearchResults(
+    matcher: (result: FindingSearchResult) => boolean,
+    updater: (result: FindingSearchResult) => FindingSummary,
+  ) {
+    setSearchResults((prev) => {
+      let changed = false;
+      const next: FindingSearchResult[] = [];
+      for (const result of prev) {
+        if (!matcher(result)) {
+          next.push(result);
+          continue;
+        }
+
+        changed = true;
+        const updatedFinding = updater(result);
+        if (!matchesSearchTabScope(updatedFinding, activeTab)) {
+          continue;
+        }
+
+        next.push(buildSearchResult(updatedFinding, result));
+      }
+
+      return changed ? next : prev;
+    });
   }
 
   function removeFindingsFromList(findings: FindingSummary[], findingIds: Set<string>) {
@@ -1175,6 +1245,10 @@ export default function BrandDetailPage() {
 
       return prev.map((finding) => (finding.id === triggerFinding.id ? updatedFinding : finding));
     });
+    updateVisibleSearchResults(
+      (result) => result.id === triggerFinding.id,
+      (result) => applyMetadataUpdate(result),
+    );
   }
 
   async function updateFindingMetadata(
@@ -1338,6 +1412,10 @@ export default function BrandDetailPage() {
         );
       }
 
+      updateVisibleSearchResults(
+        (result) => result.url === url,
+        (result) => ({ ...result, isIgnored }),
+      );
       return;
     }
 
@@ -1430,6 +1508,10 @@ export default function BrandDetailPage() {
         }
       }),
     );
+    updateVisibleSearchResults(
+      (result) => result.id === findingId,
+      (result) => ({ ...result, isIgnored }),
+    );
   }
 
   async function handleAddressedToggle(triggerFinding: FindingSummary, isAddressed: boolean) {
@@ -1499,6 +1581,10 @@ export default function BrandDetailPage() {
     });
     setAllBookmarkedFindings((prev) => prev.map((finding) => affectedFindingsById.get(finding.id) ?? finding));
     setAllIgnoredFindings((prev) => removeFindingsFromList(prev, affectedIds));
+    updateVisibleSearchResults(
+      (result) => affectedFindingsById.has(result.id),
+      (result) => affectedFindingsById.get(result.id) ?? result,
+    );
     setScans((prev) =>
       prev.map((scan) => {
         const delta = responseData.affectedScanDeltas?.[scan.id];
@@ -1633,6 +1719,10 @@ export default function BrandDetailPage() {
       return nextAddressedFindings.length > 0 ? upsertFindingsIntoList(next, nextAddressedFindings) : next;
     });
     setAllBookmarkedFindings((prev) => prev.map((finding) => affectedFindingsById.get(finding.id) ?? finding));
+    updateVisibleSearchResults(
+      (result) => affectedFindingsById.has(result.id),
+      (result) => affectedFindingsById.get(result.id) ?? result,
+    );
     setScans((prev) =>
       prev.map((scan) => {
         const delta = responseData.affectedScanDeltas?.[scan.id];
@@ -1779,15 +1869,17 @@ export default function BrandDetailPage() {
   }, [brandId, loading, scanning]);
 
   useEffect(() => {
-    if (!isFindingsSearchActive) {
+    if (!shouldUseServerFindingSearch) {
       findingSearchAbortControllerRef.current?.abort();
       findingSearchAbortControllerRef.current = null;
       setServerSearchLoading(false);
       setLoadingMoreSearchResults(false);
-      setSearchResults([]);
-      setSearchResultsNextCursor(null);
-      setSearchResultsError('');
-      setSearchResultsTruncated(false);
+      if (activeTab === 'scans' || !isFindingsSearchActive) {
+        setSearchResults([]);
+        setSearchResultsNextCursor(null);
+        setSearchResultsError('');
+        setSearchResultsTruncated(false);
+      }
       return;
     }
 
@@ -1830,13 +1922,15 @@ export default function BrandDetailPage() {
       controller.abort();
     };
   }, [
+    activeTab,
     canRunServerFindingSearch,
     fetchServerSearchResults,
     isFindingsSearchActive,
+    shouldUseServerFindingSearch,
   ]);
 
   useEffect(() => {
-    if (isFindingsSearchActive || !hasActiveNonSearchFindingFilters) {
+    if (activeTab !== 'scans' || isFindingsSearchActive || !hasActiveNonSearchFindingFilters) {
       setFilterHydrationLoading(false);
       return;
     }
@@ -1882,7 +1976,7 @@ export default function BrandDetailPage() {
       cancelled = true;
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasActiveNonSearchFindingFilters, isFindingsSearchActive, scans, scanFindings, scanNonHits, scanIgnored]);
+  }, [activeTab, hasActiveNonSearchFindingFilters, isFindingsSearchActive, scans, scanFindings, scanNonHits, scanIgnored]);
 
   const availableFindingThemes = useMemo(() => collectDistinctFindingTaxonomyLabels([
     ...findingTaxonomyOptions.themes,
@@ -2772,6 +2866,8 @@ export default function BrandDetailPage() {
   }
 
   function matchesFindingFilters(finding: FindingSummary) {
+    const matchesLocalSearch = !shouldUseLocalTabFindingSearch
+      || buildFindingSearchText(finding).includes(normalizedFindingsSearchInput);
     const matchesCategory = !selectedFindingCategory || (
       selectedFindingCategory === 'non-hit'
         ? finding.isFalsePositive === true
@@ -2781,12 +2877,14 @@ export default function BrandDetailPage() {
     const matchesTheme = !hasActiveFindingThemeFilter
       || normalizeFindingsTaxonomyValue(finding.theme) === normalizedSelectedFindingTheme;
 
-    return matchesCategory && matchesSource && matchesTheme;
+    return matchesLocalSearch && matchesCategory && matchesSource && matchesTheme;
   }
 
   function filterFindings(findings?: FindingSummary[]) {
     if (!findings) return findings;
-    return hasActiveNonSearchFindingFilters ? findings.filter(matchesFindingFilters) : findings;
+    return (hasActiveNonSearchFindingFilters || shouldUseLocalTabFindingSearch)
+      ? findings.filter(matchesFindingFilters)
+      : findings;
   }
 
   const totalFindings = scans.reduce((sum, s) => sum + s.highCount + s.mediumCount + s.lowCount, 0);
@@ -2831,7 +2929,7 @@ export default function BrandDetailPage() {
   const visibleIgnoredCount = visibleIgnoredFindings.length;
   const visibleLiveScanFindings = filterFindings(liveScanFindings) ?? [];
   const visibleLiveScanNonHits = sortBySeverity(filterFindings(liveScanNonHits) ?? []);
-  const isSearchResultsMode = isFindingsSearchActive;
+  const isSearchResultsMode = shouldUseServerFindingSearch;
   const isSearchQueryTooShort = isSearchResultsMode && !canRunServerFindingSearch;
   const searchResultsCountLabel = `${formatInteger(searchResults.length)} result${searchResults.length !== 1 ? 's' : ''}`;
   const scansToRender = isAnyFindingFilterActive
@@ -3284,7 +3382,7 @@ export default function BrandDetailPage() {
                                   </span>
                                 </p>
                                 <p className="mt-1 text-xs text-gray-500">
-                                  Matching findings across scans, bookmarks, addressed, ignored, and non-findings.
+                                  Matching findings visible in the current tab.
                                 </p>
                               </div>
                               {searchResultsTruncated && (

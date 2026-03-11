@@ -29,6 +29,8 @@ type SearchCursor = {
   findingId: string;
 };
 
+type FindingSearchScope = 'scans' | 'bookmarks' | 'ignored' | 'addressed';
+
 const MIN_SEARCH_QUERY_LENGTH = 2;
 const DEFAULT_RESULT_LIMIT = 50;
 const MAX_RESULT_LIMIT = 100;
@@ -80,6 +82,14 @@ function parseResultLimit(value?: string | null) {
   return Math.min(parsed, MAX_RESULT_LIMIT);
 }
 
+function parseSearchScope(value?: string | null): FindingSearchScope {
+  if (value === 'bookmarks' || value === 'ignored' || value === 'addressed') {
+    return value;
+  }
+
+  return 'scans';
+}
+
 function encodeCursor(cursor: SearchCursor) {
   return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
 }
@@ -108,11 +118,29 @@ function decodeCursor(value?: string | null): SearchCursor | null {
   }
 }
 
-function getFindingDisplayBucket(finding: FindingSummary): FindingSearchDisplayBucket {
+function getFindingDisplayBucket(finding: Pick<FindingSummary, 'isFalsePositive' | 'isIgnored' | 'isAddressed'>): FindingSearchDisplayBucket {
   if (finding.isFalsePositive === true) return 'non-hit';
   if (finding.isAddressed === true) return 'addressed';
   if (finding.isIgnored === true) return 'ignored';
   return 'hit';
+}
+
+function matchesSearchScope(
+  finding: Pick<FindingSummary, 'isFalsePositive' | 'isIgnored' | 'isAddressed' | 'isBookmarked'>,
+  scope: FindingSearchScope,
+) {
+  if (scope === 'bookmarks') {
+    return finding.isBookmarked === true;
+  }
+
+  const displayBucket = getFindingDisplayBucket(finding);
+  if (scope === 'scans') {
+    return displayBucket === 'hit' || displayBucket === 'non-hit';
+  }
+  if (scope === 'ignored') {
+    return displayBucket === 'ignored';
+  }
+  return displayBucket === 'addressed';
 }
 
 function getFindingSearchPriority(finding: FindingSummary) {
@@ -137,8 +165,13 @@ function matchesSearchFilters(
     category: FindingCategory | null;
     source: FindingSource | null;
     normalizedTheme: string;
+    scope: FindingSearchScope;
   },
 ) {
+  if (!matchesSearchScope(finding, params.scope)) {
+    return false;
+  }
+
   const matchesText = buildFindingSearchText(finding).includes(params.normalizedQuery);
   if (!matchesText) return false;
 
@@ -200,6 +233,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const theme = request.nextUrl.searchParams.get('theme')?.trim() ?? '';
   const normalizedTheme = normalizeThemeValue(theme);
   const scanId = request.nextUrl.searchParams.get('scanId')?.trim() ?? '';
+  const scope = parseSearchScope(request.nextUrl.searchParams.get('tab'));
   const resultLimit = parseResultLimit(request.nextUrl.searchParams.get('limit'));
   const parsedCursor = decodeCursor(request.nextUrl.searchParams.get('cursor'));
 
@@ -334,7 +368,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       };
       scannedFindings++;
 
-      if (!deletingScanIds.has(finding.scanId) && matchesSearchFilters(finding, { normalizedQuery, category, source, normalizedTheme })) {
+      if (!deletingScanIds.has(finding.scanId) && matchesSearchFilters(finding, { normalizedQuery, category, source, normalizedTheme, scope })) {
         collectedMatches.push(finding);
         collectedMatchCursors.push(lastScannedCursor);
         if (collectedMatches.length >= resultLimit + 1) {
