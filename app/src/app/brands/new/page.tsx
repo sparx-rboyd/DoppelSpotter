@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, type FormEvent } from 'react';
+import { usePageTitle } from '@/lib/use-page-title';
 import { useRouter } from 'next/navigation';
 import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
@@ -33,6 +34,7 @@ import {
 import type { BrandAnalysisSeverityDefinitions, BrandScanScheduleInput, LookbackPeriod } from '@/lib/types';
 
 export default function NewBrandPage() {
+  usePageTitle('New Brand');
   const router = useRouter();
 
   const [name, setName] = useState('');

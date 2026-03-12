@@ -5,10 +5,12 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Mail, ScanEye } from 'lucide-react';
 import { EMAIL_VERIFICATION_TOKEN_MAX_AGE_LABEL, EMAIL_VERIFICATION_REQUEST_SUCCESS_MESSAGE } from '@/lib/email-verification';
+import { usePageTitle } from '@/lib/use-page-title';
 
 type PageState = 'pending' | 'check-email' | 'success';
 
 export default function VerifyEmailClient() {
+  usePageTitle('Verify Email');
   const searchParams = useSearchParams();
   const router = useRouter();
 

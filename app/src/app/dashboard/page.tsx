@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { usePageTitle } from '@/lib/use-page-title';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
@@ -75,6 +76,7 @@ function buildDashboardDrilldownCategoryParam(category: DashboardBreakdownCatego
 }
 
 export default function DashboardPage() {
+  usePageTitle('Dashboard');
   const router = useRouter();
   const [brands, setBrands] = useState<BrandSummary[]>([]);
   const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);

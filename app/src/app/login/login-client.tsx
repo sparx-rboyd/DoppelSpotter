@@ -6,8 +6,10 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ScanEye } from 'lucide-react';
 import { useAuth, broadcastAuthSyncEvent } from '@/lib/auth/auth-context';
 import { resolveSafeReturnTo } from '@/lib/auth/redirects';
+import { usePageTitle } from '@/lib/use-page-title';
 
 export default function LoginClient() {
+  usePageTitle('Sign In');
   const { user, loading: authLoading, refreshSession } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();

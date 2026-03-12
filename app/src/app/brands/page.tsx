@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { usePageTitle } from '@/lib/use-page-title';
 import Link from 'next/link';
 import { Plus, Shield, ChevronRight } from 'lucide-react';
 import { AuthGuard } from '@/components/auth-guard';
@@ -27,6 +28,7 @@ function getScanStatusLabel(brand: BrandSummary): string {
 }
 
 export default function BrandsPage() {
+  usePageTitle('Brands');
   const [brands, setBrands] = useState<BrandSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import { usePageTitle } from '@/lib/use-page-title';
 import { useRouter } from 'next/navigation';
 import { AlertTriangle, KeyRound, Trash2 } from 'lucide-react';
 import { AuthGuard } from '@/components/auth-guard';
@@ -11,6 +12,7 @@ import { broadcastAuthSyncEvent, useAuth } from '@/lib/auth/auth-context';
 import { buildLoginRedirectHref } from '@/lib/auth/redirects';
 
 export default function SettingsPage() {
+  usePageTitle('Account Settings');
   const { signOut, user, refreshSession } = useAuth();
   const router = useRouter();
 

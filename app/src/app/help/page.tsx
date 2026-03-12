@@ -1,6 +1,7 @@
 'use client';
 
 import { type ElementType, type ReactNode, useEffect, useRef, useState } from 'react';
+import { usePageTitle } from '@/lib/use-page-title';
 import Link from 'next/link';
 import {
   CheckCircle2,
@@ -111,6 +112,7 @@ function HelpSection({
 }
 
 export default function HelpPage() {
+  usePageTitle('Help');
   const [activeId, setActiveId] = useState<string>(SECTIONS[0].id);
   const isScrollingTo = useRef(false);
 

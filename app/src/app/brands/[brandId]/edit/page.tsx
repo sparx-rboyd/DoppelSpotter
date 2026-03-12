@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, type FormEvent } from 'react';
+import { usePageTitle } from '@/lib/use-page-title';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, Trash2 } from 'lucide-react';
 import Link from 'next/link';
@@ -49,6 +50,7 @@ export default function EditBrandPage() {
   const [loadingBrand, setLoadingBrand] = useState(true);
 
   const [name, setName] = useState('');
+  usePageTitle(name ? `Edit "${name}"` : 'Edit Brand');
   const [keywordInput, setKeywordInput] = useState('');
   const [keywords, setKeywords] = useState<string[]>([]);
   const [domainInput, setDomainInput] = useState('');

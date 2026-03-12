@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import Script from 'next/script';
 import { AuthProvider } from '@/lib/auth/auth-context';
 import { CookieBanner } from '@/components/cookie-banner';
+import { GaPageTracker } from '@/components/ga-page-tracker';
 import './globals.css';
 
 const inter = Inter({
@@ -39,10 +40,11 @@ export default function RootLayout({
             window.dataLayer = window.dataLayer || [];
             function gtag(){dataLayer.push(arguments);}
             gtag('js', new Date());
-            gtag('config', 'G-V6LJ15MRBW');
+            gtag('config', 'G-V6LJ15MRBW', { send_page_view: false });
           `}
         </Script>
         <AuthProvider>{children}</AuthProvider>
+        <GaPageTracker />
         <CookieBanner />
       </body>
     </html>

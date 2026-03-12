@@ -2,6 +2,7 @@
 
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePageTitle } from '@/lib/use-page-title';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import {
@@ -476,6 +477,7 @@ export default function BrandDetailPage() {
   const initialFindingTheme = searchParams.get(DRILLDOWN_THEME_QUERY_PARAM)?.trim() ?? '';
 
   const [brand, setBrand] = useState<BrandProfile | null>(null);
+  usePageTitle(brand?.name ?? '');
   const [scans, setScans] = useState<ScanSummary[]>([]);
   const [expandedScanIds, setExpandedScanIds] = useState<string[]>([]);
   const [anchorTargetScanId, setAnchorTargetScanId] = useState<string | null>(() => (

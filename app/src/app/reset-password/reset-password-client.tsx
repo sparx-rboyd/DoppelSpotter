@@ -5,8 +5,10 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { KeyRound, ScanEye } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { PASSWORD_RESET_TOKEN_MAX_AGE_LABEL } from '@/lib/password-reset';
+import { usePageTitle } from '@/lib/use-page-title';
 
 export default function ResetPasswordClient() {
+  usePageTitle('Reset Password');
   const searchParams = useSearchParams();
   const token = useMemo(() => searchParams.get('token')?.trim() ?? '', [searchParams]);
 

@@ -4,8 +4,10 @@ import Link from 'next/link';
 import { useState, type FormEvent } from 'react';
 import { Mail, ScanEye } from 'lucide-react';
 import { PASSWORD_RESET_REQUEST_SUCCESS_MESSAGE } from '@/lib/password-reset';
+import { usePageTitle } from '@/lib/use-page-title';
 
 export default function ForgotPasswordClient() {
+  usePageTitle('Forgot Password');
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
