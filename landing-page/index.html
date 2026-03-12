@@ -62,16 +62,48 @@
                 </div>
                 <div class="hidden lg:flex items-center gap-8">
                     <a href="#demo" class="text-white hover:text-brand-100 font-medium transition">Demo</a>
-                    <a href="#problem" class="text-white hover:text-brand-100 font-medium transition">The Problem</a>
+                    <a href="#problem" class="text-white hover:text-brand-100 font-medium transition">Problem</a>
                     <a href="#solution" class="text-white hover:text-brand-100 font-medium transition">Solution</a>
                     <a href="#architecture" class="text-white hover:text-brand-100 font-medium transition">Architecture</a>
-                    <a href="#ai" class="text-white hover:text-brand-100 font-medium transition flex items-center gap-1"><i data-lucide="sparkles" class="w-4 h-4"></i> Generative AI</a>
+                    <a href="#ai" class="text-white hover:text-brand-100 font-medium transition flex items-center gap-1"><i data-lucide="sparkles" class="w-4 h-4"></i> Gen AI</a>
                     <a href="#alignment" class="text-white hover:text-brand-100 font-medium transition">Challenge Alignment</a>
                     <a
                         href="https://github.com/sparx-rboyd/DoppelSpotter"
                         target="_blank"
                         rel="noreferrer"
                         class="inline-flex items-center gap-2 rounded-full border border-brand-100 bg-white px-4 py-2 text-sm font-semibold text-brand-700 transition hover:bg-brand-50"
+                    >
+                        <i data-lucide="github" class="w-4 h-4"></i>
+                        <span>GitHub</span>
+                    </a>
+                </div>
+                <button
+                    id="mobile-menu-button"
+                    type="button"
+                    class="inline-flex items-center justify-center rounded-full border border-brand-100/30 bg-brand-700/60 p-3 text-white transition hover:bg-brand-700 lg:hidden"
+                    aria-controls="mobile-menu"
+                    aria-expanded="false"
+                    aria-label="Open navigation menu"
+                >
+                    <i id="mobile-menu-open-icon" data-lucide="menu" class="w-5 h-5"></i>
+                    <i id="mobile-menu-close-icon" data-lucide="x" class="hidden w-5 h-5"></i>
+                </button>
+            </div>
+            <div id="mobile-menu" class="hidden pb-4 lg:hidden">
+                <div class="rounded-2xl border border-brand-100/20 bg-brand-700/95 p-3 shadow-xl shadow-brand-950/20 backdrop-blur">
+                    <div class="grid gap-1">
+                        <a href="#demo" class="rounded-xl px-4 py-3 text-sm font-medium text-white transition hover:bg-brand-600/80">Demo</a>
+                        <a href="#problem" class="rounded-xl px-4 py-3 text-sm font-medium text-white transition hover:bg-brand-600/80">Problem</a>
+                        <a href="#solution" class="rounded-xl px-4 py-3 text-sm font-medium text-white transition hover:bg-brand-600/80">Solution</a>
+                        <a href="#architecture" class="rounded-xl px-4 py-3 text-sm font-medium text-white transition hover:bg-brand-600/80">Architecture</a>
+                        <a href="#ai" class="rounded-xl px-4 py-3 text-sm font-medium text-white transition hover:bg-brand-600/80">Gen AI</a>
+                        <a href="#alignment" class="rounded-xl px-4 py-3 text-sm font-medium text-white transition hover:bg-brand-600/80">Challenge Alignment</a>
+                    </div>
+                    <a
+                        href="https://github.com/sparx-rboyd/DoppelSpotter"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-full border border-brand-100 bg-white px-4 py-3 text-sm font-semibold text-brand-700 transition hover:bg-brand-50"
                     >
                         <i data-lucide="github" class="w-4 h-4"></i>
                         <span>GitHub</span>
@@ -181,14 +213,14 @@
             <div class="flex flex-col lg:flex-row gap-16 items-center">
                 <div class="lg:w-1/2">
                     <h2 class="text-3xl font-bold text-gray-900 mb-6">The Solution</h2>
-                    <p class="text-lg text-gray-600 mb-10">We continually monitor the web for potential infringements—and use an LLM via OpenRouter to separate genuine threats from the noise.</p>
+                    <p class="text-lg text-gray-600 mb-10">We continually monitor the web for potential infringements—and use DeepSeek 3.2 via OpenRouter to separate genuine threats from the noise, and generate succincy analyses for each finding.</p>
                     
                     <div class="space-y-8">
                         <div class="flex gap-4">
                             <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold border border-brand-200">1</div>
                             <div>
                                 <h4 class="text-xl font-semibold text-gray-900 mb-2">Set up your brand profile</h4>
-                                <p class="text-gray-600">Enter brand names, related keywords, and official domains to configure the monitoring scope.</p>
+                                <p class="text-gray-600">Enter your brand name, related keywords, and official domains to set the monitoring scope.</p>
                             </div>
                         </div>
                         
@@ -196,7 +228,7 @@
                             <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold border border-brand-200">2</div>
                             <div>
                                 <h4 class="text-xl font-semibold text-gray-900 mb-2">Apify Actors scan the web</h4>
-                                <p class="text-gray-600">A suite of official and custom Apify actors continually monitors social media, search results, domain registries, and code repositories.</p>
+                                <p class="text-gray-600">A suite of official and community actors, and <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="font-medium text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-800">our own custom Apify actor</a> monitor wev search results, social media, domain registries, app stores and code repositories.</p>
                             </div>
                         </div>
                         
@@ -204,7 +236,7 @@
                             <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold border border-brand-200">3</div>
                             <div>
                                 <h4 class="text-xl font-semibold text-gray-900 mb-2">AI analyses every finding</h4>
-                                <p class="text-gray-600">An LLM classifies intent and scores severity, filtering out false positives (e.g., distinguishing a fan page from an impersonation).</p>
+                                <p class="text-gray-600">DeepSeek 3.2 classifies intent and scores severity, filtering out false positives (e.g. distinguishing a fan page from an impersonation).</p>
                             </div>
                         </div>
 
@@ -215,6 +247,15 @@
                                 <p class="text-gray-600">Findings are prioritised automatically, accompanied by plain-English explanations of the concrete business risk.</p>
                             </div>
                         </div>
+
+                        <div class="flex gap-4">
+                            <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold border border-brand-200">5</div>
+                            <div>
+                                <h4 class="text-xl font-semibold text-gray-900 mb-2">Take Action</h4>
+                                <p class="text-gray-600">Rich, visual insights, downloadable PDF and CSV reports, and finding management tools support rapid follow-on action for high risk threats.</p>
+                            </div>
+                        </div>
+
                     </div>
                 </div>
 
@@ -227,15 +268,15 @@
                             <div class="bg-white/5 backdrop-blur-sm p-5 rounded-xl border border-brand-900/70">
                                 <div class="flex items-center gap-3 mb-2">
                                     <i data-lucide="brain-circuit" class="w-5 h-5 text-white/90"></i>
-                                    <h4 class="font-semibold text-white">Classifies Intent</h4>
+                                    <h4 class="font-semibold text-white">Intent Classification</h4>
                                 </div>
-                                <p class="text-sm text-brand-100/70">Goes beyond dumb keyword matching to understand context at scale—separating legitimate mentions from malicious activity.</p>
+                                <p class="text-sm text-brand-100/70">Goes beyond dumb keyword matching to understand context at scale - separating legitimate mentions from malicious activity.</p>
                             </div>
                             
                             <div class="bg-white/5 backdrop-blur-sm p-5 rounded-xl border border-brand-900/70">
                                 <div class="flex items-center gap-3 mb-2">
                                     <i data-lucide="bar-chart-3" class="w-5 h-5 text-white/90"></i>
-                                    <h4 class="font-semibold text-white">Scores Severity</h4>
+                                    <h4 class="font-semibold text-white">Severity Scoring</h4>
                                 </div>
                                 <p class="text-sm text-brand-100/70">Doesn't just dump raw data. Automatically prioritises threats so users can act immediately on what matters most.</p>
                             </div>
@@ -245,7 +286,7 @@
                                     <i data-lucide="message-square" class="w-5 h-5 text-brand-100"></i>
                                     <h4 class="font-semibold text-white">Plain English Context</h4>
                                 </div>
-                                <p class="text-sm text-brand-100/70">Translates complex data points into a human-readable summary of the finding, the flag reason, and the risk.</p>
+                                <p class="text-sm text-brand-100/70">Translates complex data points into a human-readable summary of the finding, the reason for flagging, and the potential risk.</p>
                             </div>
                         </div>
                     </div>
@@ -274,7 +315,7 @@
                     </div>
                     <div class="rounded-xl border border-gray-200 bg-white p-5 text-center shadow-sm">
                         <div class="text-sm font-semibold text-gray-500 mb-1 uppercase tracking-wider">AI Analysis</div>
-                        <div class="font-bold text-gray-900">LLM via OpenRouter</div>
+                        <div class="font-bold text-gray-900">DeepSeek via OpenRouter</div>
                     </div>
                     <div class="rounded-xl border border-gray-200 bg-white p-5 text-center shadow-sm">
                         <div class="text-sm font-semibold text-gray-500 mb-1 uppercase tracking-wider">Alerting</div>
@@ -282,7 +323,7 @@
                     </div>
                 </div>
 
-                <h3 class="text-2xl font-bold text-gray-900 mb-6">Actor Suite (Core Pipeline)</h3>
+                <h3 class="text-2xl font-bold text-gray-900 mb-6">Actor Suite</h3>
                 <div class="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
                     <table class="w-full text-left border-collapse">
                         <thead>
@@ -293,28 +334,13 @@
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-200">
-                            <tr>
-                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap text-sm align-top">
-                                    <i data-lucide="globe-2" class="w-4 h-4 inline mr-1 text-brand-500"></i>New Domains
-                                </td>
-                                <td class="p-4 align-top">
-                                    <div class="font-mono text-xs text-brand-700 font-semibold">doppelspotter/recent-domain-registrations</div>
-                                    <div class="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded bg-brand-100 border border-brand-200">
-                                        <i data-lucide="star" class="w-3 h-3 text-brand-600"></i>
-                                        <span class="text-[10px] font-sans font-bold uppercase tracking-wide text-brand-700">Custom Built &amp; Published</span>
-                                    </div>
-                                </td>
-                                <td class="p-4 text-sm text-gray-700 hidden md:table-cell align-top">
-                                    Detects recently registered domains containing brand keywords. Uniquely uses Generative AI (<code class="bg-gray-100 px-1 rounded">claude-3.5-haiku</code>) internally to actively visit and analyse the resolving homepage for phishing intent.
-                                </td>
-                            </tr>
                             <tr class="bg-gray-50/50">
                                 <td class="p-4 font-medium text-gray-900 whitespace-nowrap text-sm align-top">
                                     <i data-lucide="search" class="w-4 h-4 inline mr-1 text-brand-500"></i>Search &amp; Social
                                 </td>
                                 <td class="p-4 font-mono text-xs text-gray-600 align-top">apify/google-search-scraper</td>
                                 <td class="p-4 text-sm text-gray-600 hidden md:table-cell align-top">
-                                    Powers our Web, Reddit, TikTok, YouTube, Facebook, Instagram, and Telegram specialist scans via targeted search operators.
+                                    Powers our Web, Reddit, TikTok, YouTube, Facebook, Instagram, Telegram and App Store specialist scans via targeted search operators.
                                 </td>
                             </tr>
                             <tr>
@@ -332,7 +358,7 @@
                                 </td>
                                 <td class="p-4 font-mono text-xs text-gray-600 align-top">ryanclinton/github-repo-search</td>
                                 <td class="p-4 text-sm text-gray-600 hidden md:table-cell align-top">
-                                    Surfaces public repositories containing leaked credentials, counterfeit code, or impersonating the brand.
+                                    Surfaces public repositories impersonating the brand, or sharing code that could be damaging to the brand.
                                 </td>
                             </tr>
                             <tr>
@@ -342,6 +368,21 @@
                                 <td class="p-4 font-mono text-xs text-gray-600 align-top">apidojo/tweet-scraper</td>
                                 <td class="p-4 text-sm text-gray-600 hidden md:table-cell align-top">
                                     Monitors X posts for impersonation, counterfeit promotion, and targeted brand abuse.
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap text-sm align-top">
+                                    <i data-lucide="globe-2" class="w-4 h-4 inline mr-1 text-brand-500"></i>New Domains
+                                </td>
+                                <td class="p-4 align-top">
+                                    <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="font-mono text-xs text-brand-700 font-semibold underline decoration-brand-300 underline-offset-2 hover:text-brand-800">doppelspotter/recent-domain-registrations</a>
+                                    <div class="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded bg-brand-100 border border-brand-200">
+                                        <i data-lucide="star" class="w-3 h-3 text-brand-600"></i>
+                                        <span class="text-[10px] font-sans font-bold uppercase tracking-wide text-brand-700">Custom Built &amp; Published</span>
+                                    </div>
+                                </td>
+                                <td class="p-4 text-sm text-gray-700 hidden md:table-cell align-top">
+                                    Detects recently registered domains containing brand keywords. Uniquely uses Generative AI internally to actively visit and analyse the resolving homepage to more clearly surface threats.
                                 </td>
                             </tr>
                         </tbody>
@@ -371,7 +412,7 @@
                         <i data-lucide="bot" class="w-6 h-6 text-white"></i>
                     </div>
                     <h3 class="text-xl font-bold mb-3">Agentic AI Development</h3>
-                    <p class="text-brand-100/80 mb-4 leading-relaxed">We utilised Cursor's agentic AI for end-to-end development. From writing this pitch and building the landing page, to making core architectural decisions, to designing, building, testing, and deploying both the Next.js app and our custom Apify actor.</p>
+                    <p class="text-brand-100/80 mb-4 leading-relaxed">We utilised Cursor's agentic AI for end-to-end development. From writing this pitch and building the landing page, to making core architectural decisions, to designing, building, testing, and deploying both the Next.js app and <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="font-medium text-white underline decoration-brand-300 underline-offset-2 hover:text-brand-100">our custom Apify actor</a>.</p>
                 </div>
 
                 <div class="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 shadow-xl shadow-black/10 relative overflow-hidden group hover:bg-white/15 transition-colors">
@@ -380,7 +421,7 @@
                         <i data-lucide="cpu" class="w-6 h-6 text-white"></i>
                     </div>
                     <h3 class="text-xl font-bold mb-3 relative z-10">Generative Analysis Engine</h3>
-                    <p class="text-brand-100/80 mb-4 relative z-10 leading-relaxed">The core of our app's pipeline uses <code class="bg-black/20 px-1.5 py-0.5 rounded text-sm font-mono text-white/90">claude-3.5-haiku</code> via OpenRouter. It performs complex intent classification, severity scoring, and generates plain-English, scan-level summaries of all findings—separating real threats from the noise.</p>
+                    <p class="text-brand-100/80 mb-4 relative z-10 leading-relaxed">The core of our app's pipeline uses <code class="bg-black/20 px-1.5 py-0.5 rounded text-sm font-mono text-white/90">deepseek-3.2</code> via OpenRouter. It performs complex intent classification, severity scoring, and generates plain-English, scan-level summaries of all findings - separating real threats from the noise.</p>
                 </div>
 
                 <div class="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 shadow-xl shadow-black/10 hover:bg-white/15 transition-colors">
@@ -388,7 +429,7 @@
                         <i data-lucide="layers" class="w-6 h-6 text-white"></i>
                     </div>
                     <h3 class="text-xl font-bold mb-3">AI-Enriched Actor</h3>
-                    <p class="text-brand-100/80 mb-4 leading-relaxed">Our custom published actor, <code class="bg-black/20 px-1.5 py-0.5 rounded text-sm font-mono text-white/90">recent-domain-registrations</code>, isn't a simple API wrapper. It intrinsically uses Generative AI during the scraping process to perform enhanced homepage analysis, actively assessing the visual and textual content of new domains for phishing intent.</p>
+                    <p class="text-brand-100/80 mb-4 leading-relaxed">Our custom published actor, <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="underline decoration-brand-300 underline-offset-2 hover:text-brand-100"><code class="bg-black/20 px-1.5 py-0.5 rounded text-sm font-mono text-white/90">recent-domain-registrations</code></a>, isn't a simple API wrapper. It intrinsically uses Generative AI during the scraping process to perform enhanced homepage analysis, actively assessing the content of new domains for phishing intent.</p>
                 </div>
             </div>
         </div>
@@ -403,7 +444,7 @@
                     <span class="text-gray-500 text-xl font-light select-none">&times;</span>
                     <img src="apify-logo-wordmark-dark.png" alt="Apify" class="h-6 sm:h-7 w-auto brightness-0 invert opacity-80">
                 </div>
-                <h2 class="text-3xl font-bold mb-4">Hackathon Alignment</h2>
+                <h2 class="text-3xl font-bold mb-4">Challenge Alignment</h2>
                 <p class="text-xl text-gray-400">How DoppelSpotter maps to the GenAI Zürich 2026 Apify Challenge.</p>
             </div>
 
@@ -413,7 +454,7 @@
                         <span class="font-bold text-xl">1</span>
                     </div>
                     <h3 class="text-xl font-bold mb-3">Path 1: AI Agent</h3>
-                    <p class="text-gray-400 leading-relaxed">An autonomous pipeline that scrapes live web data, analyses findings with an LLM via OpenRouter, and delivers ranked infringement alerts with zero human in the loop.</p>
+                    <p class="text-gray-400 leading-relaxed">An autonomous pipeline that scrapes live web data, analyses findings with DeepSeek 3.2 via OpenRouter, and delivers ranked infringement alerts with zero human in the loop.</p>
                 </div>
 
                 <div class="bg-white/5 backdrop-blur-sm p-8 rounded-2xl border border-white/10 shadow-lg">
@@ -421,7 +462,7 @@
                         <span class="font-bold text-xl">3</span>
                     </div>
                     <h3 class="text-xl font-bold mb-3">Path 3: Build an Actor</h3>
-                    <p class="text-gray-400 leading-relaxed">The <code class="bg-black/30 px-1.5 py-0.5 rounded text-sm font-mono text-gray-300">doppelspotter/recent-domain-registrations</code> actor is published to the Apify Store as a standalone, reusable Actor. Any developer building domain monitoring tools can utilise it, bringing AI-enriched phishing detection to their own pipelines.</p>
+                    <p class="text-gray-400 leading-relaxed">The <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="underline decoration-brand-300 underline-offset-2 hover:text-white"><code class="bg-black/30 px-1.5 py-0.5 rounded text-sm font-mono text-gray-300">doppelspotter/recent-domain-registrations</code></a> actor is published to the Apify Store as a standalone, reusable Actor. Any developer building domain monitoring tools can utilise it, bringing AI-enriched phishing detection to their own pipelines.</p>
                 </div>
             </div>
 
@@ -460,6 +501,33 @@
         </div>
     </section>
 
+    <!-- Final CTA Section -->
+    <section class="py-20 bg-white">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="rounded-3xl border border-brand-100 bg-gradient-to-br from-brand-50 via-white to-brand-100/60 p-8 sm:p-12 shadow-xl shadow-brand-100/40">
+                <div class="max-w-3xl mx-auto text-center">
+                    <div class="inline-flex items-center gap-2 rounded-full border border-brand-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-brand-700 shadow-sm">
+                        <i data-lucide="rocket" class="w-4 h-4"></i>
+                        <span>Live product</span>
+                    </div>
+                    <h2 class="mt-6 text-3xl sm:text-4xl font-bold tracking-tight text-gray-900">Try DoppelSpotter now</h2>
+                    <a
+                        href="https://doppelspotter.com/signup"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="mt-8 inline-flex items-center justify-center gap-2 rounded-full border border-brand-700 bg-brand-600 px-8 py-4 text-base font-semibold text-white transition hover:bg-brand-700"
+                    >
+                        <i data-lucide="arrow-up-right" class="w-5 h-5"></i>
+                        <span>Sign up and try DoppelSpotter</span>
+                    </a>
+                    <p class="mt-5 text-sm leading-6 text-gray-500">
+                        You'll need an invite code to sign up. Invite codes were provided as part of the challenge submission.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- Footer -->
     <footer class="bg-white border-t border-gray-100 py-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -491,6 +559,40 @@
     <!-- Initialize Lucide Icons -->
     <script>
         lucide.createIcons();
+
+        const mobileMenuButton = document.getElementById('mobile-menu-button');
+        const mobileMenu = document.getElementById('mobile-menu');
+        const mobileMenuOpenIcon = document.getElementById('mobile-menu-open-icon');
+        const mobileMenuCloseIcon = document.getElementById('mobile-menu-close-icon');
+
+        if (mobileMenuButton && mobileMenu && mobileMenuOpenIcon && mobileMenuCloseIcon) {
+            const setMobileMenuOpen = (isOpen) => {
+                mobileMenu.classList.toggle('hidden', !isOpen);
+                mobileMenuButton.setAttribute('aria-expanded', String(isOpen));
+                mobileMenuButton.setAttribute('aria-label', isOpen ? 'Close navigation menu' : 'Open navigation menu');
+                mobileMenuOpenIcon.classList.toggle('hidden', isOpen);
+                mobileMenuCloseIcon.classList.toggle('hidden', !isOpen);
+            };
+
+            setMobileMenuOpen(false);
+
+            mobileMenuButton.addEventListener('click', () => {
+                const isOpen = mobileMenuButton.getAttribute('aria-expanded') === 'true';
+                setMobileMenuOpen(!isOpen);
+            });
+
+            mobileMenu.querySelectorAll('a').forEach((link) => {
+                link.addEventListener('click', () => {
+                    setMobileMenuOpen(false);
+                });
+            });
+
+            window.addEventListener('resize', () => {
+                if (window.innerWidth >= 1024) {
+                    setMobileMenuOpen(false);
+                }
+            });
+        }
     </script>
 </body>
 </html>
