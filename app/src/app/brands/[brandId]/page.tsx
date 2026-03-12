@@ -813,6 +813,10 @@ export default function BrandDetailPage() {
 
   async function refreshBrandProfile() {
     const brandRes = await fetch(`/api/brands/${brandId}`, { credentials: 'same-origin' });
+    if (brandRes.status === 404) {
+      router.replace('/brands');
+      return null as unknown as BrandProfile;
+    }
     if (!brandRes.ok) throw new Error('Brand not found');
     const brandJson = await brandRes.json();
     setBrand(brandJson.data);
@@ -1785,7 +1789,8 @@ export default function BrandDetailPage() {
       void loadFindingTaxonomyOptions();
 
       try {
-        await refreshBrandProfile();
+        const brandProfile = await refreshBrandProfile();
+        if (!brandProfile) return; // redirecting to /brands
 
         // Fetch scans list without auto-expanding until we know whether an
         // in-flight scan should own the active UI slot.
