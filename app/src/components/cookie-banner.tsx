@@ -23,7 +23,7 @@ export function CookieBanner() {
   function reject() {
     localStorage.setItem(CONSENT_KEY, 'rejected');
     // Disable GA for the remainder of this page session
-    (window as Record<string, unknown>)[`ga-disable-${GA_ID}`] = true;
+    (window as unknown as Record<string, unknown>)[`ga-disable-${GA_ID}`] = true;
     setVisible(false);
   }
 
