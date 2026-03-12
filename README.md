@@ -111,7 +111,7 @@ It is a Next.js 15 application that combines a web UI with API routes for auth, 
 | Styling | Tailwind CSS 4 |
 | Database | Google Cloud Firestore |
 | Scraping and orchestration | Apify actors and Apify webhooks |
-| AI analysis | OpenRouter, defaulting to `anthropic/claude-3.5-haiku` |
+| AI analysis | OpenRouter, defaulting to `deepseek/deepseek-v3.2` |
 | Email delivery | MailerSend |
 | App hosting | Google Cloud Run |
 | App CI/CD | Google Cloud Build |
@@ -336,7 +336,7 @@ For true end-to-end scan testing, Apify needs to call back into the app's webhoo
 | `APIFY_API_TOKEN` | Yes | Starts and manages Apify actor runs. |
 | `APIFY_WEBHOOK_SECRET` | Yes | Validates incoming Apify webhook callbacks. |
 | `OPENROUTER_API_KEY` | Yes | Used for finding classification, scan summaries, and domain actor integration inside the app. |
-| `OPENROUTER_MODEL` | No | Overrides the default app model (`anthropic/claude-3.5-haiku`). |
+| `OPENROUTER_MODEL` | No | Overrides the default app model (`deepseek/deepseek-v3.2`). |
 | `CODEPUNCH_API_KEY` | Yes for domain scans | Used when the app starts the recent-domain-registrations actor. |
 | `CODEPUNCH_API_SECRET` | Yes for domain scans | Used when the app starts the recent-domain-registrations actor. |
 | `MAILERSEND_API_TOKEN` | Optional | Enables transactional emails such as verification, reset, and scan summaries. |

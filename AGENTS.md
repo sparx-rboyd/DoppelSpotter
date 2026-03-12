@@ -15,7 +15,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 - Frontend / API: Next.js 15 (App Router), TypeScript, Tailwind CSS
 - Database: Google Cloud Firestore
 - Scraping: Apify platform (hosted actors)
-- AI analysis: OpenRouter → `anthropic/claude-3.5-haiku` (default)
+- AI analysis: OpenRouter → `deepseek/deespseek-v3.2` (default)
 - Hosting: Google Cloud Run (app) + Cloudflare Workers (landing page)
 - CI/CD: GCP Cloud Build
 
@@ -304,7 +304,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 
 - **File:** `app/src/lib/analysis/`
 - **When:** After each Apify actor run completes, inside the webhook handler
-- **Model:** `anthropic/claude-3.5-haiku` via OpenRouter (overridable via `OPENROUTER_MODEL`)
+- **Model:** `deepseek/deepseek-v3.2` via OpenRouter (overridable via `OPENROUTER_MODEL`)
 - **Prompts:** `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT` + `buildDomainRegistrationChunkAnalysisPrompt()` for chunked recent-domain-registration classification; `DISCORD_CLASSIFICATION_SYSTEM_PROMPT` + `buildDiscordChunkAnalysisPrompt()` for chunked Discord server classification; `GITHUB_CLASSIFICATION_SYSTEM_PROMPT` + `buildGitHubChunkAnalysisPrompt()` for chunked GitHub repository classification; `X_CLASSIFICATION_SYSTEM_PROMPT` + `buildXChunkAnalysisPrompt()` for chunked X post classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for Google deep-search selection; `SCAN_SUMMARY_SYSTEM_PROMPT` + `buildScanSummaryPrompt()` for the final scan summary
 - **Scan-level summary:** after all actor runs finish, the webhook runs one final LLM pass over the scan's actionable findings and stores a concise `aiSummary` on the scan document for the brand page
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
@@ -550,7 +550,7 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | `OPENROUTER_API_KEY` | OpenRouter API key |
 | `CODEPUNCH_API_KEY` | CodePunch API key used by the recent-domain-registrations actor |
 | `CODEPUNCH_API_SECRET` | CodePunch API secret used by the recent-domain-registrations actor |
-| `OPENROUTER_MODEL` | AI analysis model override (default: `anthropic/claude-3.5-haiku`) |
+| `OPENROUTER_MODEL` | AI analysis model override (default: `deepseek/deepseek-v3.2`) |
 | `MAILERSEND_API_TOKEN` | MailerSend API token used to send branded transactional emails |
 | `AUTH_JWT_SECRET` | JWT signing secret used for 7-day auth cookies and 1-hour password-reset links |
 | `SCHEDULE_DISPATCH_SERVICE_ACCOUNT_EMAIL` | Email of the dedicated Cloud Scheduler service account allowed to call the internal scheduled-scan dispatch route |

@@ -1,6 +1,7 @@
 'use client';
 
 import { type ElementType, type ReactNode, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import { usePageTitle } from '@/lib/use-page-title';
 import Link from 'next/link';
 import {
@@ -34,21 +35,10 @@ const SECTIONS = [
 
 const inlineLink = 'font-medium text-brand-700 transition hover:underline';
 
-function PlaceholderMedia({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
+function DocImage({ src, alt }: { src: string; alt: string }) {
   return (
-    <div
-      className={cn(
-        'flex items-center justify-center rounded-xl border border-gray-200 bg-gray-100 px-6 text-center text-sm italic text-gray-400',
-        className,
-      )}
-    >
-      {children}
+    <div className="overflow-hidden rounded-xl border border-gray-200">
+      <Image src={src} alt={alt} width={1400} height={600} className="w-full h-auto" unoptimized />
     </div>
   );
 }
@@ -209,10 +199,10 @@ export default function HelpPage() {
                   </>
                 )}
               >
-                <PlaceholderMedia className="aspect-[21/8]">
-                  [Placeholder: Annotated screenshot of the main navigation showing Dashboard, Brands, Help,
-                  and the user menu]
-                </PlaceholderMedia>
+                <DocImage
+                  src="/docs-images/1-overview-and-navigation.png"
+                  alt="Annotated screenshot of the main navigation showing Dashboard, Brands, Help, and the user menu"
+                />
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -262,10 +252,10 @@ export default function HelpPage() {
                   </>
                 )}
               >
-                <PlaceholderMedia className="aspect-[16/8]">
-                  [Placeholder: Screenshot of the &quot;Add Brand&quot; or &quot;Brand Settings&quot; page showing Brand name,
-                  Keywords, Official domains, Watch words, Safe words, scan settings, and scan types]
-                </PlaceholderMedia>
+                <DocImage
+                  src="/docs-images/2-brands-and-setup.png"
+                  alt="Screenshot of the Brand Settings page showing brand name, keywords, official domains, watch words, safe words, scan settings, and scan types"
+                />
 
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -328,10 +318,10 @@ export default function HelpPage() {
                   </>
                 )}
               >
-                <PlaceholderMedia className="aspect-[16/8]">
-                  [Placeholder: Screenshot or GIF of the scan settings area showing lookback period, search
-                  depth, deep search, scheduled scans, and analysis settings]
-                </PlaceholderMedia>
+                <DocImage
+                  src="/docs-images/3-scan-settings.gif"
+                  alt="Animated walkthrough of the scan settings area showing lookback period, search depth, deep search, scheduled scans, and analysis settings"
+                />
 
                 <HelpAccordion title="Lookback period" defaultOpen>
                   <p>
@@ -418,10 +408,10 @@ export default function HelpPage() {
                   </>
                 )}
               >
-                <PlaceholderMedia className="aspect-[16/8]">
-                  [Placeholder: GIF of opening the &quot;Run scan&quot; menu, choosing between Scan defaults and Custom
-                  scan, then showing the live progress panel]
-                </PlaceholderMedia>
+                <DocImage
+                  src="/docs-images/4-running-scans.gif"
+                  alt="Animated demo of opening the Run scan menu, choosing between scan defaults and a custom scan, then showing the live progress panel"
+                />
 
                 <HelpAccordion title="Scan defaults vs custom scan" defaultOpen>
                   <p>
@@ -473,10 +463,10 @@ export default function HelpPage() {
                   </>
                 )}
               >
-                <PlaceholderMedia className="aspect-[16/8]">
-                  [Placeholder: Screenshot of an expanded completed scan showing the AI summary, severity groups,
-                  a non-findings section, and a finding card with action buttons]
-                </PlaceholderMedia>
+                <DocImage
+                  src="/docs-images/5-reviewing-findings.gif"
+                  alt="Animated walkthrough of an expanded completed scan showing the AI summary, severity groups, a non-findings section, and a finding card with action buttons"
+                />
 
                 <HelpAccordion title="What a completed scan shows" defaultOpen>
                   <p>
@@ -546,10 +536,10 @@ export default function HelpPage() {
                   </>
                 )}
               >
-                <PlaceholderMedia className="aspect-[16/8]">
-                  [Placeholder: GIF of typing into findings search, applying theme/severity/source filters,
-                  switching tabs, selecting findings, and using the bulk action tray]
-                </PlaceholderMedia>
+                <DocImage
+                  src="/docs-images/6-search-filters-bulk.gif"
+                  alt="Animated demo of typing into findings search, applying theme, severity, and source filters, switching tabs, selecting findings, and using the bulk action tray"
+                />
 
                 <HelpAccordion title="Findings search" defaultOpen>
                   <p>
@@ -608,10 +598,10 @@ export default function HelpPage() {
                   </>
                 )}
               >
-                <PlaceholderMedia className="aspect-[21/8]">
-                  [Placeholder: Screenshot of the dashboard showing brand selector, scan scope selector, metric
-                  cards, stacked charts, and trend charts]
-                </PlaceholderMedia>
+                <DocImage
+                  src="/docs-images/7-dashboard.gif"
+                  alt="Animated walkthrough of the dashboard showing the brand selector, scan scope selector, metric cards, stacked charts, and trend charts"
+                />
 
                 <HelpAccordion title="Brand and scan scope" defaultOpen>
                   <p>
@@ -660,10 +650,10 @@ export default function HelpPage() {
                   </>
                 )}
               >
-                <PlaceholderMedia className="aspect-[16/6]">
-                  [Placeholder: Screenshot of a completed scan row showing the CSV and PDF export buttons, plus
-                  a sample scan summary email or PDF cover page]
-                </PlaceholderMedia>
+                <DocImage
+                  src="/docs-images/8-reports-and-emails.png"
+                  alt="Screenshot of a completed scan row showing the CSV and PDF export buttons, plus a scan summary email"
+                />
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="rounded-xl border border-gray-200 bg-white p-4">
@@ -709,10 +699,10 @@ export default function HelpPage() {
                   </>
                 )}
               >
-                <PlaceholderMedia className="aspect-[16/8]">
-                  [Placeholder: Screenshot of the user menu, Settings page, and destructive actions like Clear
-                  history, Delete scan, Delete brand, and Delete account]
-                </PlaceholderMedia>
+                <DocImage
+                  src="/docs-images/9-account-management.gif"
+                  alt="Animated walkthrough of the user menu, Settings page, and destructive actions including clear history, delete scan, delete brand, and delete account"
+                />
 
                 <HelpAccordion title="Signing in, verification, and password recovery" defaultOpen>
                   <ul className="list-disc space-y-1.5 pl-5">
