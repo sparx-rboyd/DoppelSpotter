@@ -1,4 +1,4 @@
-import { ApifyClient } from 'apify-client';
+import { ApifyClient, ApifyApiError } from 'apify-client';
 import type { BrandProfile, EffectiveScanSettings } from '@/lib/types';
 import {
   getInitialDomainRegistrationLimit,
@@ -49,6 +49,40 @@ type PreparedActorInput = {
 type ActorRunBrandContext = Pick<BrandProfile, 'name' | 'keywords'>;
 
 const GITHUB_MIN_RESULTS_PER_KEYWORD = 10;
+
+/** Memory cap for Google Search actor runs (MB). Keeps combined account RAM well within plan limits. */
+const GOOGLE_ACTOR_MEMORY_MB = 512;
+
+/** Maximum attempts to start an actor run before giving up (covers 429 resource-limit rejections). */
+const ACTOR_START_MAX_ATTEMPTS = 5;
+/** Base delay for exponential backoff between actor start retries (ms). */
+const ACTOR_START_BACKOFF_BASE_MS = 3_000;
+
+/**
+ * Wrap an actor `.start()` call with exponential-backoff retries for HTTP 429 responses.
+ * Apify returns 429 when the account's concurrent-run or combined-memory limit is hit.
+ * Retries give in-flight runs time to finish and free capacity before we give up.
+ */
+async function withActorStartRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  for (let attempt = 0; attempt < ACTOR_START_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const isCapacityError = err instanceof ApifyApiError && err.statusCode === 429;
+      const hasAttemptsLeft = attempt < ACTOR_START_MAX_ATTEMPTS - 1;
+      if (isCapacityError && hasAttemptsLeft) {
+        const delayMs = ACTOR_START_BACKOFF_BASE_MS * 2 ** attempt;
+        console.warn(
+          `[apify] ${label} hit resource limit (429), retrying in ${delayMs}ms (attempt ${attempt + 1}/${ACTOR_START_MAX_ATTEMPTS})`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw new Error('[apify] withActorStartRetry: exceeded max attempts without resolving');
+}
 
 /**
  * Build a source-specific actor input payload for a brand profile.
@@ -163,7 +197,11 @@ export async function startActorRun(
 
   const client = getClient();
   const { input, query, displayQuery } = actorInputs[0];
-  const run = await client.actor(actor.actorId).start(input, buildActorStartOptions(actor, settings, webhookUrl));
+  const startOptions = buildActorStartOptions(actor, settings, webhookUrl);
+  const run = await withActorStartRetry(
+    () => client.actor(actor.actorId).start(input, startOptions),
+    `${actor.id}`,
+  );
   return { runId: run.id, query, displayQuery };
 }
 
@@ -178,9 +216,13 @@ export async function startActorRuns(
   let failedCount = 0;
   const runs: ActorRunStart[] = [];
 
+  const startOptions = buildActorStartOptions(actor, settings, webhookUrl);
   for (const { input, query, displayQuery } of actorInputs) {
     try {
-      const run = await client.actor(actor.actorId).start(input, buildActorStartOptions(actor, settings, webhookUrl));
+      const run = await withActorStartRetry(
+        () => client.actor(actor.actorId).start(input, startOptions),
+        `${actor.id} query "${displayQuery}"`,
+      );
       runs.push({ runId: run.id, query, displayQuery });
     } catch (error) {
       failedCount += 1;
@@ -240,11 +282,15 @@ export async function startDeepSearchRun(
       maxPagesPerQuery: getDeepSearchGooglePageCount(searchResultPages),
     };
     displayQuery = sanitizeGoogleQueryForDisplay(executableQuery);
+    startOptions.memory = GOOGLE_ACTOR_MEMORY_MB;
   } else {
     throw new Error(`Deep search is not implemented for ${actor.displayName}`);
   }
 
-  const run = await client.actor(actor.actorId).start(runInput, startOptions);
+  const run = await withActorStartRetry(
+    () => client.actor(actor.actorId).start(runInput, startOptions),
+    `${actor.id} deep-search "${displayQuery}"`,
+  );
 
   return {
     runId: run.id,
@@ -354,6 +400,10 @@ function buildActorStartOptions(
 
   if (actor.kind === 'discord') {
     startOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(settings.searchResultPages);
+  }
+
+  if (actor.kind === 'google') {
+    startOptions.memory = GOOGLE_ACTOR_MEMORY_MB;
   }
 
   return startOptions;
