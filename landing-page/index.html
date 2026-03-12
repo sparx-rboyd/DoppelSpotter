@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DoppelSpotter - GenAI Zürich 2026 Pitch</title>
+    <!-- Google Analytics consent guard (must run before gtag loads) -->
+    <script>try{if(localStorage.getItem('cookie_consent')==='rejected'){window['ga-disable-G-4EZC8S9DSP']=true;}}catch(e){}</script>
     <!-- Google tag (gtag.js) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-4EZC8S9DSP"></script>
     <script>
@@ -564,6 +566,23 @@
         </div>
     </footer>
 
+    <!-- Cookie consent banner -->
+    <div id="cookie-banner" class="hidden fixed bottom-0 left-0 right-0 z-50 border-t border-gray-200 bg-white" style="box-shadow:0 -2px 8px rgba(0,0,0,0.06)">
+        <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-4 sm:px-6 lg:px-8 py-3">
+            <p class="text-sm text-gray-500">
+                We use cookies for analytics to help improve your experience. You can accept or reject non-essential cookies.
+            </p>
+            <div class="flex items-center gap-2 shrink-0">
+                <button id="cookie-reject" class="inline-flex items-center justify-center rounded-full font-medium transition px-3 py-1.5 text-xs bg-white hover:bg-gray-50 text-gray-900 border border-gray-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+                    Reject
+                </button>
+                <button id="cookie-accept" class="inline-flex items-center justify-center rounded-full font-medium transition px-3 py-1.5 text-xs bg-brand-600 hover:bg-brand-700 text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500">
+                    Accept
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Initialize Lucide Icons -->
     <script>
         lucide.createIcons();
@@ -599,6 +618,25 @@
                 if (window.innerWidth >= 1024) {
                     setMobileMenuOpen(false);
                 }
+            });
+        }
+
+        // Cookie banner
+        const cookieBanner = document.getElementById('cookie-banner');
+        const cookieAccept = document.getElementById('cookie-accept');
+        const cookieReject = document.getElementById('cookie-reject');
+        if (cookieBanner && cookieAccept && cookieReject) {
+            if (!localStorage.getItem('cookie_consent')) {
+                cookieBanner.classList.remove('hidden');
+            }
+            cookieAccept.addEventListener('click', () => {
+                localStorage.setItem('cookie_consent', 'accepted');
+                cookieBanner.classList.add('hidden');
+            });
+            cookieReject.addEventListener('click', () => {
+                localStorage.setItem('cookie_consent', 'rejected');
+                window['ga-disable-G-4EZC8S9DSP'] = true;
+                cookieBanner.classList.add('hidden');
             });
         }
     </script>
