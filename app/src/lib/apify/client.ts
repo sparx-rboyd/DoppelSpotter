@@ -60,28 +60,38 @@ const TIKTOK_MIN_POSTS_PER_QUERY = 10;
 
 /** Memory cap for Google Search actor runs (MB). Keeps combined account RAM well within plan limits. */
 const GOOGLE_ACTOR_MEMORY_MB = 512;
+/** Memory cap for Reddit actor runs (MB). Empirically sufficient and avoids unnecessary account RAM pressure. */
+const REDDIT_ACTOR_MEMORY_MB = 512;
+/** Memory cap for GitHub actor runs (MB). Empirically sufficient and avoids unnecessary account RAM pressure. */
+const GITHUB_ACTOR_MEMORY_MB = 512;
 
-/** Maximum attempts to start an actor run before giving up (covers 429 resource-limit rejections). */
+/** Maximum attempts to start an actor run before giving up (covers temporary Apify capacity rejections). */
 const ACTOR_START_MAX_ATTEMPTS = 5;
 /** Base delay for exponential backoff between actor start retries (ms). */
 const ACTOR_START_BACKOFF_BASE_MS = 3_000;
 
 /**
- * Wrap an actor `.start()` call with exponential-backoff retries for HTTP 429 responses.
- * Apify returns 429 when the account's concurrent-run or combined-memory limit is hit.
- * Retries give in-flight runs time to finish and free capacity before we give up.
+ * Wrap an actor `.start()` call with exponential-backoff retries for temporary
+ * Apify capacity/resource-limit responses. Besides 429 rate/resource limits,
+ * Apify can also return 402 `actor-memory-limit-exceeded` when account RAM is
+ * temporarily exhausted by other in-flight runs.
  */
 async function withActorStartRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
   for (let attempt = 0; attempt < ACTOR_START_MAX_ATTEMPTS; attempt++) {
     try {
       return await fn();
     } catch (err) {
-      const isCapacityError = err instanceof ApifyApiError && err.statusCode === 429;
+      const isRateLimited = err instanceof ApifyApiError && err.statusCode === 429;
+      const isMemoryLimitExceeded = err instanceof ApifyApiError
+        && err.statusCode === 402
+        && err.type === 'actor-memory-limit-exceeded';
+      const isCapacityError = isRateLimited || isMemoryLimitExceeded;
       const hasAttemptsLeft = attempt < ACTOR_START_MAX_ATTEMPTS - 1;
       if (isCapacityError && hasAttemptsLeft) {
         const delayMs = ACTOR_START_BACKOFF_BASE_MS * 2 ** attempt;
+        const reason = isRateLimited ? '429 resource limit' : '402 actor-memory-limit-exceeded';
         console.warn(
-          `[apify] ${label} hit resource limit (429), retrying in ${delayMs}ms (attempt ${attempt + 1}/${ACTOR_START_MAX_ATTEMPTS})`,
+          `[apify] ${label} hit temporary capacity limit (${reason}), retrying in ${delayMs}ms (attempt ${attempt + 1}/${ACTOR_START_MAX_ATTEMPTS})`,
         );
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         continue;
@@ -335,6 +345,7 @@ export async function startDeepSearchRun(
       strictTokenFilter: true,
     };
     displayQuery = trimmedQuery;
+    startOptions.memory = REDDIT_ACTOR_MEMORY_MB;
   } else if (actor.kind === 'tiktok') {
     executableQuery = trimmedQuery;
     runInput = {
@@ -413,6 +424,18 @@ export async function runActor(
     runOptions.maxTotalChargeUsd = actor.kind === 'discord'
       ? getInitialDiscordMaxTotalChargeUsd(settings.searchResultPages)
       : getInitialRedditMaxTotalChargeUsd(settings.searchResultPages);
+  }
+
+  if (actor.kind === 'google') {
+    runOptions.memory = GOOGLE_ACTOR_MEMORY_MB;
+  }
+
+  if (actor.kind === 'reddit') {
+    runOptions.memory = REDDIT_ACTOR_MEMORY_MB;
+  }
+
+  if (actor.kind === 'github') {
+    runOptions.memory = GITHUB_ACTOR_MEMORY_MB;
   }
 
   if (webhookUrl) {
@@ -529,6 +552,14 @@ function buildActorStartOptions(
 
   if (actor.kind === 'google') {
     startOptions.memory = GOOGLE_ACTOR_MEMORY_MB;
+  }
+
+  if (actor.kind === 'reddit') {
+    startOptions.memory = REDDIT_ACTOR_MEMORY_MB;
+  }
+
+  if (actor.kind === 'github') {
+    startOptions.memory = GITHUB_ACTOR_MEMORY_MB;
   }
 
   return startOptions;
