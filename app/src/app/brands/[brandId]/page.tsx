@@ -906,7 +906,7 @@ export default function BrandDetailPage() {
 
   async function refreshBrandProfile() {
     const brandRes = await fetch(`/api/brands/${brandId}`, { credentials: 'same-origin' });
-    if (brandRes.status === 404) {
+    if (brandRes.status === 403 || brandRes.status === 404) {
       router.replace('/brands');
       return null as unknown as BrandProfile;
     }
