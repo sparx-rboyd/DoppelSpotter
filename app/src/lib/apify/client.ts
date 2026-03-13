@@ -3,6 +3,7 @@ import type { BrandProfile, EffectiveScanSettings } from '@/lib/types';
 import {
   getDeepSearchRedditMaxPosts,
   getDeepSearchTikTokMaxItems,
+  getDeepSearchXMaxItems,
   getInitialDomainRegistrationLimit,
   getInitialDiscordMaxTotalChargeUsd,
   getInitialRedditMaxTotalChargeUsd,
@@ -342,6 +343,16 @@ export async function startDeepSearchRun(
       dateRange: getTikTokDateRangeForLookbackDate(lookbackDate),
       sortType: 'RELEVANCE',
       includeSearchKeywords: true,
+    };
+    displayQuery = trimmedQuery;
+  } else if (actor.kind === 'x') {
+    executableQuery = trimmedQuery;
+    runInput = {
+      searchTerms: [trimmedQuery],
+      maxItems: getDeepSearchXMaxItems(),
+      sort: 'Latest',
+      includeSearchTerms: true,
+      ...(lookbackDate ? { start: lookbackDate } : {}),
     };
     displayQuery = trimmedQuery;
   } else {

@@ -148,8 +148,9 @@ support deep-search follow-up runs.
 
 `x-search` is a tweet-level source. It uses `searchTerms` only, maps the brand-page `Search depth`
 setting from `1..5` to `maxItems = 50..250`, stores one finding per tweet, uses tweet `id` as
-the canonical identity for per-scan upserts and historical repeat suppression, and does **not**
-support deep-search follow-up runs.
+the canonical identity for per-scan upserts and historical repeat suppression, and supports
+AI-requested deep-search follow-up runs: each follow-up query starts a new X actor run capped at
+`maxItems = 30` and never recurses beyond depth 1.
 
 `domain-registrations` is a domain-level source. It queries the published
 `doppelspotter/recent-domain-registrations` actor, fixes the actor date filter to UTC "one month
@@ -310,9 +311,9 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ X chunk output also labels whether the risk comes from the account handle, the tweet content, both, or neither
       └─ handle-only X hits are written the first time an account is seen, then suppressed on later tweets from the same previously-seen real-hit account unless the new tweet text is itself infringing
       └─ X findings denormalize `xAuthorId`, `xAuthorHandle`, `xAuthorUrl`, and `xMatchBasis` for lightweight list/search/UI use
-      └─ does not run deep-search suggestion generation or follow-up runs
+      └─ depth 0 runs may ask the LLM for follow-up X queries; each follow-up run is capped at `maxItems = 30` and runs at depth 1 only
  └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and scanner-specific focus, and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
-└─ AI-requested deep-search eligibility and breadth are read from `scans.effectiveSettings` when present, falling back to brand defaults only for older scans; Google deep-search runs reuse the brand's page depth, Reddit deep-search runs always cap each follow-up query at `maxPosts = 20`, and TikTok deep-search runs always cap each follow-up query at `maxItems = 50`
+└─ AI-requested deep-search eligibility and breadth are read from `scans.effectiveSettings` when present, falling back to brand defaults only for older scans; Google deep-search runs reuse the brand's page depth, Reddit deep-search runs always cap each follow-up query at `maxPosts = 20`, TikTok deep-search runs always cap each follow-up query at `maxItems = 50`, and X deep-search runs always cap each follow-up query at `maxItems = 30`
 └─ before each finding-level classification pass, the webhook loads the brand's existing finding `theme` labels so the LLM can preferentially reuse them
 └─ for every chunked classification source, a failed or incomplete LLM chunk is retried once; if the retry also fails, that chunk's candidates are discarded entirely rather than stored as manual-review fallbacks
  └─ each classification prompt also receives the scan's resolved high/medium/low severity definitions, falling back to the current brand defaults only for older scans that predate the snapshot
@@ -327,6 +328,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ each deep-search Google run uses the same `brands.searchResultPages` setting as the initial search
       └─ each deep-search Reddit run uses the same `lookbackDate` as the initial Reddit scan but hard-caps the actor input to `maxPosts = 20`
       └─ each deep-search TikTok run uses the same `lookbackDate` as the initial TikTok scan but hard-caps the actor input to `maxItems = 50`
+      └─ each deep-search X run uses the same `lookbackDate` as the initial X scan but hard-caps the actor input to `maxItems = 30`
       └─ `actorRuns.*.analysedCount` increments as chunks finish so the UI can show meaningful `X / N` AI-analysis progress
       └─ `actorRuns.*.skippedDuplicateCount` tracks how many previous-scan duplicate URLs were filtered out for progress UI + scan summaries
       └─ unexpected processing errors after partial finding writes reconcile scan counts from persisted findings, mark the affected run terminal, and let the scan complete normally when useful results already exist
@@ -446,6 +448,11 @@ run's observed author handles, hashtags, and sample captions as context. Each su
 query starts a separate follow-up TikTok actor run capped at `maxItems = 50`, and those
 follow-up runs stop at depth 1.
 
+When `x-search` runs at depth 0, the webhook can also ask a dedicated X deep-search chooser for up
+to the brand's configured `maxAiDeepSearches` follow-up X queries using the run's observed author
+handles, languages, and sample tweet text as context. Each suggested X query starts a separate
+follow-up X actor run capped at `maxItems = 30`, and those follow-up runs stop at depth 1.
+
 `discord-servers` does not support deep search. Even when the brand-level deep-search toggle is
 enabled, Discord runs stay initial-scan-only and never reserve or execute follow-up searches.
 
@@ -453,13 +460,10 @@ enabled, Discord runs stay initial-scan-only and never reserve or execute follow
 is enabled, domain-registration runs stay initial-scan-only and never reserve or execute
 follow-up searches.
 
-`x-search` does not support deep search. Even when the brand-level deep-search toggle is enabled,
-X runs stay initial-scan-only and never reserve or execute follow-up searches.
-
 `github-repos` also does not support deep search. Even when the brand-level deep-search toggle is
 enabled, GitHub runs stay initial-scan-only and never reserve or execute follow-up searches.
 
-Deep search is only enabled for supported Google-backed, Reddit, and TikTok scan types when the
+Deep search is only enabled for supported Google-backed, Reddit, TikTok, and X scan types when the
 brand's `allowAiDeepSearches` setting is true.
 
 The webhook handler calls `startDeepSearchRun()` for each supported suggested query, registers the
@@ -473,7 +477,8 @@ its transaction, so dynamically-added runs are counted correctly for scan comple
 runs are skipped entirely when `allowAiDeepSearches` is false for the brand. When enabled, both
 the initial Google scan and each deep-search Google run use the brand's `searchResultPages`
 setting, while TikTok initial runs map the same depth to a `100..500` total video budget and each
-deep-search TikTok run stays fixed at `maxItems = 50`.
+deep-search TikTok run stays fixed at `maxItems = 50`, and X initial runs map the same depth to a
+`50..250` total tweet budget while each deep-search X run stays fixed at `maxItems = 30`.
 
 `ActorRunInfo` now carries `scannerId`, `searchDepth`, raw `searchQuery`, and operator-free
 `displayQuery`. The brand page progress indicator groups active work by source (`Web search`,

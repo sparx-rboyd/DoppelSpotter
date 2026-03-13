@@ -108,6 +108,10 @@ export function getDeepSearchTikTokMaxItems(): number {
   return 50;
 }
 
+export function getDeepSearchXMaxItems(): number {
+  return 30;
+}
+
 export function getInitialGitHubMaxResults(searchResultPages?: unknown): number {
   return normalizeSearchResultPages(searchResultPages) * 50;
 }

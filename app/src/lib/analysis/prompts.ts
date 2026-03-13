@@ -11,6 +11,7 @@ import {
   type GoogleScannerConfig,
   type RedditScannerConfig,
   type TikTokScannerConfig,
+  type XScannerConfig,
 } from '@/lib/scan-sources';
 import {
   buildGoogleClassificationSurfaceLine,
@@ -1215,6 +1216,85 @@ Sample TikTok captions from the results:
 ${runContext.sampleCaptions.length > 0 ? runContext.sampleCaptions.map((caption) => `- ${caption}`).join('\n') : '- none'}
 
 Maximum number of follow-up TikTok searches you may suggest:
+- ${maxSuggestedSearches}`;
+}
+
+export function buildXFinalSelectionSystemPrompt(
+  maxSuggestedSearches: number,
+  scanner: XScannerConfig,
+): string {
+  return `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive metadata about a brand, an existing ${scanner.displayName} search term about the brand that has been executed, and contextual signals observed from the resulting X posts.
+
+Your task is to identify up to ${maxSuggestedSearches} follow-up X searches that could be performed, that are likely to surface further evidence of potential brand misuse on X.
+
+You will synthesise up to ${maxSuggestedSearches} entirely new queries based on the context that you're provided with, that you feel will help to surface the maximum number of potential threats to the brand.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "suggestedSearches": ["query 1", "query 2"]
+}
+
+Rules:
+- "suggestedSearches" is optional. Omit it entirely if no follow-up queries are warranted.
+- Suggest at most ${maxSuggestedSearches} follow-up X queries.
+- Quality over quantity: return fewer than ${maxSuggestedSearches} queries when only a small number of genuinely useful follow-up searches are warranted.
+- Prefer coverage across distinct brand misuse themes. Avoid spending multiple searches on near-duplicate variants of the same theme when one broader query would cover them.
+- Any newly synthesised query must stay grounded in the context that you're provided with.
+- Do NOT suggest the original source query again or obvious paraphrases of it.
+- Do NOT suggest clearly legitimate or generic navigational queries.
+- Prefer concise X-ready search terms, not full sentences.
+- Avoid overfitting to a single post or author unless that is clearly the most important abuse signal.`;
+}
+
+export function buildXFinalSelectionPrompt(params: {
+  scanner: XScannerConfig;
+  brandName: string;
+  keywords: string[];
+  watchWords?: string[];
+  safeWords?: string[];
+  runContext: XRunContext;
+  maxSuggestedSearches: number;
+}): string {
+  const {
+    scanner,
+    brandName,
+    keywords,
+    watchWords,
+    safeWords,
+    runContext,
+    maxSuggestedSearches,
+  } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand; you can use slices or combinations of these in your suggested queries as you see appropriate): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with; you can use these as negative context when deciding whether a follow-up X query is worthwhile): ${safeWords.join(', ')}`
+    : null;
+
+  return `Brand being protected: "${brandName}"
+
+Brand keywords (keywords that the brand owner wants to monitor and protect; you can use slices or combinations of these in your suggested queries as you see appropriate): ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+
+${watchWordsLine ? `${watchWordsLine}\n\n` : ''}${safeWordsLine ? `${safeWordsLine}\n\n` : ''}Original X search query:
+${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.map((query) => `- ${query}`).join('\n') : '- none'}
+
+Surface being explored:
+- ${scanner.displayName}
+
+Observed author handles from the X results:
+${runContext.observedAuthors.length > 0 ? runContext.observedAuthors.map((author) => `- ${author}`).join('\n') : '- none'}
+
+Observed languages from the X results:
+${runContext.observedLanguages.length > 0 ? runContext.observedLanguages.map((language) => `- ${language}`).join('\n') : '- none'}
+
+Sample X post text from the results:
+${runContext.sampleTweetTexts.length > 0 ? runContext.sampleTweetTexts.map((text) => `- ${text}`).join('\n') : '- none'}
+
+Maximum number of follow-up X searches you may suggest:
 - ${maxSuggestedSearches}`;
 }
 

@@ -140,7 +140,7 @@ It is a Next.js 15 application that combines a web UI with API routes for auth, 
 4. Apify sends webhook callbacks when runs complete.
 5. The app fetches each dataset, normalizes results per source, and deduplicates them.
 6. The AI layer classifies findings, assigns severity, and optionally assigns a short theme label.
-7. For supported Google-backed scans, the AI can trigger follow-up deep-search runs.
+7. For supported Google-backed, Reddit, TikTok, and X scans, the AI can trigger follow-up deep-search runs.
 8. Once all runs finish, the app writes a scan-level AI summary and final counts.
 9. Findings become available in the brand page, dashboard, exports, and optional email summaries.
 
@@ -156,7 +156,7 @@ The app is not only about detection. It is also about making results manageable 
 
 ### Deep Search
 
-Deep search is supported for Google-backed scan surfaces only.
+Deep search is supported for Google-backed scan surfaces plus the first-class Reddit, TikTok, and X scan types.
 
 After the initial scan, the app can use the run-level context to synthesize more targeted follow-up searches. This is intended to uncover adjacent abuse vectors without requiring the user to manually craft every secondary query.
 

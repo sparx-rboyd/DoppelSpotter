@@ -363,8 +363,8 @@ export default function HelpPage() {
                     control both whether it is allowed and how many follow-up searches it may run.
                   </p>
                   <ul className="mt-2 list-disc space-y-1.5 pl-5">
-                    <li>Deep search is only available on Google-backed scan types.</li>
-                    <li>It is not used for Discord servers, GitHub repos, X, or domain registrations.</li>
+                    <li>Deep search is available on Google-backed scan types plus the first-class Reddit, TikTok, and X scans.</li>
+                    <li>It is not used for Discord servers, GitHub repos, or domain registrations.</li>
                     <li>The <strong className="text-gray-700">Deep search breadth</strong> slider caps how many follow-up searches can run in a scan.</li>
                   </ul>
                 </HelpAccordion>

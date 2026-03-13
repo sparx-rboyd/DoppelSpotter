@@ -29,6 +29,8 @@ import {
   buildTikTokFinalSelectionSystemPrompt,
   buildScanSummaryPrompt,
   buildXChunkAnalysisPrompt,
+  buildXFinalSelectionPrompt,
+  buildXFinalSelectionSystemPrompt,
   formatLlmPromptForDebug,
 } from '@/lib/analysis/prompts';
 import {
@@ -75,9 +77,7 @@ import {
 } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo, GoogleScannerId, XFindingMatchBasis } from '@/lib/types';
 import {
-  getDeepSearchTikTokMaxItems,
   getEffectiveScanSettings,
-  getInitialTikTokTotalPosts,
 } from '@/lib/brands';
 import { rebuildAndPersistDashboardBreakdownsForScanIds } from '@/lib/dashboard-aggregates';
 import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
@@ -93,6 +93,7 @@ import {
   type RedditScannerConfig,
   type ScannerConfig,
   type TikTokScannerConfig,
+  type XScannerConfig,
 } from '@/lib/scan-sources';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
@@ -596,24 +597,28 @@ async function handleSucceededRun({
           existingTaxonomy,
           scannerConfig,
         })
-      : await analyseAndWriteXBatch({
-      scanDoc,
-      scan,
-      brand,
-      source,
-      actorId,
-      datasetId,
-      runId,
-        items,
-      searchDepth,
-      searchQuery,
-      displayQuery,
-      userPreferenceHints,
-      previousTweetIds: previousXTweetIds,
-      previousAccountKeys: previousXAccountKeys,
-      existingTaxonomy,
-      scannerConfig,
-    });
+      : scannerConfig.kind === 'x'
+        ? await analyseAndWriteXBatch({
+          scanDoc,
+          scan,
+          brand,
+          source,
+          actorId,
+          datasetId,
+          runId,
+          items,
+          searchDepth,
+          searchQuery,
+          displayQuery,
+          userPreferenceHints,
+          previousTweetIds: previousXTweetIds,
+          previousAccountKeys: previousXAccountKeys,
+          existingTaxonomy,
+          scannerConfig,
+        })
+        : (() => {
+          throw new Error(`Unsupported scanner kind: ${String((scannerConfig as { kind?: string }).kind)}`);
+        })();
   newFindingCount = findingCount;
   skippedDuplicateCount = batchSkippedDuplicateCount;
   counts.high = batchCounts.high;
@@ -1711,7 +1716,7 @@ async function analyseAndWriteXBatch({
   scan: Scan;
   brand: BrandProfile;
   source: Finding['source'];
-  scannerConfig: ScannerConfig;
+  scannerConfig: XScannerConfig;
   actorId: string;
   datasetId: string;
   runId: string;
@@ -1730,9 +1735,13 @@ async function analyseAndWriteXBatch({
   skippedDuplicateCount: number;
 }> {
   let findingCount = 0;
+  let suggestedSearches: string[] | undefined;
   const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const effectiveSettings = getEffectiveScanSettings(brand, scan.effectiveSettings);
   const severityDefinitions = scan.analysisSeverityDefinitions
     ?? resolveBrandAnalysisSeverityDefinitions(brand.analysisSeverityDefinitions);
+  const canRunDeepSearchSelection = searchDepth === 0 && effectiveSettings.allowAiDeepSearches;
+  const maxSuggestedSearches = effectiveSettings.maxAiDeepSearches;
   const normalizedRun = normalizeXRun({
     searchQuery,
     displayQuery,
@@ -1801,6 +1810,15 @@ async function analyseAndWriteXBatch({
     }
   }
 
+  if (canRunDeepSearchSelection) {
+    suggestedSearches = await finalizeXSuggestedSearches({
+      brand,
+      scannerConfig,
+      runContext: normalizedRun.runContext,
+      maxSuggestedSearches,
+    });
+  }
+
   const seenRealAccountKeys = new Set(previousAccountKeys ?? []);
   for (const { candidate, outcome } of outcomes.values()) {
     const accountKey = buildXAccountKey({
@@ -1837,7 +1855,7 @@ async function analyseAndWriteXBatch({
     }
   }
 
-  return { findingCount, counts, skippedDuplicateCount };
+  return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
 }
 
 async function analyseAndWriteGitHubBatch({
@@ -3407,6 +3425,41 @@ async function analyseTikTokFinalSelection({
   return parsed.suggestedSearches;
 }
 
+async function analyseXFinalSelection({
+  brand,
+  scannerConfig,
+  runContext,
+  maxSuggestedSearches,
+}: {
+  brand: BrandProfile;
+  scannerConfig: XScannerConfig;
+  runContext: XRunContext;
+  maxSuggestedSearches: number;
+}): Promise<string[] | undefined> {
+  const prompt = buildXFinalSelectionPrompt({
+    scanner: scannerConfig,
+    brandName: brand.name,
+    keywords: brand.keywords,
+    watchWords: brand.watchWords,
+    safeWords: brand.safeWords,
+    runContext,
+    maxSuggestedSearches,
+  });
+  const systemPrompt = buildXFinalSelectionSystemPrompt(maxSuggestedSearches, scannerConfig);
+
+  const raw = await chatCompletion([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseSuggestedSearchOutput(raw, maxSuggestedSearches);
+  if (!parsed) {
+    throw new Error(`Failed to parse X final selection output: ${raw.slice(0, 200)}`);
+  }
+
+  return parsed.suggestedSearches;
+}
+
 async function finalizeSuggestedSearches({
   brand,
   scannerConfig,
@@ -3532,6 +3585,49 @@ async function finalizeTikTokSuggestedSearches({
     return filteredSuggestions;
   } catch (err) {
     console.error('[webhook] TikTok final deep-search selection failed:', err);
+    return undefined;
+  }
+}
+
+async function finalizeXSuggestedSearches({
+  brand,
+  scannerConfig,
+  runContext,
+  maxSuggestedSearches,
+}: {
+  brand: BrandProfile;
+  scannerConfig: XScannerConfig;
+  runContext: XRunContext;
+  maxSuggestedSearches: number;
+}): Promise<string[] | undefined> {
+  try {
+    const llmSuggestedSearches = await analyseXFinalSelection({
+      brand,
+      scannerConfig,
+      runContext,
+      maxSuggestedSearches,
+    });
+
+    if (!llmSuggestedSearches || llmSuggestedSearches.length === 0) {
+      console.log(
+        `[webhook] X deep-search final selection authors=${runContext.observedAuthors.length} languages=${runContext.observedLanguages.length} selected=[]`,
+      );
+      return undefined;
+    }
+
+    const sourceQueryKeys = new Set(runContext.sourceQueries.map(normalizeSuggestedSearchKey));
+    const filteredSuggestions = llmSuggestedSearches.filter((query) => !sourceQueryKeys.has(normalizeSuggestedSearchKey(query)));
+    if (filteredSuggestions.length === 0) {
+      console.warn('[webhook] X final deep-search selection returned only source-query duplicates');
+      return undefined;
+    }
+
+    console.log(
+      `[webhook] X deep-search final selection authors=${runContext.observedAuthors.length} languages=${runContext.observedLanguages.length} selected=${JSON.stringify(filteredSuggestions)}`,
+    );
+    return filteredSuggestions;
+  } catch (err) {
+    console.error('[webhook] X final deep-search selection failed:', err);
     return undefined;
   }
 }

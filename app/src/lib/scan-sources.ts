@@ -244,7 +244,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     kind: 'x',
     displayName: 'X',
     shortLabel: 'X',
-    supportsDeepSearch: false,
+    supportsDeepSearch: true,
   },
 };
 

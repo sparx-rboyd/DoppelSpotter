@@ -144,9 +144,9 @@ export interface BrandProfile {
   lookbackPeriod?: LookbackPeriod;
   /** Whether completed scans should send a summary email to the brand owner's account email. */
   sendScanSummaryEmails?: boolean;
-  /** Whether AI analysis may trigger follow-up deep-search runs for supported Google-backed scans for this brand. */
+  /** Whether AI analysis may trigger follow-up deep-search runs for supported deep-search-capable scans for this brand. */
   allowAiDeepSearches?: boolean;
-  /** User-configured deep search breadth (1-5) limiting AI-requested follow-up searches on supported Google-backed scans. */
+  /** User-configured deep search breadth (1-5) limiting AI-requested follow-up searches on supported deep-search-capable scans. */
   maxAiDeepSearches?: number;
   /** Which scan surfaces are enabled for this brand. */
   scanSources?: BrandScanSources;
