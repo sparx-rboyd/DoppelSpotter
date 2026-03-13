@@ -21,6 +21,7 @@ import {
   isValidLookbackPeriod,
   isValidMaxAiDeepSearches,
   isValidSearchResultPages,
+  MAX_BRAND_KEYWORDS,
   MAX_AI_DEEP_SEARCHES,
   MAX_SEARCH_RESULT_PAGES,
   MIN_AI_DEEP_SEARCHES,
@@ -90,7 +91,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const updatedAt = new Date();
   const updates: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
   if (body.name) updates.name = body.name.trim();
-  if (body.keywords) updates.keywords = body.keywords.map((k) => k.trim().toLowerCase()).filter(Boolean);
+  if (body.keywords !== undefined) {
+    if (!Array.isArray(body.keywords)) {
+      return errorResponse('keywords must be an array of strings');
+    }
+
+    const normalizedKeywords = body.keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean);
+    if (normalizedKeywords.length > MAX_BRAND_KEYWORDS) {
+      return errorResponse(`You can add up to ${MAX_BRAND_KEYWORDS} protected keywords`);
+    }
+
+    updates.keywords = normalizedKeywords;
+  }
   if (body.officialDomains) updates.officialDomains = body.officialDomains.map((d) => d.trim().toLowerCase()).filter(Boolean);
   if (body.sendScanSummaryEmails !== undefined) {
     if (typeof body.sendScanSummaryEmails !== 'boolean') {

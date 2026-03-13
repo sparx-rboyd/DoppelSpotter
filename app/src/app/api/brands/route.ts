@@ -25,6 +25,7 @@ import {
   isValidAllowAiDeepSearches,
   isValidBrandScanSources,
   DEFAULT_MAX_AI_DEEP_SEARCHES,
+  MAX_BRAND_KEYWORDS,
   MAX_AI_DEEP_SEARCHES,
   MAX_SEARCH_RESULT_PAGES,
   MIN_AI_DEEP_SEARCHES,
@@ -172,6 +173,15 @@ export async function POST(request: NextRequest) {
     return errorResponse('Brand name is required');
   }
 
+  if (!Array.isArray(keywords)) {
+    return errorResponse('keywords must be an array of strings');
+  }
+
+  const normalizedKeywords = keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean);
+  if (normalizedKeywords.length > MAX_BRAND_KEYWORDS) {
+    return errorResponse(`You can add up to ${MAX_BRAND_KEYWORDS} protected keywords`);
+  }
+
   if (!isValidAllowAiDeepSearches(allowAiDeepSearches)) {
     return errorResponse('allowAiDeepSearches must be a boolean');
   }
@@ -222,7 +232,7 @@ export async function POST(request: NextRequest) {
   const brandData = {
     userId: uid,
     name: name.trim(),
-    keywords: keywords.map((k) => String(k).trim().toLowerCase()).filter(Boolean),
+    keywords: normalizedKeywords,
     officialDomains: officialDomains.map((d) => String(d).trim().toLowerCase()).filter(Boolean),
     searchResultPages,
     lookbackPeriod,

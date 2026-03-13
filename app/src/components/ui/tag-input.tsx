@@ -14,6 +14,8 @@ interface TagInputProps extends Omit<InputHTMLAttributes<HTMLInputElement>, 'val
   onAdd: () => void;
   onRemove: (value: string) => void;
   error?: string;
+  hint?: ReactNode;
+  inputDisabled?: boolean;
 }
 
 export function TagInput({
@@ -26,6 +28,8 @@ export function TagInput({
   onAdd,
   onRemove,
   error,
+  hint,
+  inputDisabled = false,
   placeholder,
   className,
   disabled,
@@ -83,11 +87,11 @@ export function TagInput({
           placeholder={values.length === 0 ? placeholder : undefined}
           className="brand-form-input min-w-[10rem] flex-1 border-0 bg-transparent p-0 text-sm text-gray-900 focus:outline-none focus:ring-0"
           aria-invalid={Boolean(error)}
-          disabled={disabled}
+          disabled={disabled || inputDisabled}
           {...props}
         />
       </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {error ? <p className="text-xs text-red-600">{error}</p> : hint ? <p className="text-xs text-gray-500">{hint}</p> : null}
     </div>
   );
 }

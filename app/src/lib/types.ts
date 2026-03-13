@@ -418,14 +418,26 @@ export interface ActorRunInfo {
   suggestedSearches?: string[];
 }
 
-export interface QueuedGitHubRunInfo {
-  scannerId: 'github-repos';
+export interface QueuedActorRunInfo {
+  /** Stable logical scanner identifier, independent from the underlying Apify actor ID. */
+  scannerId: ScannerId;
   actorId: string;
-  source: 'github';
-  searchDepth: 0;
+  source: FindingSource;
+  /**
+   * 0 = initial scan run; 1 = AI-requested deep follow-up.
+   * Deep searches are never spawned from depth > 0 (loop guard).
+   */
+  searchDepth: 0 | 1;
+  /** Serialized actor input used to start this queued launch when capacity becomes available. */
+  input: Record<string, unknown>;
+  /** The literal executable query string used for this run. */
   searchQuery: string;
+  /** Explicit executable queries for batched runs, when a single actor run covers multiple terms. */
+  searchQueries?: string[];
+  /** The user-visible query text with internal site operators removed. */
   displayQuery: string;
-  maxResults: number;
+  /** Explicit user-visible queries for batched runs, when a single actor run covers multiple terms. */
+  displayQueries?: string[];
 }
 
 export interface Scan {
@@ -445,10 +457,10 @@ export interface Scan {
   actorRunIds?: string[];
   /** Per-actor run details, keyed by Apify run ID */
   actorRuns?: Record<string, ActorRunInfo>;
-  /** GitHub runs that are queued behind the active-run cap and have not been started yet. */
-  queuedGithubRuns?: QueuedGitHubRunInfo[];
-  /** GitHub runs that have been claimed for launch but do not yet have a real Apify run ID. */
-  launchingGithubRuns?: Record<string, QueuedGitHubRunInfo>;
+  /** Actor runs queued behind the per-scan live-run cap and not yet started on Apify. */
+  queuedActorRuns?: QueuedActorRunInfo[];
+  /** Queued launches claimed for start but not yet assigned a real Apify run ID. */
+  launchingActorRuns?: Record<string, QueuedActorRunInfo>;
   /** How many actor runs have completed (succeeded or failed) — used to detect scan completion */
   completedRunCount?: number;
   /** Total persisted non-false-positive findings, including ignored and addressed items. */

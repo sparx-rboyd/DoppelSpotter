@@ -27,6 +27,7 @@ import {
   normalizeLookbackPeriod,
   normalizeMaxAiDeepSearches,
   DEFAULT_MAX_AI_DEEP_SEARCHES,
+  MAX_BRAND_KEYWORDS,
   hasEnabledBrandScanSource,
 } from '@/lib/brands';
 import {
@@ -53,6 +54,7 @@ export default function EditBrandPage() {
   usePageTitle(name ? `Edit "${name}"` : 'Edit Brand');
   const [keywordInput, setKeywordInput] = useState('');
   const [keywords, setKeywords] = useState<string[]>([]);
+  const [keywordError, setKeywordError] = useState('');
   const [domainInput, setDomainInput] = useState('');
   const [domainError, setDomainError] = useState('');
   const [domains, setDomains] = useState<string[]>([]);
@@ -86,6 +88,7 @@ export default function EditBrandPage() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState('');
+  const keywordLimitReached = keywords.length >= MAX_BRAND_KEYWORDS;
 
   useEffect(() => {
     async function fetchBrand() {
@@ -138,14 +141,27 @@ export default function EditBrandPage() {
 
   function addKeyword() {
     const trimmed = keywordInput.trim().toLowerCase();
-    if (trimmed && !keywords.includes(trimmed)) {
-      setKeywords([...keywords, trimmed]);
+    if (!trimmed) {
+      setKeywordInput('');
+      return;
     }
+    if (keywords.includes(trimmed)) {
+      setKeywordInput('');
+      setKeywordError('');
+      return;
+    }
+    if (keywordLimitReached) {
+      setKeywordError(`You can add up to ${MAX_BRAND_KEYWORDS} protected keywords`);
+      return;
+    }
+    setKeywords([...keywords, trimmed]);
+    setKeywordError('');
     setKeywordInput('');
   }
 
   function removeKeyword(kw: string) {
     setKeywords(keywords.filter((k) => k !== kw));
+    setKeywordError('');
   }
 
   function addDomain() {
@@ -217,6 +233,10 @@ export default function EditBrandPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) return;
+    if (keywords.length > MAX_BRAND_KEYWORDS) {
+      setKeywordError(`You can add up to ${MAX_BRAND_KEYWORDS} protected keywords`);
+      return;
+    }
     if (!hasEnabledBrandScanSource(scanSources)) {
       setSaveError('At least one scan source must be enabled');
       return;
@@ -349,16 +369,24 @@ export default function EditBrandPage() {
                     id="keywords"
                     label={(
                       <>
-                        Keywords <span className="text-gray-400 font-normal">(optional)</span>
+                        Protected keywords <span className="text-gray-400 font-normal">(optional)</span>
                       </>
                     )}
                     tooltip="The words associated with your brand that you want to protect and monitor (e.g. your trademarks). Scans will search for these keywords."
                     values={keywords}
                     inputValue={keywordInput}
-                    onInputChange={setKeywordInput}
+                    onInputChange={(value) => {
+                      setKeywordInput(value);
+                      if (keywordError) {
+                        setKeywordError('');
+                      }
+                    }}
                     onAdd={addKeyword}
                     onRemove={removeKeyword}
-                    placeholder="Type a keyword and press enter..."
+                    placeholder={keywordLimitReached ? `Maximum ${MAX_BRAND_KEYWORDS} protected keywords reached` : 'Type a keyword and press enter...'}
+                    error={keywordError}
+                    hint={`${keywords.length}/${MAX_BRAND_KEYWORDS} protected keywords`}
+                    inputDisabled={keywordLimitReached && keywordInput.length === 0}
                   />
 
                   {/* Official domains */}

@@ -314,21 +314,15 @@ export async function startPreparedActorRuns(
   return { runs, failedCount };
 }
 
-/**
- * Start a deep-search actor run for a supported custom follow-up query.
- */
-export async function startDeepSearchRun(
+export function buildDeepSearchPreparedInput(
   params: {
     actor: ActorConfig;
     queries: string[];
     searchResultPages: number | undefined;
     lookbackDate: string | undefined;
-    webhookUrl: string;
   },
-): Promise<{ runId: string; query: string; queries: string[]; displayQuery: string; displayQueries: string[] }> {
-  const { actor, queries, searchResultPages, lookbackDate, webhookUrl } = params;
-  const client = getClient();
-
+): PreparedActorInput {
+  const { actor, queries, searchResultPages, lookbackDate } = params;
   const trimmedQueries = normalizeSearchTerms(queries);
   if (trimmedQueries.length === 0) {
     throw new Error('Deep-search query must not be empty');
@@ -341,16 +335,6 @@ export async function startDeepSearchRun(
   let runInput: Record<string, unknown>;
   let executableQueries: string[];
   let displayQueries: string[];
-  const startOptions: Record<string, unknown> = {
-    webhooks: [
-      {
-        eventTypes: ['ACTOR.RUN.SUCCEEDED', 'ACTOR.RUN.FAILED', 'ACTOR.RUN.ABORTED'],
-        requestUrl: webhookUrl,
-        headersTemplate: `{"X-Apify-Webhook-Secret": "${process.env.APIFY_WEBHOOK_SECRET}"}`,
-      },
-    ],
-  };
-
   if (actor.kind === 'google') {
     const baseQuery = buildGoogleScannerQuery(actor.source, trimmedQueries[0]);
     const executableQuery = lookbackDate ? `${baseQuery} after:${lookbackDate}` : baseQuery;
@@ -360,7 +344,6 @@ export async function startDeepSearchRun(
       queries: executableQuery,
       maxPagesPerQuery: getDeepSearchGooglePageCount(searchResultPages),
     };
-    startOptions.memory = GOOGLE_ACTOR_MEMORY_MB;
   } else if (actor.kind === 'reddit') {
     executableQueries = [trimmedQueries[0]];
     displayQueries = [...executableQueries];
@@ -373,7 +356,6 @@ export async function startDeepSearchRun(
       includeNsfw: false,
       strictTokenFilter: true,
     };
-    startOptions.memory = REDDIT_ACTOR_MEMORY_MB;
   } else if (actor.kind === 'tiktok') {
     executableQueries = [trimmedQueries[0]];
     displayQueries = [...executableQueries];
@@ -400,18 +382,57 @@ export async function startDeepSearchRun(
 
   const query = joinSearchTermsForDisplay(executableQueries);
   const displayQuery = joinSearchTermsForDisplay(displayQueries);
+  return {
+    input: runInput,
+    query,
+    ...(executableQueries.length > 0 ? { queries: executableQueries } : {}),
+    displayQuery,
+    ...(displayQueries.length > 0 ? { displayQueries } : {}),
+  };
+}
 
+/**
+ * Start a deep-search actor run for a supported custom follow-up query.
+ */
+export async function startDeepSearchRun(
+  params: {
+    actor: ActorConfig;
+    queries: string[];
+    searchResultPages: number | undefined;
+    lookbackDate: string | undefined;
+    webhookUrl: string;
+  },
+): Promise<{ runId: string; query: string; queries: string[]; displayQuery: string; displayQueries: string[] }> {
+  const { actor, webhookUrl } = params;
+  const client = getClient();
+  const preparedInput = buildDeepSearchPreparedInput(params);
+  const startOptions: Record<string, unknown> = {
+    webhooks: [
+      {
+        eventTypes: ['ACTOR.RUN.SUCCEEDED', 'ACTOR.RUN.FAILED', 'ACTOR.RUN.ABORTED'],
+        requestUrl: webhookUrl,
+        headersTemplate: `{"X-Apify-Webhook-Secret": "${process.env.APIFY_WEBHOOK_SECRET}"}`,
+      },
+    ],
+  };
+  if (actor.kind === 'google') {
+    startOptions.memory = GOOGLE_ACTOR_MEMORY_MB;
+  } else if (actor.kind === 'reddit') {
+    startOptions.memory = REDDIT_ACTOR_MEMORY_MB;
+    startOptions.maxTotalChargeUsd = getInitialRedditMaxTotalChargeUsd(params.searchResultPages);
+  } else if (actor.kind === 'github') {
+    startOptions.memory = GITHUB_ACTOR_MEMORY_MB;
+  }
   const run = await withActorStartRetry(
-    () => client.actor(actor.actorId).start(runInput, startOptions),
-    `${actor.id} deep-search "${displayQuery}"`,
+    () => client.actor(actor.actorId).start(preparedInput.input, startOptions),
+    `${actor.id} deep-search "${preparedInput.displayQuery}"`,
   );
-
   return {
     runId: run.id,
-    query,
-    queries: executableQueries,
-    displayQuery,
-    displayQueries,
+    query: preparedInput.query,
+    queries: preparedInput.queries ?? [preparedInput.query],
+    displayQuery: preparedInput.displayQuery,
+    displayQueries: preparedInput.displayQueries ?? [preparedInput.displayQuery],
   };
 }
 

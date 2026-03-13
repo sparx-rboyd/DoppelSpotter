@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { normalizeBrandScanSources } from '@/lib/brands';
 import type { EffectiveScanSettings } from '@/lib/types';
 import { getActorConfigByScannerId } from './actors';
-import { buildActorInputs } from './client';
+import { buildActorInputs, buildDeepSearchPreparedInput } from './client';
 
 const baseSettings: EffectiveScanSettings = {
   searchResultPages: 3,
@@ -45,4 +45,33 @@ test('buildActorInputs keeps GitHub one-query-per-run', () => {
   assert.equal(inputs[1].displayQuery, 'Sparx Maths');
   assert.match(inputs[0].query, /in:name,description pushed:>2026-03-01$/);
   assert.match(inputs[1].query, /in:name,description pushed:>2026-03-01$/);
+});
+
+test('buildDeepSearchPreparedInput produces queued-ready Google follow-up input', () => {
+  const actor = getActorConfigByScannerId('google-youtube');
+  const prepared = buildDeepSearchPreparedInput({
+    actor,
+    queries: ['sparx maths leaks'],
+    searchResultPages: 4,
+    lookbackDate: '2026-03-01',
+  });
+
+  assert.equal(prepared.displayQuery, 'sparx maths leaks');
+  assert.deepEqual(prepared.displayQueries, ['sparx maths leaks']);
+  assert.equal(prepared.query.includes('site:youtube.com'), true);
+  assert.equal(prepared.input.maxPagesPerQuery, 4);
+});
+
+test('buildDeepSearchPreparedInput keeps X follow-up input single-query', () => {
+  const actor = getActorConfigByScannerId('x-search');
+  const prepared = buildDeepSearchPreparedInput({
+    actor,
+    queries: ['sparx maths'],
+    searchResultPages: 5,
+    lookbackDate: '2026-03-01',
+  });
+
+  assert.deepEqual(prepared.input.searchTerms, ['sparx maths']);
+  assert.deepEqual(prepared.queries, ['sparx maths']);
+  assert.deepEqual(prepared.displayQueries, ['sparx maths']);
 });

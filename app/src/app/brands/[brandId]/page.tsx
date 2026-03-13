@@ -2632,29 +2632,29 @@ export default function BrandDetailPage() {
     () => (activeScan?.actorRuns ? Object.values(activeScan.actorRuns) : []),
     [activeScan?.actorRuns],
   );
-  const launchingGithubRuns = useMemo(
-    () => (activeScan?.launchingGithubRuns
-      ? Object.values(activeScan.launchingGithubRuns).map((run) => ({
+  const launchingQueuedRuns = useMemo(
+    () => (activeScan?.launchingActorRuns
+      ? Object.values(activeScan.launchingActorRuns).map((run) => ({
         ...run,
         status: 'pending' as const,
         skippedDuplicateCount: 0,
       } satisfies ActorRunInfo))
       : []),
-    [activeScan?.launchingGithubRuns],
+    [activeScan?.launchingActorRuns],
   );
-  const queuedGithubRuns = useMemo(
-    () => (activeScan?.queuedGithubRuns
-      ? activeScan.queuedGithubRuns.map((run) => ({
+  const queuedActorRuns = useMemo(
+    () => (activeScan?.queuedActorRuns
+      ? activeScan.queuedActorRuns.map((run) => ({
         ...run,
         status: 'pending' as const,
         skippedDuplicateCount: 0,
       } satisfies ActorRunInfo))
       : []),
-    [activeScan?.queuedGithubRuns],
+    [activeScan?.queuedActorRuns],
   );
   const allRuns = useMemo(
-    () => [...startedRuns, ...launchingGithubRuns, ...queuedGithubRuns],
-    [launchingGithubRuns, queuedGithubRuns, startedRuns],
+    () => [...startedRuns, ...launchingQueuedRuns, ...queuedActorRuns],
+    [launchingQueuedRuns, queuedActorRuns, startedRuns],
   );
   const defaultScanSettings = getEffectiveScanSettings(brand);
   const activeScanSettings = activeScan

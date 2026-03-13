@@ -123,7 +123,7 @@ It is a Next.js 15 application that combines a web UI with API routes for auth, 
 - Brand profiles with keywords, official domains, watch words, and safe words.
 - Per-brand scan-source toggles across all supported monitoring surfaces.
 - Search depth, lookback period, AI deep-search controls, and recurring schedules.
-- Concurrent actor-run startup with webhook-driven completion handling.
+- Per-scan capped live Apify actor-run startup with webhook-driven completion handling and queued overflow launches.
 - AI classification into `high`, `medium`, `low`, and `non-hit`.
 - Theme labelling for lightweight taxonomy and filtering.
 - User review actions including ignore, address, bookmark, and per-finding notes.
@@ -136,7 +136,7 @@ It is a Next.js 15 application that combines a web UI with API routes for auth, 
 
 1. A user creates or updates a brand profile.
 2. The app resolves the enabled scan surfaces and effective scan settings.
-3. It starts all relevant Apify actor runs concurrently.
+3. It starts up to the configured per-scan live Apify actor-run cap immediately and queues any overflow launches for later start.
 4. Apify sends webhook callbacks when runs complete.
 5. The app fetches each dataset, normalizes results per source, and deduplicates them.
 6. The AI layer classifies findings, assigns severity, and optionally assigns a short theme label.
@@ -335,6 +335,7 @@ For true end-to-end scan testing, Apify needs to call back into the app's webhoo
 | --- | --- | --- |
 | `APIFY_API_TOKEN` | Yes | Starts and manages Apify actor runs. |
 | `APIFY_WEBHOOK_SECRET` | Yes | Validates incoming Apify webhook callbacks. |
+| `APIFY_MAX_LIVE_RUNS_PER_SCAN` | No | Positive integer override for the per-scan live Apify actor-run cap, defaulting to `5`. |
 | `OPENROUTER_API_KEY` | Yes | Used for finding classification, scan summaries, and domain actor integration inside the app. |
 | `OPENROUTER_MODEL` | No | Overrides the default app model (`deepseek/deepseek-v3.2`). |
 | `CODEPUNCH_API_KEY` | Yes for domain scans | Used when the app starts the recent-domain-registrations actor. |

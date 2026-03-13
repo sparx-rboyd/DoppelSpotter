@@ -3,6 +3,7 @@ import type { BrandProfile, BrandScanSources, EffectiveScanSettings, LookbackPer
 export const DEFAULT_LOOKBACK_PERIOD: LookbackPeriod = '1year';
 export const LOOKBACK_PERIOD_VALUES: LookbackPeriod[] = ['1year', '1month', '1week', 'since_last_scan'];
 
+export const MAX_BRAND_KEYWORDS = 10;
 export const DEFAULT_SEARCH_RESULT_PAGES = 3;
 export const MIN_SEARCH_RESULT_PAGES = 1;
 export const MAX_SEARCH_RESULT_PAGES = 5;

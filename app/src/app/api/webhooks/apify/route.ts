@@ -2,7 +2,16 @@ import { createHash, randomUUID } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
-import { fetchDatasetItems, startDeepSearchRun, startPreparedActorRun, type PreparedActorInput } from '@/lib/apify/client';
+import { buildDeepSearchPreparedInput, fetchDatasetItems, startPreparedActorRun } from '@/lib/apify/client';
+import {
+  buildActorRunInfoFromQueuedRun,
+  buildPreparedActorInputFromQueuedRun,
+  buildQueuedActorRunInfo,
+  getApifyMaxLiveRunsPerScan,
+  getLiveActorRunCount,
+  hasQueuedActorLaunchWork,
+  isActorRunInFlight,
+} from '@/lib/apify/live-run-cap';
 import { chatCompletion } from '@/lib/analysis/openrouter';
 import { resolveBrandAnalysisSeverityDefinitions } from '@/lib/analysis-severity';
 import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-hints';
@@ -80,7 +89,7 @@ import type {
   BrandProfile,
   Finding,
   GoogleScannerId,
-  QueuedGitHubRunInfo,
+  QueuedActorRunInfo,
   Scan,
   XFindingMatchBasis,
 } from '@/lib/types';
@@ -141,7 +150,6 @@ const GITHUB_FINDING_ID_PREFIX = 'github';
 const GITHUB_RAW_DATA_VERSION = 1;
 const X_FINDING_ID_PREFIX = 'x';
 const X_RAW_DATA_VERSION = 1;
-const GITHUB_ACTIVE_RUN_CAP = 2;
 type ScanDocHandle = {
   id: string;
   ref: DocumentReference;
@@ -240,6 +248,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ received: true });
     }
     if (claim.kind === 'waiting_for_preference_hints') {
+      await drainQueuedActorRunsIfCapacity(scanDoc, webhookUrl);
       console.log(`[webhook] Deferring callback for run ${resource.id} — waiting for scan-level preference hints`);
       return NextResponse.json({ received: true });
     }
@@ -258,6 +267,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ received: true });
     }
 
+    await drainQueuedActorRunsIfCapacity(scanDoc, webhookUrl);
     try {
       await handleSucceededRun({
         runId: resource.id,
@@ -276,6 +286,10 @@ export async function POST(request: NextRequest) {
   } else if (resource.status === 'FAILED' || resource.status === 'ABORTED') {
     console.warn(`[webhook] Actor run ${resource.id} ended with status: ${resource.status}`);
     await markActorRunComplete(scanDoc, resource.id, 'failed');
+    const launchedCount = await drainQueuedActorRunsIfCapacity(scanDoc, webhookUrl);
+    if (launchedCount === 0) {
+      await finalizeIdleScanIfNoRemainingWork(scanDoc);
+    }
   }
 
   return NextResponse.json({ received: true });
@@ -388,26 +402,6 @@ function readActorRunDisplayQueries(actorRunInfo?: Partial<ActorRunInfo>): strin
 
 function joinRunQueriesForStorage(values: string[]): string | undefined {
   return values.length > 0 ? values.join(' | ') : undefined;
-}
-
-function isActorRunInFlight(run?: Pick<ActorRunInfo, 'status'>): boolean {
-  return run?.status === 'pending'
-    || run?.status === 'running'
-    || run?.status === 'waiting_for_preference_hints'
-    || run?.status === 'fetching_dataset'
-    || run?.status === 'analysing';
-}
-
-function buildQueuedGitHubPreparedInput(queuedRun: QueuedGitHubRunInfo): PreparedActorInput {
-  return {
-    input: {
-      query: queuedRun.searchQuery,
-      sortBy: 'best-match',
-      maxResults: queuedRun.maxResults,
-    },
-    query: queuedRun.searchQuery,
-    displayQuery: queuedRun.displayQuery,
-  };
 }
 
 /**
@@ -2188,21 +2182,9 @@ type ScanFindingTotals = {
   skippedCount: number;
 };
 
-function hasQueuedGithubWork(scan: Pick<Scan, 'queuedGithubRuns' | 'launchingGithubRuns'>): boolean {
-  return (scan.queuedGithubRuns?.length ?? 0) > 0 || Object.keys(scan.launchingGithubRuns ?? {}).length > 0;
-}
-
-function getInFlightGithubWorkCount(scan: Pick<Scan, 'actorRuns' | 'launchingGithubRuns'>): number {
-  const activeRuns = Object.values(scan.actorRuns ?? {}).filter(
-    (run) => run.scannerId === 'github-repos' && isActorRunInFlight(run),
-  ).length;
-  const launchingRuns = Object.keys(scan.launchingGithubRuns ?? {}).length;
-  return activeRuns + launchingRuns;
-}
-
-async function reserveQueuedGithubRunsForLaunch(
+async function reserveQueuedActorRunsForLaunch(
   scanRef: DocumentReference,
-): Promise<Array<{ reservationId: string; queuedRun: QueuedGitHubRunInfo }>> {
+): Promise<Array<{ reservationId: string; queuedRun: QueuedActorRunInfo }>> {
   return db.runTransaction(async (tx) => {
     const freshSnap = await tx.get(scanRef);
     if (!freshSnap.exists) return [];
@@ -2212,12 +2194,12 @@ async function reserveQueuedGithubRunsForLaunch(
       return [];
     }
 
-    const queuedRuns = fresh.queuedGithubRuns ?? [];
+    const queuedRuns = fresh.queuedActorRuns ?? [];
     if (queuedRuns.length === 0) {
       return [];
     }
 
-    const availableSlots = GITHUB_ACTIVE_RUN_CAP - getInFlightGithubWorkCount(fresh);
+    const availableSlots = getApifyMaxLiveRunsPerScan() - getLiveActorRunCount(fresh);
     if (availableSlots <= 0) {
       return [];
     }
@@ -2232,10 +2214,10 @@ async function reserveQueuedGithubRunsForLaunch(
       queuedRun,
     }));
     const updates: Record<string, unknown> = {
-      queuedGithubRuns: queuedRuns.slice(selectedRuns.length),
+      queuedActorRuns: queuedRuns.slice(selectedRuns.length),
     };
     for (const reservation of reservations) {
-      updates[`launchingGithubRuns.${reservation.reservationId}`] = reservation.queuedRun;
+      updates[`launchingActorRuns.${reservation.reservationId}`] = reservation.queuedRun;
     }
 
     tx.update(scanRef, updates);
@@ -2243,7 +2225,7 @@ async function reserveQueuedGithubRunsForLaunch(
   });
 }
 
-async function settleQueuedGithubLaunchReservation(
+async function settleQueuedActorLaunchReservation(
   scanRef: DocumentReference,
   reservationId: string,
   result?: {
@@ -2252,7 +2234,7 @@ async function settleQueuedGithubLaunchReservation(
   },
 ) {
   const updates: Record<string, unknown> = {
-    [`launchingGithubRuns.${reservationId}`]: FieldValue.delete(),
+    [`launchingActorRuns.${reservationId}`]: FieldValue.delete(),
   };
 
   if (result) {
@@ -2263,9 +2245,8 @@ async function settleQueuedGithubLaunchReservation(
   await scanRef.update(updates);
 }
 
-async function launchQueuedGithubRunsIfCapacity(params: {
+async function launchQueuedActorRunsIfCapacity(params: {
   scanDoc: ScanDocHandle;
-  scan: Scan;
   effectiveSettings: NonNullable<Scan['effectiveSettings']>;
   webhookUrl: string;
 }): Promise<number> {
@@ -2273,7 +2254,7 @@ async function launchQueuedGithubRunsIfCapacity(params: {
   let launchedCount = 0;
 
   while (true) {
-    const reservations = await reserveQueuedGithubRunsForLaunch(scanDoc.ref);
+    const reservations = await reserveQueuedActorRunsForLaunch(scanDoc.ref);
     if (reservations.length === 0) {
       return launchedCount;
     }
@@ -2281,55 +2262,66 @@ async function launchQueuedGithubRunsIfCapacity(params: {
     for (const reservation of reservations) {
       try {
         const startedRun = await startPreparedActorRun(
-          getScannerConfigById('github-repos'),
-          buildQueuedGitHubPreparedInput(reservation.queuedRun),
+          getScannerConfigById(reservation.queuedRun.scannerId),
+          buildPreparedActorInputFromQueuedRun(reservation.queuedRun),
           effectiveSettings,
           webhookUrl,
         );
-        await settleQueuedGithubLaunchReservation(scanDoc.ref, reservation.reservationId, {
+        await settleQueuedActorLaunchReservation(scanDoc.ref, reservation.reservationId, {
           runId: startedRun.runId,
-          info: {
-            scannerId: 'github-repos',
-            actorId: reservation.queuedRun.actorId,
-            source: 'github',
-            status: 'running',
-            skippedDuplicateCount: 0,
-            searchDepth: 0,
-            searchQuery: startedRun.query,
-            ...(startedRun.queries && startedRun.queries.length > 0 ? { searchQueries: startedRun.queries } : {}),
-            displayQuery: startedRun.displayQuery,
-            ...(startedRun.displayQueries && startedRun.displayQueries.length > 0 ? { displayQueries: startedRun.displayQueries } : {}),
-          },
+          info: buildActorRunInfoFromQueuedRun(reservation.queuedRun, startedRun),
         });
         launchedCount += 1;
       } catch (error) {
-        console.error(`[webhook] Failed to start queued GitHub run "${reservation.queuedRun.displayQuery}":`, error);
-        await settleQueuedGithubLaunchReservation(scanDoc.ref, reservation.reservationId);
+        console.error(`[webhook] Failed to start queued actor run "${reservation.queuedRun.displayQuery}":`, error);
+        await settleQueuedActorLaunchReservation(scanDoc.ref, reservation.reservationId);
       }
     }
   }
 }
 
+async function drainQueuedActorRunsIfCapacity(
+  scanDoc: ScanDocHandle,
+  webhookUrl: string,
+): Promise<number> {
+  const freshScanSnap = await scanDoc.ref.get();
+  if (!freshScanSnap.exists) {
+    return 0;
+  }
+
+  const freshScan = scanFromSnapshot(freshScanSnap);
+  if (!freshScan.effectiveSettings) {
+    console.warn(`[webhook] Cannot launch queued actor runs for scan ${scanDoc.id} because effectiveSettings are missing`);
+    return 0;
+  }
+
+  return launchQueuedActorRunsIfCapacity({
+    scanDoc,
+    effectiveSettings: freshScan.effectiveSettings,
+    webhookUrl,
+  });
+}
+
 async function finalizeIdleScanIfNoRemainingWork(scanDoc: ScanDocHandle): Promise<void> {
   const result = await db.runTransaction<MarkActorRunCompleteResult>(async (tx) => {
     const freshSnap = await tx.get(scanDoc.ref);
-    if (!freshSnap.exists) return { needsSummary: false, shouldDrainGithubQueue: false };
+    if (!freshSnap.exists) return { needsSummary: false };
 
     const fresh = freshSnap.data() as Scan;
     if (fresh.status === 'cancelled' || fresh.status === 'failed' || fresh.status === 'completed' || fresh.status === 'summarising') {
-      return { needsSummary: false, shouldDrainGithubQueue: false };
+      return { needsSummary: false };
     }
-    if (hasQueuedGithubWork(fresh)) {
-      return { needsSummary: false, shouldDrainGithubQueue: false };
+    if (hasQueuedActorLaunchWork(fresh)) {
+      return { needsSummary: false };
     }
     if (Object.values(fresh.actorRuns ?? {}).some((run) => isActorRunInFlight(run))) {
-      return { needsSummary: false, shouldDrainGithubQueue: false };
+      return { needsSummary: false };
     }
 
     const totalRunCount = fresh.actorRunIds?.length ?? 0;
     const completedRunCount = fresh.completedRunCount ?? 0;
     if (totalRunCount > 0 && completedRunCount < totalRunCount) {
-      return { needsSummary: false, shouldDrainGithubQueue: false };
+      return { needsSummary: false };
     }
 
     const hasResults = hasPersistedScanResults({
@@ -2356,7 +2348,7 @@ async function finalizeIdleScanIfNoRemainingWork(scanDoc: ScanDocHandle): Promis
     }
 
     tx.update(scanDoc.ref, updates);
-    return { needsSummary: updates.status === 'summarising', shouldDrainGithubQueue: false };
+    return { needsSummary: updates.status === 'summarising' };
   });
 
   if (result.needsSummary) {
@@ -2372,7 +2364,6 @@ type ScanSummaryFindingInput = Pick<Finding, 'severity' | 'title' | 'llmAnalysis
 
 type MarkActorRunCompleteResult = {
   needsSummary: boolean;
-  shouldDrainGithubQueue: boolean;
 };
 
 async function retryChunkAnalysisOnce<Result>({
@@ -4875,71 +4866,29 @@ async function triggerDeepSearches({
   const queries = suggestedSearches.slice(0, maxSuggestedSearches);
   const effectiveSettings = getEffectiveScanSettings(brand, scan.effectiveSettings);
   const queryGroups = queries.map((query) => [query]);
-
-  const startResults = await Promise.all(queryGroups.map(async (queryGroup) => {
+  const queuedActorRuns = queryGroups.flatMap((queryGroup) => {
     try {
-      const {
-        runId,
-        query: executableQuery,
-        queries: executableQueries,
-        displayQuery,
-        displayQueries,
-      } = await startDeepSearchRun({
+      const preparedInput = buildDeepSearchPreparedInput({
         actor: scannerConfig,
         queries: queryGroup,
         searchResultPages: effectiveSettings.searchResultPages,
         lookbackDate: scan.effectiveSettings?.lookbackDate ?? effectiveSettings.lookbackDate,
-        webhookUrl,
       });
-
-      return {
-        runId,
-        info: {
-          scannerId: scannerConfig.id,
-          actorId: scannerConfig.actorId,
-          source: scannerConfig.source,
-          status: 'running',
-          skippedDuplicateCount: 0,
-          searchDepth: 1,
-          searchQuery: executableQuery,
-          ...(executableQueries.length > 0 ? { searchQueries: executableQueries } : {}),
-          displayQuery,
-          ...(displayQueries.length > 0 ? { displayQueries } : {}),
-        } satisfies ActorRunInfo,
-      };
+      return [buildQueuedActorRunInfo(scannerConfig, preparedInput, 1)];
     } catch (err) {
-      console.error(`[webhook] Failed to start deep search for "${queryGroup.join(' | ')}":`, err);
-      return null;
+      console.error(`[webhook] Failed to prepare deep search for "${queryGroup.join(' | ')}":`, err);
+      return [];
     }
-  }));
+  });
 
-  const newRunIds = startResults
-    .filter((result): result is NonNullable<typeof result> => result !== null)
-    .map((result) => result.runId);
-  const newActorRuns: Record<string, ActorRunInfo> = Object.fromEntries(
-    startResults
-      .filter((result): result is NonNullable<typeof result> => result !== null)
-      .map((result) => [result.runId, result.info]),
-  );
+  if (queuedActorRuns.length === 0) return;
 
-  if (newRunIds.length === 0) return;
+  await scanDoc.ref.update({
+    queuedActorRuns: FieldValue.arrayUnion(...queuedActorRuns),
+  });
+  await drainQueuedActorRunsIfCapacity(scanDoc, webhookUrl);
 
-  // Atomically register the new runs on the scan document.
-  // markActorRunComplete reads fresh actorRunIds.length inside its transaction,
-  // so the completion check will correctly account for these additional runs.
-  const updates: Record<string, unknown> = {
-    actorRunIds: FieldValue.arrayUnion(...newRunIds),
-  };
-  for (const [runId, info] of Object.entries(newActorRuns)) {
-    updates[`actorRuns.${runId}`] = info;
-  }
-
-  await scanDoc.ref.update(updates);
-
-  // Also update the scan reference held in memory so this run's markActorRunComplete
-  // sees the right total when it reads scan.actorRunIds. In practice this is already
-  // handled by the fresh-snapshot read inside the transaction, but being explicit helps.
-  void scan; // scan is stale after this point — always use fresh reads in transactions
+  void scan;
 }
 
 function buildGoogleFindingOutcome(
@@ -7518,22 +7467,20 @@ async function markActorRunComplete(
     // do not overwrite the cancelled status or increment completion counters.
     if (fresh.status === 'cancelled') {
       console.log(`[webhook] markActorRunComplete: scan ${scanDoc.id} is cancelled — skipping`);
-      return { needsSummary: false, shouldDrainGithubQueue: false };
+      return { needsSummary: false };
     }
 
     const existingRunStatus = fresh.actorRuns?.[runId]?.status;
     if (existingRunStatus === 'succeeded' || existingRunStatus === 'failed') {
       console.log(`[webhook] markActorRunComplete: run ${runId} already ${existingRunStatus} — skipping duplicate completion`);
-      return { needsSummary: false, shouldDrainGithubQueue: false };
+      return { needsSummary: false };
     }
 
     // Read the current total from the fresh snapshot so any deep-search runs
     // added after the scan started are included in the completion check.
     const totalRunCount = fresh.actorRunIds?.length ?? 1;
     const updatedCompletedCount = (fresh.completedRunCount ?? 0) + 1;
-    const allDone = updatedCompletedCount >= totalRunCount && !hasQueuedGithubWork(fresh);
-    const shouldDrainGithubQueue = fresh.actorRuns?.[runId]?.scannerId === 'github-repos'
-      && (fresh.queuedGithubRuns?.length ?? 0) > 0;
+    const allDone = updatedCompletedCount >= totalRunCount && !hasQueuedActorLaunchWork(fresh);
     const reconciledTotals = options.reconcilePersistedCounts
       ? {
         ...buildScanFindingTotals(
@@ -7609,32 +7556,10 @@ async function markActorRunComplete(
     tx.update(scanDoc.ref, updates);
     return {
       needsSummary: allDone && updates.status === 'summarising',
-      shouldDrainGithubQueue,
     };
   });
 
   if (result.needsSummary) {
     await generateAndPersistScanSummary(scanDoc.ref);
-  }
-  if (result.shouldDrainGithubQueue) {
-    const freshScanSnap = await scanDoc.ref.get();
-    if (!freshScanSnap.exists) {
-      return;
-    }
-    const freshScan = scanFromSnapshot(freshScanSnap);
-    if (!freshScan.effectiveSettings) {
-      console.warn(`[webhook] Cannot launch queued GitHub runs for scan ${scanDoc.id} because effectiveSettings are missing`);
-      await finalizeIdleScanIfNoRemainingWork(scanDoc);
-      return;
-    }
-    const launchedCount = await launchQueuedGithubRunsIfCapacity({
-      scanDoc,
-      scan: freshScan,
-      effectiveSettings: freshScan.effectiveSettings,
-      webhookUrl: `${(process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')}/api/webhooks/apify`,
-    });
-    if (launchedCount === 0) {
-      await finalizeIdleScanIfNoRemainingWork(scanDoc);
-    }
   }
 }

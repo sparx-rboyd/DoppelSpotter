@@ -247,14 +247,14 @@ export default function HelpPage() {
                 title="Brands & Setup"
                 description={(
                   <>
-                    A brand is the unit DoppelSpotter monitors. Each brand has its own keywords, owned
+                    A brand is the unit DoppelSpotter monitors. Each brand has its own protected keywords, owned
                     domains, scan defaults, source toggles, AI settings, and scan history.
                   </>
                 )}
               >
                 <DocImage
                   src="/docs-images/2-brands-and-setup.png"
-                  alt="Screenshot of the Brand Settings page showing brand name, keywords, official domains, watch words, safe words, scan settings, and scan types"
+                  alt="Screenshot of the Brand Settings page showing brand name, protected keywords, official domains, watch words, safe words, scan settings, and scan types"
                 />
 
                 <div className="grid gap-4 md:grid-cols-2">
@@ -266,10 +266,10 @@ export default function HelpPage() {
                     </p>
                   </div>
                   <div className="rounded-xl border border-gray-200 bg-white p-4">
-                    <p className="text-sm font-medium text-gray-900">Keywords</p>
+                    <p className="text-sm font-medium text-gray-900">Protected keywords</p>
                     <p className="mt-1 text-sm text-gray-500">
                       Search terms associated with the brand, such as trademarks, product names, or common
-                      variants. These drive what the scans look for.
+                      variants. These drive what the scans look for, with a maximum of 10 per brand.
                     </p>
                   </div>
                   <div className="rounded-xl border border-gray-200 bg-white p-4">
