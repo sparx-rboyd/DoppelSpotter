@@ -550,6 +550,7 @@ export default function BrandDetailPage() {
   const copiedScanLinkResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lookbackNudgeSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressScanKeyRef = useRef<string | null>(null);
+  const selectedProgressScanKeyRef = useRef<string | null>(null);
   const pendingScanFindingsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanNonHitsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanIgnoredLoadsRef = useRef<Record<string, Promise<void>>>({});
@@ -2735,6 +2736,7 @@ export default function BrandDetailPage() {
   const progressSourceSignature = progressSourcesWithFallback
     .map((source) => `${source}:${rawScanProgressPctBySource[source] ?? 0}`)
     .join('|');
+  const progressSourcesSignature = progressSourcesWithFallback.join('|');
   const progressStatusSignature = progressSourcesWithFallback
     .map((source) => {
       const runs = getRunsForSource(source);
@@ -2776,31 +2778,25 @@ export default function BrandDetailPage() {
   }, [progressScanKey, progressSourceSignature]);
 
   useEffect(() => {
-    const progressStatuses = progressStatusSignature
-      .split('|')
-      .filter(Boolean)
-      .map((entry) => {
-        const [source, status] = entry.split(':');
-        return {
-          source: source as FindingSource,
-          status: status as 'not_started' | 'in_progress' | 'complete',
-        };
-      });
-    const preferredProgressSource = progressStatuses.find((entry) => entry.status === 'in_progress')?.source
-      ?? progressStatuses.find((entry) => entry.status === 'complete')?.source
-      ?? progressStatuses[0]?.source;
-
-    if (!preferredProgressSource) {
+    if (!progressScanKey) {
+      selectedProgressScanKeyRef.current = null;
       return;
     }
-    const validSources = progressStatuses.map((entry) => entry.source);
+
+    const firstProgressSource = progressSourcesWithFallback[0];
+    if (!firstProgressSource) {
+      return;
+    }
+
+    const scanChanged = selectedProgressScanKeyRef.current !== progressScanKey;
+    selectedProgressScanKeyRef.current = progressScanKey;
 
     setSelectedScanProgressSource((current) => (
-      validSources.includes(current)
-        ? current
-        : preferredProgressSource
+      scanChanged || !progressSourcesWithFallback.includes(current)
+        ? firstProgressSource
+        : current
     ));
-  }, [progressStatusSignature]);
+  }, [progressScanKey, progressSourcesSignature]);
 
   const activeProgressSource = progressSourcesWithFallback.includes(selectedScanProgressSource)
     ? selectedScanProgressSource
