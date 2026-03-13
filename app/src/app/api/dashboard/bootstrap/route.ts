@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     db
       .collection('brands')
       .where('userId', '==', uid)
-      .select('name', 'createdAt', 'scanSchedule')
+      .select('name', 'createdAt', 'scanSchedule', 'historyDeletion', 'brandDeletion')
       .orderBy('createdAt', 'asc')
       .get(),
     db
