@@ -48,6 +48,8 @@ import {
   type GoogleSearchCandidate,
   type GoogleSearchSighting,
   type GoogleStoredFindingRawData,
+  type VerifiedRedditCommentSnapshot,
+  type VerifiedRedditPostSnapshot,
   type XChunkAnalysisItem,
   type XRunContext,
   type XStoredFindingRawData,
@@ -73,6 +75,11 @@ import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSna
 /** Maximum normalized candidates per LLM request chunk. */
 const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
 const GOOGLE_ANALYSIS_CONCURRENCY = 6;
+const REDDIT_VERIFICATION_CONCURRENCY = 4;
+const REDDIT_JSON_FETCH_TIMEOUT_MS = 8000;
+const MAX_REDDIT_POST_TITLE_LENGTH = 300;
+const MAX_REDDIT_POST_SELFTEXT_LENGTH = 4000;
+const MAX_REDDIT_COMMENT_BODY_LENGTH = 2000;
 const DISCORD_ANALYSIS_CHUNK_SIZE = 10;
 const DISCORD_ANALYSIS_CONCURRENCY = 6;
 const DOMAIN_REGISTRATION_ANALYSIS_CHUNK_SIZE = 10;
@@ -83,7 +90,7 @@ const X_ANALYSIS_CHUNK_SIZE = 10;
 const X_ANALYSIS_CONCURRENCY = 6;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';
-const GOOGLE_RAW_DATA_VERSION = 2;
+const GOOGLE_RAW_DATA_VERSION = 3;
 const DISCORD_FINDING_ID_PREFIX = 'discord';
 const DISCORD_RAW_DATA_VERSION = 1;
 const DOMAIN_REGISTRATION_FINDING_ID_PREFIX = 'domains';
@@ -853,20 +860,23 @@ async function analyseAndWriteGoogleBatch({
   const candidatesToAnalyse = normalizedRun.candidates.filter(
     (candidate) => !previousFindingUrls?.has(candidate.normalizedUrl),
   );
+  const verifiedCandidates = source === 'reddit'
+    ? await enrichGoogleRedditCandidatesWithVerifiedPosts(candidatesToAnalyse)
+    : candidatesToAnalyse;
   const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
 
   await scanDoc.ref.update({
-    [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
+    [`actorRuns.${runId}.itemCount`]: verifiedCandidates.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
     [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
   });
 
-  if (candidatesToAnalyse.length === 0) {
+  if (verifiedCandidates.length === 0) {
     return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
   }
 
   const outcomes = new Map<string, { candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>();
-  const chunks = chunkArray(candidatesToAnalyse, GOOGLE_ANALYSIS_CHUNK_SIZE);
+  const chunks = chunkArray(verifiedCandidates, GOOGLE_ANALYSIS_CHUNK_SIZE);
   const chunkResults = await mapWithConcurrency(
     chunks,
     GOOGLE_ANALYSIS_CONCURRENCY,
@@ -1774,6 +1784,221 @@ function normalizeGoogleSerpRun({
       peopleAlsoAsk: uniqueStrings(Array.from(peopleAlsoAsk)),
     },
   };
+}
+
+async function enrichGoogleRedditCandidatesWithVerifiedPosts(
+  candidates: GoogleSearchCandidate[],
+): Promise<GoogleSearchCandidate[]> {
+  return mapWithConcurrency(
+    candidates,
+    REDDIT_VERIFICATION_CONCURRENCY,
+    async (candidate) => {
+      const verifiedRedditPost = await fetchVerifiedRedditPostSnapshot(candidate.url);
+      if (!verifiedRedditPost) {
+        return candidate;
+      }
+
+      return {
+        ...candidate,
+        verifiedRedditPost,
+      };
+    },
+  );
+}
+
+async function fetchVerifiedRedditPostSnapshot(url: string): Promise<VerifiedRedditPostSnapshot | undefined> {
+  const permalink = extractRedditPermalinkParts(url);
+  if (!permalink) {
+    return undefined;
+  }
+
+  try {
+    const response = await fetch(permalink.jsonUrl, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'DoppelSpotter/1.0 (+https://doppelspotter.com)',
+      },
+      signal: AbortSignal.timeout(REDDIT_JSON_FETCH_TIMEOUT_MS),
+      cache: 'no-store',
+    });
+
+    if (!response.ok) {
+      console.warn(`[webhook] Reddit JSON verification skipped for ${url}: ${response.status}`);
+      return undefined;
+    }
+
+    const payload = await response.json();
+    const snapshot = readVerifiedRedditPostSnapshot(payload, permalink);
+    if (!snapshot) {
+      console.warn(`[webhook] Reddit JSON verification returned unusable payload for ${url}`);
+      return undefined;
+    }
+
+    return snapshot;
+  } catch (error) {
+    console.warn(`[webhook] Reddit JSON verification failed for ${url}:`, error);
+    return undefined;
+  }
+}
+
+function extractRedditPermalinkParts(url: string): {
+  canonicalUrl: string;
+  jsonUrl: string;
+  postId: string;
+  commentId?: string;
+} | null {
+  try {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname.toLowerCase();
+    if (!hostname.endsWith('reddit.com')) {
+      return null;
+    }
+
+    const segments = parsed.pathname
+      .split('/')
+      .map((segment) => segment.trim())
+      .filter((segment) => segment.length > 0);
+    if (segments.length < 4 || segments[0] !== 'r' || segments[2] !== 'comments') {
+      return null;
+    }
+
+    const postId = segments[3];
+    if (!postId) {
+      return null;
+    }
+
+    const commentId = segments.length >= 6 ? segments[5] : undefined;
+    const canonicalPath = `/${segments.join('/')}`;
+    return {
+      canonicalUrl: `https://www.reddit.com${canonicalPath}`,
+      jsonUrl: `https://www.reddit.com${canonicalPath}/.json`,
+      postId,
+      ...(commentId ? { commentId } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readVerifiedRedditPostSnapshot(
+  payload: unknown,
+  permalink: {
+    canonicalUrl: string;
+    jsonUrl: string;
+    postId: string;
+    commentId?: string;
+  },
+): VerifiedRedditPostSnapshot | undefined {
+  if (!Array.isArray(payload) || payload.length < 1) {
+    return undefined;
+  }
+
+  const postListing = payload[0];
+  const postChildren = readRedditListingChildren(postListing);
+  const postData = postChildren.find((child) => child.kind === 't3')?.data;
+  if (!postData) {
+    return undefined;
+  }
+
+  const title = trimToLength(readOptionalTrimmedString(postData.title), MAX_REDDIT_POST_TITLE_LENGTH);
+  const subreddit = readOptionalTrimmedString(postData.subreddit);
+  if (!title || !subreddit) {
+    return undefined;
+  }
+  const selftext = trimToLength(readOptionalTrimmedString(postData.selftext), MAX_REDDIT_POST_SELFTEXT_LENGTH);
+  const author = readOptionalTrimmedString(postData.author);
+  const postPermalink = readOptionalTrimmedString(postData.permalink);
+  const createdUtc = readOptionalFiniteNumber(postData.created_utc);
+  const score = readOptionalFiniteNumber(postData.score);
+  const numComments = readOptionalFiniteNumber(postData.num_comments);
+  const linkFlairText = readOptionalTrimmedString(postData.link_flair_text);
+  const domain = readOptionalTrimmedString(postData.domain);
+
+  const matchedComment = permalink.commentId
+    ? findVerifiedRedditCommentSnapshot(payload[1], permalink.commentId)
+    : undefined;
+
+  return stripUndefinedDeep({
+    source: 'reddit-json',
+    canonicalUrl: permalink.canonicalUrl,
+    jsonUrl: permalink.jsonUrl,
+    postId: permalink.postId,
+    subreddit,
+    title,
+    ...(selftext ? { selftext } : {}),
+    ...(author ? { author } : {}),
+    ...(postPermalink ? { permalink: postPermalink } : {}),
+    ...(createdUtc !== undefined ? { createdUtc } : {}),
+    ...(score !== undefined ? { score } : {}),
+    ...(numComments !== undefined ? { numComments } : {}),
+    ...(linkFlairText ? { linkFlairText } : {}),
+    ...(typeof postData.is_self === 'boolean' ? { isSelfPost: postData.is_self } : {}),
+    ...(domain ? { domain } : {}),
+    ...(typeof postData.over_18 === 'boolean' ? { over18: postData.over_18 } : {}),
+    ...(matchedComment ? { matchedComment } : {}),
+  }) satisfies VerifiedRedditPostSnapshot;
+}
+
+function readRedditListingChildren(value: unknown): Array<{ kind?: string; data: Record<string, unknown> }> {
+  if (typeof value !== 'object' || value === null) {
+    return [];
+  }
+
+  const data = (value as Record<string, unknown>).data;
+  if (typeof data !== 'object' || data === null) {
+    return [];
+  }
+
+  const children = (data as Record<string, unknown>).children;
+  if (!Array.isArray(children)) {
+    return [];
+  }
+
+  return children
+    .filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null)
+    .map((entry) => ({
+      kind: typeof entry.kind === 'string' ? entry.kind : undefined,
+      data: typeof entry.data === 'object' && entry.data !== null ? entry.data as Record<string, unknown> : {},
+    }));
+}
+
+function findVerifiedRedditCommentSnapshot(
+  commentsListing: unknown,
+  commentId: string,
+): VerifiedRedditCommentSnapshot | undefined {
+  const targetId = commentId.trim().toLowerCase();
+  if (!targetId) {
+    return undefined;
+  }
+
+  const stack = readRedditListingChildren(commentsListing).map((child) => child.data);
+  while (stack.length > 0) {
+    const current = stack.shift();
+    if (!current) continue;
+
+    const currentId = readOptionalTrimmedString(current.id)?.toLowerCase();
+    if (currentId === targetId) {
+      const body = trimToLength(readOptionalTrimmedString(current.body), MAX_REDDIT_COMMENT_BODY_LENGTH);
+      if (!body) {
+        return undefined;
+      }
+
+      return stripUndefinedDeep({
+        id: currentId,
+        body,
+        ...(readOptionalTrimmedString(current.author) ? { author: readOptionalTrimmedString(current.author) } : {}),
+        ...(readOptionalFiniteNumber(current.score) !== undefined ? { score: readOptionalFiniteNumber(current.score) } : {}),
+        ...(readOptionalFiniteNumber(current.depth) !== undefined ? { depth: readOptionalFiniteNumber(current.depth) } : {}),
+      }) satisfies VerifiedRedditCommentSnapshot;
+    }
+
+    const replies = current.replies;
+    if (typeof replies === 'object' && replies !== null) {
+      stack.push(...readRedditListingChildren(replies).map((child) => child.data));
+    }
+  }
+
+  return undefined;
 }
 
 function normalizeDiscordServerRun({
@@ -3290,6 +3515,7 @@ function buildGoogleStoredFindingRawData({
         ? { emphasizedKeywords: candidate.emphasizedKeywords }
         : {}),
     },
+    verifiedRedditPost: candidate.verifiedRedditPost ?? existing?.verifiedRedditPost,
     sightings: mergedSightings,
     context: mergedContext,
     analysis: {
@@ -3308,7 +3534,7 @@ function readGoogleStoredFindingRawData(rawData?: Record<string, unknown>): Goog
   if (!rawData || rawData.kind !== 'google-normalized') {
     return null;
   }
-  if (rawData.version !== 1 && rawData.version !== GOOGLE_RAW_DATA_VERSION) {
+  if (rawData.version !== 1 && rawData.version !== 2 && rawData.version !== GOOGLE_RAW_DATA_VERSION) {
     return null;
   }
 
@@ -3330,6 +3556,7 @@ function readGoogleStoredFindingRawData(rawData?: Record<string, unknown>): Goog
         ? result.emphasizedKeywords.filter((value): value is string => typeof value === 'string')
         : undefined,
     },
+    verifiedRedditPost: normalizeVerifiedRedditPostSnapshot(rawData.verifiedRedditPost),
     sightings: Array.isArray(rawData.sightings)
       ? rawData.sightings
         .map((value) => normalizeGoogleSearchSighting(value))
@@ -4787,6 +5014,81 @@ function readOptionalFiniteNumber(value: unknown): number | undefined {
     return Number(value);
   }
   return undefined;
+}
+
+function trimToLength(value: string | undefined, maxLength: number): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  return trimmed.length <= maxLength
+    ? trimmed
+    : `${trimmed.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+function normalizeVerifiedRedditCommentSnapshot(value: unknown): VerifiedRedditCommentSnapshot | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+
+  const comment = value as Record<string, unknown>;
+  const id = readOptionalTrimmedString(comment.id);
+  const body = readOptionalTrimmedString(comment.body);
+  if (!id || !body) {
+    return undefined;
+  }
+
+  return {
+    id,
+    body,
+    ...(readOptionalTrimmedString(comment.author) ? { author: readOptionalTrimmedString(comment.author) } : {}),
+    ...(readOptionalFiniteNumber(comment.score) !== undefined ? { score: readOptionalFiniteNumber(comment.score) } : {}),
+    ...(readOptionalFiniteNumber(comment.depth) !== undefined ? { depth: readOptionalFiniteNumber(comment.depth) } : {}),
+  };
+}
+
+function normalizeVerifiedRedditPostSnapshot(value: unknown): VerifiedRedditPostSnapshot | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+
+  const snapshot = value as Record<string, unknown>;
+  const source = readOptionalTrimmedString(snapshot.source);
+  const canonicalUrl = readOptionalTrimmedString(snapshot.canonicalUrl);
+  const jsonUrl = readOptionalTrimmedString(snapshot.jsonUrl);
+  const postId = readOptionalTrimmedString(snapshot.postId);
+  const subreddit = readOptionalTrimmedString(snapshot.subreddit);
+  const title = readOptionalTrimmedString(snapshot.title);
+  if (source !== 'reddit-json' || !canonicalUrl || !jsonUrl || !postId || !subreddit || !title) {
+    return undefined;
+  }
+
+  return {
+    source: 'reddit-json',
+    canonicalUrl,
+    jsonUrl,
+    postId,
+    subreddit,
+    title,
+    ...(readOptionalTrimmedString(snapshot.selftext) ? { selftext: readOptionalTrimmedString(snapshot.selftext) } : {}),
+    ...(readOptionalTrimmedString(snapshot.author) ? { author: readOptionalTrimmedString(snapshot.author) } : {}),
+    ...(readOptionalTrimmedString(snapshot.permalink) ? { permalink: readOptionalTrimmedString(snapshot.permalink) } : {}),
+    ...(readOptionalFiniteNumber(snapshot.createdUtc) !== undefined ? { createdUtc: readOptionalFiniteNumber(snapshot.createdUtc) } : {}),
+    ...(readOptionalFiniteNumber(snapshot.score) !== undefined ? { score: readOptionalFiniteNumber(snapshot.score) } : {}),
+    ...(readOptionalFiniteNumber(snapshot.numComments) !== undefined ? { numComments: readOptionalFiniteNumber(snapshot.numComments) } : {}),
+    ...(readOptionalTrimmedString(snapshot.linkFlairText) ? { linkFlairText: readOptionalTrimmedString(snapshot.linkFlairText) } : {}),
+    ...(typeof snapshot.isSelfPost === 'boolean' ? { isSelfPost: snapshot.isSelfPost } : {}),
+    ...(readOptionalTrimmedString(snapshot.domain) ? { domain: readOptionalTrimmedString(snapshot.domain) } : {}),
+    ...(typeof snapshot.over18 === 'boolean' ? { over18: snapshot.over18 } : {}),
+    ...(normalizeVerifiedRedditCommentSnapshot(snapshot.matchedComment)
+      ? { matchedComment: normalizeVerifiedRedditCommentSnapshot(snapshot.matchedComment) }
+      : {}),
+  };
 }
 
 function mergeGoogleSightings(

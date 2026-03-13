@@ -24,6 +24,38 @@ export interface GoogleSearchSighting {
  * Repeated appearances on different pages are merged into one candidate before
  * AI analysis so the same URL is only classified once per run.
  */
+export interface VerifiedRedditCommentSnapshot {
+  id: string;
+  author?: string;
+  body: string;
+  score?: number;
+  depth?: number;
+}
+
+/**
+ * Stable Reddit post metadata fetched from the post's public `.json` endpoint.
+ * This is used to verify Reddit candidates discovered via Google SERPs.
+ */
+export interface VerifiedRedditPostSnapshot {
+  source: 'reddit-json';
+  canonicalUrl: string;
+  jsonUrl: string;
+  postId: string;
+  subreddit: string;
+  title: string;
+  selftext?: string;
+  author?: string;
+  permalink?: string;
+  createdUtc?: number;
+  score?: number;
+  numComments?: number;
+  linkFlairText?: string;
+  isSelfPost?: boolean;
+  domain?: string;
+  over18?: boolean;
+  matchedComment?: VerifiedRedditCommentSnapshot;
+}
+
 export interface GoogleSearchCandidate {
   resultId: string;
   url: string;
@@ -32,6 +64,7 @@ export interface GoogleSearchCandidate {
   displayedUrl?: string;
   description?: string;
   emphasizedKeywords?: string[];
+  verifiedRedditPost?: VerifiedRedditPostSnapshot;
   pageNumbers: number[];
   positions: number[];
   sightings: GoogleSearchSighting[];
@@ -88,7 +121,7 @@ export interface ScanSummaryOutput {
  */
 export interface GoogleStoredFindingRawData extends Record<string, unknown> {
   kind: 'google-normalized';
-  version: 2;
+  version: 3;
   normalizedUrl: string;
   result: {
     rawUrl: string;
@@ -98,6 +131,7 @@ export interface GoogleStoredFindingRawData extends Record<string, unknown> {
     description?: string;
     emphasizedKeywords?: string[];
   };
+  verifiedRedditPost?: VerifiedRedditPostSnapshot;
   sightings: GoogleSearchSighting[];
   context: GoogleRunContext;
   analysis: {

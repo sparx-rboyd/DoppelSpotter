@@ -241,6 +241,9 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ duplicate callbacks for a run already in `fetching_dataset` / `analysing` are acknowledged and skipped before expensive work starts
  └─ fetches source-specific capped items from Apify dataset (source-level actor limits still apply before post-normalization chunked analysis: Google via requested SERP pages, Discord via `maxTotalChargeUsd` spend cap, and GitHub / X via the requested `50..250` result volume)
  └─ Google Search mode: normalize SERP pages into compact organic-result candidates
+      └─ `google-reddit` candidates that point at Reddit post/comment permalinks attempt a low-volume verification fetch via the public Reddit `/.json` endpoint before AI classification
+      └─ when Reddit verification succeeds, classification uses the verified Reddit post snapshot (title, selftext, subreddit, author, flair, score, comment count, and an optionally matched comment for comment permalinks) as the primary evidence instead of the volatile Google snippet text
+      └─ if Reddit verification fails or the URL is not a Reddit post/comment permalink, the scan falls back to the normal Google-snippet candidate path
       └─ excludes ads from AI analysis; keeps `relatedQueries` + `peopleAlsoAsk` as run-level context
       └─ stores scanner-aware sighting/debug metadata so merged findings can retain which logical scan surfaces saw a URL
       └─ dedupes repeated URLs within the run before analysis
@@ -325,10 +328,14 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 
 Google Search results arrive as page-level SERP blobs. The webhook normalizes them into compact
 organic-result candidates, dedupes repeated URLs within the run, and classifies those candidates
-in bounded chunks. Google findings store a compact normalized debug payload
-(`kind: 'google-normalized'`) with candidate metadata, merged sightings, and SERP context instead
-of the full page blobs. Normalized Google URLs that already appeared in previous scans for the
-same brand are filtered out before chunking, so repeat results do not trigger new LLM calls.
+in bounded chunks. For `google-reddit`, Reddit post/comment permalinks are first verified against
+the public Reddit `/.json` endpoint so the classifier can rely on stable Reddit post metadata
+instead of volatile Google snippet text; comment bodies are only included when the matched URL is
+a specific comment permalink. Google findings store a compact normalized debug payload
+(`kind: 'google-normalized'`) with candidate metadata, merged sightings, SERP context, and any
+verified Reddit snapshot instead of the full page blobs. Normalized Google URLs that already
+appeared in previous scans for the same brand are filtered out before chunking, so repeat results
+do not trigger new LLM calls.
 
 See `REVIEW.md` for full prompt text and AI analysis pipeline details.
 

@@ -39,6 +39,8 @@ You will receive a compact list of Google organic search result candidates for a
 
 Your task is to assess ONLY the provided result candidates for potential brand infringement.
 Do not invent extra results. Do not assess ads. Do not turn related queries or People Also Ask questions into findings.
+When a result candidate includes 'verifiedRedditPost', treat that verified Reddit JSON snapshot as the primary evidence. Google snippet fields are only low-trust discovery hints and may reflect changing page chrome, related posts, or comments that are not the actual matched post.
+Do not infer risk from Reddit comments unless a specific 'matchedComment' is included inside 'verifiedRedditPost'.
 Use British English spelling and phrasing in all human-readable output fields.
 
 You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
@@ -414,17 +416,21 @@ export function buildGoogleChunkAnalysisPrompt(params: {
   const existingThemesLine = `Existing theme labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingThemes && existingThemes.length > 0 ? existingThemes.join(', ') : 'none'}`;
   const monitoringSurfaceLine = buildGoogleClassificationSurfaceLine(scanner);
 
-  const compactCandidates = candidates.map((candidate) => ({
-    resultId: candidate.resultId,
-    url: candidate.url,
-    title: candidate.title,
-    displayedUrl: candidate.displayedUrl,
-    description: candidate.description,
-    emphasizedKeywords: candidate.emphasizedKeywords ?? [],
-    pageNumbers: candidate.pageNumbers,
-    positions: candidate.positions,
-    appearanceCount: candidate.sightings.length,
-  }));
+  const compactCandidates = candidates.map((candidate) => {
+    const hasVerifiedRedditPost = Boolean(candidate.verifiedRedditPost);
+    return {
+      resultId: candidate.resultId,
+      url: candidate.url,
+      title: candidate.verifiedRedditPost?.title ?? candidate.title,
+      displayedUrl: candidate.displayedUrl,
+      description: hasVerifiedRedditPost ? undefined : candidate.description,
+      emphasizedKeywords: hasVerifiedRedditPost ? [] : (candidate.emphasizedKeywords ?? []),
+      verifiedRedditPost: candidate.verifiedRedditPost,
+      pageNumbers: candidate.pageNumbers,
+      positions: candidate.positions,
+      appearanceCount: candidate.sightings.length,
+    };
+  });
 
   return `Brand being protected: "${brandName}"
 Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
@@ -441,6 +447,7 @@ Supporting SERP context (for extra caution only — do NOT assess these as findi
 Assess every result candidate below and return one item in the "items" array per resultId.
 Use British English in any human-readable text you generate.
 Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
+For candidates with 'verifiedRedditPost', base your judgement on that verified Reddit metadata rather than on the Google snippet fields.
 
 Result candidates (${compactCandidates.length}):
 ${JSON.stringify(compactCandidates, null, 2)}`;
