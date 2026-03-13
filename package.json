@@ -6,6 +6,6 @@
     "actor:recent-domain-registrations:run": "npm --prefix actors/recent-domain-registrations start"
   },
   "devDependencies": {
-    "wrangler": "^4.70.0"
+    "wrangler": "^4.73.0"
   }
 }
