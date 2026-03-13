@@ -11,19 +11,24 @@ import {
   DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT,
   GITHUB_CLASSIFICATION_SYSTEM_PROMPT,
   GOOGLE_CLASSIFICATION_SYSTEM_PROMPT,
+  REDDIT_CLASSIFICATION_SYSTEM_PROMPT,
   SCAN_SUMMARY_SYSTEM_PROMPT,
   X_CLASSIFICATION_SYSTEM_PROMPT,
+  buildRedditChunkAnalysisPrompt,
   buildDiscordChunkAnalysisPrompt,
   buildDomainRegistrationChunkAnalysisPrompt,
   buildGitHubChunkAnalysisPrompt,
   buildGoogleFinalSelectionSystemPrompt,
   buildGoogleFinalSelectionPrompt,
   buildGoogleChunkAnalysisPrompt,
+  buildRedditFinalSelectionPrompt,
+  buildRedditFinalSelectionSystemPrompt,
   buildScanSummaryPrompt,
   buildXChunkAnalysisPrompt,
   formatLlmPromptForDebug,
 } from '@/lib/analysis/prompts';
 import {
+  parseRedditChunkAnalysisOutput,
   parseDiscordChunkAnalysisOutput,
   parseDomainRegistrationChunkAnalysisOutput,
   parseGitHubChunkAnalysisOutput,
@@ -48,6 +53,10 @@ import {
   type GoogleSearchCandidate,
   type GoogleSearchSighting,
   type GoogleStoredFindingRawData,
+  type RedditChunkAnalysisItem,
+  type RedditPostCandidate,
+  type RedditRunContext,
+  type RedditStoredFindingRawData,
   type VerifiedRedditCommentSnapshot,
   type VerifiedRedditPostSnapshot,
   type XChunkAnalysisItem,
@@ -62,11 +71,14 @@ import {
 import { rebuildAndPersistDashboardBreakdownsForScanIds } from '@/lib/dashboard-aggregates';
 import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
 import {
+  GOOGLE_SEARCH_ACTOR_ID,
+  REDDIT_POST_SCRAPER_ACTOR_ID,
   buildGoogleScannerQuery,
   getScannerConfigById,
   getScannerConfigBySource,
   sanitizeGoogleQueryForDisplay,
   type GoogleScannerConfig,
+  type RedditScannerConfig,
   type ScannerConfig,
 } from '@/lib/scan-sources';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
@@ -75,6 +87,8 @@ import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSna
 /** Maximum normalized candidates per LLM request chunk. */
 const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
 const GOOGLE_ANALYSIS_CONCURRENCY = 6;
+const REDDIT_ANALYSIS_CHUNK_SIZE = 10;
+const REDDIT_ANALYSIS_CONCURRENCY = 6;
 const REDDIT_VERIFICATION_CONCURRENCY = 4;
 const REDDIT_JSON_FETCH_TIMEOUT_MS = 8000;
 const MAX_REDDIT_POST_TITLE_LENGTH = 300;
@@ -91,6 +105,8 @@ const X_ANALYSIS_CONCURRENCY = 6;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';
 const GOOGLE_RAW_DATA_VERSION = 3;
+const REDDIT_FINDING_ID_PREFIX = 'reddit';
+const REDDIT_RAW_DATA_VERSION = 1;
 const DISCORD_FINDING_ID_PREFIX = 'discord';
 const DISCORD_RAW_DATA_VERSION = 1;
 const DOMAIN_REGISTRATION_FINDING_ID_PREFIX = 'domains';
@@ -367,6 +383,13 @@ async function handleSucceededRun({
       currentScanId: scan.id ?? scanDoc.id,
     })
     : undefined;
+  const previousRedditPostIds = scannerConfig.kind === 'reddit'
+    ? await loadPreviousRedditPostIds({
+      brandId: scan.brandId,
+      userId: scan.userId,
+      currentScanId: scan.id ?? scanDoc.id,
+    })
+    : undefined;
   const previousDiscordServerIds = scannerConfig.kind === 'discord'
     ? await loadPreviousDiscordServerIds({
       brandId: scan.brandId,
@@ -457,6 +480,25 @@ async function handleSucceededRun({
       existingTaxonomy,
       scannerConfig,
     })
+    : scannerConfig.kind === 'reddit'
+      ? await analyseAndWriteRedditBatch({
+        scanDoc,
+        scan,
+        brand,
+        source,
+        actorId,
+        datasetId,
+        runId,
+        items,
+        searchDepth,
+        searchQuery,
+        displayQuery,
+        userPreferenceHints,
+        previousPostIds: previousRedditPostIds,
+        existingTaxonomy,
+        scannerConfig,
+        effectiveSettings,
+      })
     : scannerConfig.kind === 'discord'
       ? await analyseAndWriteDiscordBatch({
         scanDoc,
@@ -624,6 +666,41 @@ async function loadPreviousFindingUrls({
   }
 
   return urls;
+}
+
+async function loadPreviousRedditPostIds({
+  brandId,
+  userId,
+  currentScanId,
+}: {
+  brandId: string;
+  userId: string;
+  currentScanId: string;
+}): Promise<Set<string>> {
+  const previousFindingsSnap = await db
+    .collection('findings')
+    .where('brandId', '==', brandId)
+    .where('userId', '==', userId)
+    .select('scanId', 'rawData', 'url')
+    .get();
+
+  const postIds = new Set<string>();
+  for (const doc of previousFindingsSnap.docs) {
+    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown>; url?: string };
+    if (data.scanId === currentScanId) {
+      continue;
+    }
+
+    const postId = readRedditStoredFindingRawData(data.rawData)?.post.id
+      ?? readGoogleStoredFindingRawData(data.rawData)?.verifiedRedditPost?.postId
+      ?? extractRedditPostIdFromUrl(readGoogleStoredFindingRawData(data.rawData)?.normalizedUrl)
+      ?? extractRedditPostIdFromUrl(data.url);
+    if (typeof postId === 'string' && postId.trim().length > 0) {
+      postIds.add(postId.trim());
+    }
+  }
+
+  return postIds;
 }
 
 async function loadPreviousDiscordServerIds({
@@ -935,6 +1012,158 @@ async function analyseAndWriteGoogleBatch({
 
   for (const { candidate, outcome } of outcomes.values()) {
     const delta = await upsertGoogleFinding({
+      scanDoc,
+      scan,
+      source,
+      actorId,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      candidate,
+      runContext: normalizedRun.runContext,
+      outcome,
+      scannerConfig,
+    });
+
+    findingCount += delta.findingCount;
+    counts.high += delta.counts.high;
+    counts.medium += delta.counts.medium;
+    counts.low += delta.counts.low;
+    counts.nonHit += delta.counts.nonHit;
+  }
+
+  return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
+}
+
+async function analyseAndWriteRedditBatch({
+  scanDoc,
+  scan,
+  brand,
+  source,
+  scannerConfig,
+  actorId,
+  datasetId,
+  runId,
+  items,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  userPreferenceHints,
+  previousPostIds,
+  existingTaxonomy,
+  effectiveSettings,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  brand: BrandProfile;
+  source: Finding['source'];
+  scannerConfig: RedditScannerConfig;
+  actorId: string;
+  datasetId: string;
+  runId: string;
+  items: Record<string, unknown>[];
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  userPreferenceHints?: Scan['userPreferenceHints'];
+  previousPostIds?: ReadonlySet<string>;
+  existingTaxonomy: { themes: string[] };
+  effectiveSettings: ReturnType<typeof getEffectiveScanSettings>;
+}): Promise<{
+  findingCount: number;
+  suggestedSearches?: string[];
+  counts: { high: number; medium: number; low: number; nonHit: number };
+  skippedDuplicateCount: number;
+}> {
+  let findingCount = 0;
+  let suggestedSearches: string[] | undefined;
+  const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const severityDefinitions = scan.analysisSeverityDefinitions
+    ?? resolveBrandAnalysisSeverityDefinitions(brand.analysisSeverityDefinitions);
+  const canRunDeepSearchSelection = searchDepth === 0 && effectiveSettings.allowAiDeepSearches;
+  const maxSuggestedSearches = effectiveSettings.maxAiDeepSearches;
+
+  const normalizedRun = normalizeRedditRun({
+    searchQuery,
+    displayQuery,
+    lookbackDate: effectiveSettings.lookbackDate,
+    items,
+  });
+  const candidatesToAnalyse = normalizedRun.candidates.filter(
+    (candidate) => !previousPostIds?.has(candidate.postId),
+  );
+  const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
+
+  await scanDoc.ref.update({
+    [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
+    [`actorRuns.${runId}.analysedCount`]: 0,
+    [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
+  });
+
+  if (candidatesToAnalyse.length === 0) {
+    return { findingCount, counts, skippedDuplicateCount };
+  }
+
+  const outcomes = new Map<string, { candidate: RedditPostCandidate; outcome: RedditFindingOutcome }>();
+  const chunks = chunkArray(candidatesToAnalyse, REDDIT_ANALYSIS_CHUNK_SIZE);
+  const chunkResults = await mapWithConcurrency(
+    chunks,
+    REDDIT_ANALYSIS_CONCURRENCY,
+    async (chunk, chunkIndex): Promise<RedditChunkAnalysisResult | null> => {
+      const prompt = buildRedditChunkAnalysisPrompt({
+        brandName: brand.name,
+        keywords: brand.keywords,
+        officialDomains: brand.officialDomains,
+        severityDefinitions,
+        watchWords: brand.watchWords,
+        safeWords: brand.safeWords,
+        userPreferenceHints,
+        existingThemes: existingTaxonomy.themes,
+        source,
+        candidates: chunk,
+        runContext: normalizedRun.runContext,
+      });
+      const llmAnalysisPrompt = formatLlmPromptForDebug(REDDIT_CLASSIFICATION_SYSTEM_PROMPT, prompt);
+
+      try {
+        return await retryChunkAnalysisOnce({
+          sourceLabel: 'Reddit',
+          datasetId,
+          chunkIndex,
+          totalChunks: chunks.length,
+          analyse: () => analyseRedditChunk({
+            candidates: chunk,
+            prompt,
+            llmAnalysisPrompt,
+          }),
+        });
+      } finally {
+        await scanDoc.ref.update({
+          [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
+        });
+      }
+    },
+  );
+
+  for (const chunkResult of chunkResults) {
+    if (!chunkResult) continue;
+    for (const [postId, value] of chunkResult.outcomes.entries()) {
+      outcomes.set(postId, value);
+    }
+  }
+
+  if (canRunDeepSearchSelection) {
+    suggestedSearches = await finalizeRedditSuggestedSearches({
+      brand,
+      scannerConfig,
+      runContext: normalizedRun.runContext,
+      maxSuggestedSearches,
+    });
+  }
+
+  for (const { candidate, outcome } of outcomes.values()) {
+    const delta = await upsertRedditFinding({
       scanDoc,
       scan,
       source,
@@ -1535,6 +1764,21 @@ type GoogleChunkAnalysisResult = {
   outcomes: Map<string, { candidate: GoogleSearchCandidate; outcome: GoogleFindingOutcome }>;
 };
 
+type RedditFindingOutcome = {
+  severity: Finding['severity'];
+  title: string;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+  llmAnalysisPrompt?: string;
+  rawLlmResponse?: string;
+  classificationSource: 'llm' | 'fallback';
+};
+
+type RedditChunkAnalysisResult = {
+  outcomes: Map<string, { candidate: RedditPostCandidate; outcome: RedditFindingOutcome }>;
+};
+
 type DiscordFindingOutcome = {
   severity: Finding['severity'];
   title: string;
@@ -1880,6 +2124,14 @@ function extractRedditPermalinkParts(url: string): {
   }
 }
 
+function extractRedditPostIdFromUrl(url?: string): string | undefined {
+  if (typeof url !== 'string' || url.trim().length === 0) {
+    return undefined;
+  }
+
+  return extractRedditPermalinkParts(url)?.postId;
+}
+
 function readVerifiedRedditPostSnapshot(
   payload: unknown,
   permalink: {
@@ -1999,6 +2251,129 @@ function findVerifiedRedditCommentSnapshot(
   }
 
   return undefined;
+}
+
+function normalizeRedditRun({
+  searchQuery,
+  displayQuery,
+  lookbackDate,
+  items,
+}: {
+  searchQuery?: string;
+  displayQuery?: string;
+  lookbackDate?: string;
+  items: Record<string, unknown>[];
+}): { candidates: RedditPostCandidate[]; runContext: RedditRunContext } {
+  const candidateMap = new Map<string, RedditPostCandidate>();
+  const sourceQueries = new Set<string>();
+  const observedSubreddits = new Set<string>();
+  const observedAuthors = new Set<string>();
+  const sampleTitles = new Set<string>();
+  let nextResultId = 1;
+
+  for (const sourceQuery of readDelimitedQueries(displayQuery ?? searchQuery)) {
+    sourceQueries.add(sourceQuery);
+  }
+
+  for (const item of items) {
+    const kind = readOptionalTrimmedString(item.kind)?.toLowerCase();
+    if (kind !== 'post') continue;
+
+    const postId = readRedditPostId(item);
+    const canonicalUrl = readRedditCanonicalUrl(item);
+    if (!postId || !canonicalUrl) continue;
+
+    const createdAt = readOptionalTrimmedString(item.created_utc);
+    if (!isRedditPostWithinLookback(createdAt, lookbackDate)) continue;
+
+    const title = trimToLength(readOptionalTrimmedString(item.title), MAX_REDDIT_POST_TITLE_LENGTH) ?? `Reddit post ${postId}`;
+    const body = trimToLength(readOptionalTrimmedString(item.body), MAX_REDDIT_POST_SELFTEXT_LENGTH);
+    const author = readOptionalTrimmedString(item.author);
+    const subreddit = readOptionalTrimmedString(item.subreddit) ?? 'unknown';
+    const score = readOptionalFiniteNumber(item.score);
+    const upvoteRatio = readOptionalFiniteNumber(item.upvote_ratio);
+    const numComments = readOptionalFiniteNumber(item.num_comments);
+    const flair = readOptionalTrimmedString(item.flair);
+    const domain = readOptionalTrimmedString(item.domain);
+    const matchedQuery = readOptionalTrimmedString(item.query);
+    const over18 = typeof item.over_18 === 'boolean' ? item.over_18 : undefined;
+    const isSelfPost = typeof item.is_self === 'boolean' ? item.is_self : undefined;
+    const spoiler = typeof item.spoiler === 'boolean' ? item.spoiler : undefined;
+    const locked = typeof item.locked === 'boolean' ? item.locked : undefined;
+    const isVideo = typeof item.is_video === 'boolean' ? item.is_video : undefined;
+
+    sampleTitles.add(title);
+    observedSubreddits.add(subreddit);
+    if (author) observedAuthors.add(author);
+    if (matchedQuery) sourceQueries.add(matchedQuery);
+
+    const existing = candidateMap.get(postId);
+    if (existing) {
+      existing.matchedQueries = uniqueStrings([...existing.matchedQueries, ...(matchedQuery ? [matchedQuery] : [])]);
+      if (!existing.body && body) existing.body = body;
+      if (!existing.author && author) existing.author = author;
+      if (existing.createdAt === undefined && createdAt) existing.createdAt = createdAt;
+      if (existing.score === undefined && score !== undefined) existing.score = score;
+      if (existing.upvoteRatio === undefined && upvoteRatio !== undefined) existing.upvoteRatio = upvoteRatio;
+      if (existing.numComments === undefined && numComments !== undefined) existing.numComments = numComments;
+      if (!existing.flair && flair) existing.flair = flair;
+      if (!existing.domain && domain) existing.domain = domain;
+      if (existing.over18 === undefined && over18 !== undefined) existing.over18 = over18;
+      if (existing.isSelfPost === undefined && isSelfPost !== undefined) existing.isSelfPost = isSelfPost;
+      if (existing.spoiler === undefined && spoiler !== undefined) existing.spoiler = spoiler;
+      if (existing.locked === undefined && locked !== undefined) existing.locked = locked;
+      if (existing.isVideo === undefined && isVideo !== undefined) existing.isVideo = isVideo;
+      continue;
+    }
+
+    candidateMap.set(postId, {
+      resultId: `rp${nextResultId++}`,
+      postId,
+      url: canonicalUrl,
+      canonicalUrl,
+      title,
+      ...(body ? { body } : {}),
+      ...(author ? { author } : {}),
+      subreddit,
+      ...(createdAt ? { createdAt } : {}),
+      ...(score !== undefined ? { score } : {}),
+      ...(upvoteRatio !== undefined ? { upvoteRatio } : {}),
+      ...(numComments !== undefined ? { numComments } : {}),
+      ...(flair ? { flair } : {}),
+      ...(over18 !== undefined ? { over18 } : {}),
+      ...(isSelfPost !== undefined ? { isSelfPost } : {}),
+      ...(spoiler !== undefined ? { spoiler } : {}),
+      ...(locked !== undefined ? { locked } : {}),
+      ...(isVideo !== undefined ? { isVideo } : {}),
+      ...(domain ? { domain } : {}),
+      matchedQueries: matchedQuery ? [matchedQuery] : [],
+    });
+  }
+
+  return {
+    candidates: Array.from(candidateMap.values()),
+    runContext: {
+      sourceQueries: uniqueStrings(Array.from(sourceQueries)),
+      observedSubreddits: uniqueStrings(Array.from(observedSubreddits)),
+      observedAuthors: uniqueStrings(Array.from(observedAuthors)),
+      sampleTitles: uniqueStrings(Array.from(sampleTitles)).slice(0, 12),
+      ...(lookbackDate ? { lookbackDate } : {}),
+    },
+  };
+}
+
+function isRedditPostWithinLookback(createdAt?: string, lookbackDate?: string): boolean {
+  if (!createdAt || !lookbackDate) {
+    return true;
+  }
+
+  const createdAtMs = Date.parse(createdAt);
+  const lookbackMs = Date.parse(`${lookbackDate}T00:00:00.000Z`);
+  if (!Number.isFinite(createdAtMs) || !Number.isFinite(lookbackMs)) {
+    return true;
+  }
+
+  return createdAtMs >= lookbackMs;
 }
 
 function normalizeDiscordServerRun({
@@ -2381,6 +2756,40 @@ async function analyseGoogleChunk({
   return { outcomes };
 }
 
+async function analyseRedditChunk({
+  candidates,
+  prompt,
+  llmAnalysisPrompt,
+}: {
+  candidates: RedditPostCandidate[];
+  prompt: string;
+  llmAnalysisPrompt: string;
+}): Promise<RedditChunkAnalysisResult> {
+  const raw = await chatCompletion([
+    { role: 'system', content: REDDIT_CLASSIFICATION_SYSTEM_PROMPT },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseRedditChunkAnalysisOutput(raw, new Set(candidates.map((candidate) => candidate.resultId)));
+  if (!parsed) {
+    throw new Error(`Failed to parse Reddit chunk analysis output: ${raw.slice(0, 200)}`);
+  }
+
+  const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  assertChunkAnalysisCoveredCandidates('Reddit', candidates, byResultId);
+  const outcomes = new Map<string, { candidate: RedditPostCandidate; outcome: RedditFindingOutcome }>();
+
+  for (const candidate of candidates) {
+    const item = byResultId.get(candidate.resultId)!;
+    outcomes.set(candidate.postId, {
+      candidate,
+      outcome: buildRedditFindingOutcome(item, raw, llmAnalysisPrompt),
+    });
+  }
+
+  return { outcomes };
+}
+
 async function analyseDiscordChunk({
   candidates,
   prompt,
@@ -2552,6 +2961,41 @@ async function analyseGoogleFinalSelection({
   return parsed.suggestedSearches;
 }
 
+async function analyseRedditFinalSelection({
+  brand,
+  scannerConfig,
+  runContext,
+  maxSuggestedSearches,
+}: {
+  brand: BrandProfile;
+  scannerConfig: RedditScannerConfig;
+  runContext: RedditRunContext;
+  maxSuggestedSearches: number;
+}): Promise<string[] | undefined> {
+  const prompt = buildRedditFinalSelectionPrompt({
+    scanner: scannerConfig,
+    brandName: brand.name,
+    keywords: brand.keywords,
+    watchWords: brand.watchWords,
+    safeWords: brand.safeWords,
+    runContext,
+    maxSuggestedSearches,
+  });
+  const systemPrompt = buildRedditFinalSelectionSystemPrompt(maxSuggestedSearches, scannerConfig);
+
+  const raw = await chatCompletion([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseSuggestedSearchOutput(raw, maxSuggestedSearches);
+  if (!parsed) {
+    throw new Error(`Failed to parse Reddit final selection output: ${raw.slice(0, 200)}`);
+  }
+
+  return parsed.suggestedSearches;
+}
+
 async function finalizeSuggestedSearches({
   brand,
   scannerConfig,
@@ -2591,6 +3035,49 @@ async function finalizeSuggestedSearches({
     return filteredSuggestions;
   } catch (err) {
     console.error('[webhook] Google final deep-search selection failed:', err);
+    return undefined;
+  }
+}
+
+async function finalizeRedditSuggestedSearches({
+  brand,
+  scannerConfig,
+  runContext,
+  maxSuggestedSearches,
+}: {
+  brand: BrandProfile;
+  scannerConfig: RedditScannerConfig;
+  runContext: RedditRunContext;
+  maxSuggestedSearches: number;
+}): Promise<string[] | undefined> {
+  try {
+    const llmSuggestedSearches = await analyseRedditFinalSelection({
+      brand,
+      scannerConfig,
+      runContext,
+      maxSuggestedSearches,
+    });
+
+    if (!llmSuggestedSearches || llmSuggestedSearches.length === 0) {
+      console.log(
+        `[webhook] Reddit deep-search final selection subreddits=${runContext.observedSubreddits.length} authors=${runContext.observedAuthors.length} selected=[]`,
+      );
+      return undefined;
+    }
+
+    const sourceQueryKeys = new Set(runContext.sourceQueries.map(normalizeSuggestedSearchKey));
+    const filteredSuggestions = llmSuggestedSearches.filter((query) => !sourceQueryKeys.has(normalizeSuggestedSearchKey(query)));
+    if (filteredSuggestions.length === 0) {
+      console.warn('[webhook] Reddit final deep-search selection returned only source-query duplicates');
+      return undefined;
+    }
+
+    console.log(
+      `[webhook] Reddit deep-search final selection subreddits=${runContext.observedSubreddits.length} authors=${runContext.observedAuthors.length} selected=${JSON.stringify(filteredSuggestions)}`,
+    );
+    return filteredSuggestions;
+  } catch (err) {
+    console.error('[webhook] Reddit final deep-search selection failed:', err);
     return undefined;
   }
 }
@@ -2686,6 +3173,132 @@ async function upsertGoogleFinding({
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.normalizedUrl,
+      rawData: mergedRawData,
+      isFalsePositive: preferredOutcome.isFalsePositive,
+    };
+
+    const llmAnalysisPrompt = preferredOutcome.llmAnalysisPrompt ?? existing.llmAnalysisPrompt;
+    if (typeof llmAnalysisPrompt === 'string') {
+      updates.llmAnalysisPrompt = llmAnalysisPrompt;
+    }
+
+    const rawLlmResponse = preferredOutcome.rawLlmResponse ?? existing.rawLlmResponse;
+    if (typeof rawLlmResponse === 'string') {
+      updates.rawLlmResponse = rawLlmResponse;
+    }
+
+    if (preferredOutcome.isFalsePositive) {
+      updates.isIgnored = true;
+      if (existing.isIgnored !== true) {
+        updates.ignoredAt = FieldValue.serverTimestamp();
+      }
+      updates.isAddressed = false;
+      if (existing.addressedAt) {
+        updates.addressedAt = FieldValue.delete();
+      }
+    } else {
+      updates.isIgnored = false;
+      if (existing.ignoredAt) {
+        updates.ignoredAt = FieldValue.delete();
+      }
+    }
+
+    tx.update(findingRef, updates);
+    return diffFindingStates(previousState, nextState);
+  });
+}
+
+async function upsertRedditFinding({
+  scanDoc,
+  scan,
+  source,
+  scannerConfig,
+  actorId,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  candidate,
+  runContext,
+  outcome,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  candidate: RedditPostCandidate;
+  runContext: RedditRunContext;
+  outcome: RedditFindingOutcome;
+}): Promise<FindingDelta> {
+  const scanId = scan.id ?? scanDoc.id;
+  const findingRef = db.collection('findings').doc(buildRedditFindingId(scanId, candidate.postId));
+
+  return db.runTransaction(async (tx) => {
+    const existingSnap = await tx.get(findingRef);
+    const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
+    const preferredOutcome = choosePreferredRedditOutcome(existing, outcome);
+    const mergedRawData = buildRedditStoredFindingRawData({
+      existingRawData: existing?.rawData,
+      candidate,
+      runContext,
+      source,
+      scannerConfig,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      classificationSource: preferredOutcome.classificationSource,
+    });
+    const preferredSource = choosePreferredFindingSource(existing?.source, source);
+
+    const previousState = existing ? getFindingCountState(existing) : emptyFindingCountState();
+    const nextState = getOutcomeCountState(preferredOutcome);
+
+    if (!existing) {
+      const finding: Omit<Finding, 'id'> = {
+        scanId,
+        brandId: scan.brandId,
+        userId: scan.userId,
+        source: preferredSource,
+        actorId,
+        severity: preferredOutcome.severity,
+        title: preferredOutcome.title,
+        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        description: preferredOutcome.analysis,
+        llmAnalysis: preferredOutcome.analysis,
+        url: candidate.url,
+        rawData: mergedRawData,
+        isFalsePositive: preferredOutcome.isFalsePositive,
+        ...(preferredOutcome.isFalsePositive && {
+          isIgnored: true,
+          ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+        }),
+        ...(typeof preferredOutcome.llmAnalysisPrompt === 'string' && {
+          llmAnalysisPrompt: preferredOutcome.llmAnalysisPrompt,
+        }),
+        ...(typeof preferredOutcome.rawLlmResponse === 'string' && {
+          rawLlmResponse: preferredOutcome.rawLlmResponse,
+        }),
+        createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+      };
+      tx.set(findingRef, finding);
+      return diffFindingStates(previousState, nextState);
+    }
+
+    const updates: Record<string, unknown> = {
+      source: preferredSource,
+      severity: preferredOutcome.severity,
+      title: preferredOutcome.title,
+      platform: FieldValue.delete(),
+      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      description: preferredOutcome.analysis,
+      llmAnalysis: preferredOutcome.analysis,
+      url: candidate.url,
       rawData: mergedRawData,
       isFalsePositive: preferredOutcome.isFalsePositive,
     };
@@ -3295,7 +3908,7 @@ async function reserveSuggestedSearches({
 }
 
 /**
- * Start follow-up Google Search actor runs for each query suggested by AI analysis.
+ * Start follow-up actor runs for each query suggested by AI analysis.
  * Caps total deep searches at the configured brand-specific deep-search limit,
  * but guarded here too). Adds the new runs to the scan document atomically so that
  * markActorRunComplete can correctly detect overall scan completion.
@@ -3383,6 +3996,23 @@ function buildGoogleFindingOutcome(
   rawLlmResponse: string,
   llmAnalysisPrompt: string,
 ): GoogleFindingOutcome {
+  return {
+    severity: item.severity,
+    title: item.title,
+    theme: item.theme,
+    analysis: item.analysis,
+    isFalsePositive: item.isFalsePositive,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'llm',
+  };
+}
+
+function buildRedditFindingOutcome(
+  item: RedditChunkAnalysisItem,
+  rawLlmResponse: string,
+  llmAnalysisPrompt: string,
+): RedditFindingOutcome {
   return {
     severity: item.severity,
     title: item.title,
@@ -3583,6 +4213,137 @@ function readGoogleStoredFindingRawData(rawData?: Record<string, unknown>): Goog
       displayQuery: typeof analysis.displayQuery === 'string'
         ? analysis.displayQuery
         : (typeof analysis.searchQuery === 'string' ? sanitizeGoogleQueryForDisplay(analysis.searchQuery) : undefined),
+    },
+  };
+}
+
+function buildRedditStoredFindingRawData({
+  existingRawData,
+  candidate,
+  runContext,
+  source,
+  scannerConfig,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  classificationSource,
+}: {
+  existingRawData?: Record<string, unknown>;
+  candidate: RedditPostCandidate;
+  runContext: RedditRunContext;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  classificationSource: 'llm' | 'fallback';
+}): RedditStoredFindingRawData {
+  const existing = readRedditStoredFindingRawData(existingRawData);
+  return stripUndefinedDeep({
+    kind: 'reddit-normalized',
+    version: REDDIT_RAW_DATA_VERSION,
+    post: {
+      id: candidate.postId,
+      url: candidate.url,
+      canonicalUrl: candidate.canonicalUrl,
+      title: candidate.title,
+      ...(candidate.body ? { body: candidate.body } : {}),
+      ...(candidate.author ? { author: candidate.author } : {}),
+      subreddit: candidate.subreddit,
+      ...(candidate.createdAt ? { createdAt: candidate.createdAt } : {}),
+      ...(candidate.score !== undefined ? { score: candidate.score } : {}),
+      ...(candidate.upvoteRatio !== undefined ? { upvoteRatio: candidate.upvoteRatio } : {}),
+      ...(candidate.numComments !== undefined ? { numComments: candidate.numComments } : {}),
+      ...(candidate.flair ? { flair: candidate.flair } : {}),
+      ...(candidate.over18 !== undefined ? { over18: candidate.over18 } : {}),
+      ...(candidate.isSelfPost !== undefined ? { isSelfPost: candidate.isSelfPost } : {}),
+      ...(candidate.spoiler !== undefined ? { spoiler: candidate.spoiler } : {}),
+      ...(candidate.locked !== undefined ? { locked: candidate.locked } : {}),
+      ...(candidate.isVideo !== undefined ? { isVideo: candidate.isVideo } : {}),
+      ...(candidate.domain ? { domain: candidate.domain } : {}),
+      matchedQueries: uniqueStrings([...(existing?.post.matchedQueries ?? []), ...candidate.matchedQueries]),
+    },
+    context: {
+      sourceQueries: uniqueStrings([...(existing?.context.sourceQueries ?? []), ...runContext.sourceQueries]),
+      observedSubreddits: uniqueStrings([...(existing?.context.observedSubreddits ?? []), ...runContext.observedSubreddits]),
+      observedAuthors: uniqueStrings([...(existing?.context.observedAuthors ?? []), ...runContext.observedAuthors]),
+      sampleTitles: uniqueStrings([...(existing?.context.sampleTitles ?? []), ...runContext.sampleTitles]).slice(0, 12),
+      ...(runContext.lookbackDate ?? existing?.context.lookbackDate
+        ? { lookbackDate: runContext.lookbackDate ?? existing?.context.lookbackDate }
+        : {}),
+    },
+    analysis: {
+      source: classificationSource,
+      runId,
+      findingSource: source,
+      scannerId: scannerConfig.id,
+      searchDepth,
+      ...(searchQuery ? { searchQuery } : {}),
+      ...(displayQuery ? { displayQuery } : {}),
+    },
+  }) as RedditStoredFindingRawData;
+}
+
+function readRedditStoredFindingRawData(rawData?: Record<string, unknown>): RedditStoredFindingRawData | null {
+  if (!rawData || rawData.kind !== 'reddit-normalized' || rawData.version !== REDDIT_RAW_DATA_VERSION) {
+    return null;
+  }
+
+  const post = typeof rawData.post === 'object' && rawData.post !== null ? rawData.post as Record<string, unknown> : {};
+  const context = typeof rawData.context === 'object' && rawData.context !== null ? rawData.context as Record<string, unknown> : {};
+  const analysis = typeof rawData.analysis === 'object' && rawData.analysis !== null ? rawData.analysis as Record<string, unknown> : {};
+
+  return {
+    kind: 'reddit-normalized',
+    version: REDDIT_RAW_DATA_VERSION,
+    post: {
+      id: typeof post.id === 'string' ? post.id : '',
+      url: typeof post.url === 'string' ? post.url : '',
+      canonicalUrl: typeof post.canonicalUrl === 'string' ? post.canonicalUrl : (typeof post.url === 'string' ? post.url : ''),
+      title: typeof post.title === 'string' ? post.title : '',
+      body: typeof post.body === 'string' ? post.body : undefined,
+      author: typeof post.author === 'string' ? post.author : undefined,
+      subreddit: typeof post.subreddit === 'string' ? post.subreddit : '',
+      createdAt: typeof post.createdAt === 'string' ? post.createdAt : undefined,
+      score: typeof post.score === 'number' ? post.score : undefined,
+      upvoteRatio: typeof post.upvoteRatio === 'number' ? post.upvoteRatio : undefined,
+      numComments: typeof post.numComments === 'number' ? post.numComments : undefined,
+      flair: typeof post.flair === 'string' ? post.flair : undefined,
+      over18: typeof post.over18 === 'boolean' ? post.over18 : undefined,
+      isSelfPost: typeof post.isSelfPost === 'boolean' ? post.isSelfPost : undefined,
+      spoiler: typeof post.spoiler === 'boolean' ? post.spoiler : undefined,
+      locked: typeof post.locked === 'boolean' ? post.locked : undefined,
+      isVideo: typeof post.isVideo === 'boolean' ? post.isVideo : undefined,
+      domain: typeof post.domain === 'string' ? post.domain : undefined,
+      matchedQueries: Array.isArray(post.matchedQueries)
+        ? post.matchedQueries.filter((value): value is string => typeof value === 'string')
+        : [],
+    },
+    context: {
+      sourceQueries: Array.isArray(context.sourceQueries)
+        ? context.sourceQueries.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedSubreddits: Array.isArray(context.observedSubreddits)
+        ? context.observedSubreddits.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedAuthors: Array.isArray(context.observedAuthors)
+        ? context.observedAuthors.filter((value): value is string => typeof value === 'string')
+        : [],
+      sampleTitles: Array.isArray(context.sampleTitles)
+        ? context.sampleTitles.filter((value): value is string => typeof value === 'string')
+        : [],
+      lookbackDate: typeof context.lookbackDate === 'string' ? context.lookbackDate : undefined,
+    },
+    analysis: {
+      source: analysis.source === 'fallback' ? 'fallback' : 'llm',
+      runId: typeof analysis.runId === 'string' ? analysis.runId : '',
+      findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'reddit',
+      scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'reddit-posts',
+      searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
+      searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
+      displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
     },
   };
 }
@@ -4150,6 +4911,7 @@ function isKnownScannerId(value: unknown): value is ActorRunInfo['scannerId'] {
   return (
     value === 'google-web'
     || value === 'google-reddit'
+    || value === 'reddit-posts'
     || value === 'google-tiktok'
     || value === 'google-youtube'
     || value === 'google-facebook'
@@ -4181,6 +4943,15 @@ function isKnownGoogleScannerId(value: unknown): value is GoogleScannerId {
 function resolveScannerConfig(actorRunInfo?: Partial<ActorRunInfo>): ScannerConfig {
   if (actorRunInfo?.scannerId && isKnownScannerId(actorRunInfo.scannerId)) {
     return getScannerConfigById(actorRunInfo.scannerId);
+  }
+
+  if (actorRunInfo?.source === 'reddit') {
+    if (actorRunInfo.actorId === GOOGLE_SEARCH_ACTOR_ID) {
+      return getScannerConfigById('google-reddit');
+    }
+    if (actorRunInfo.actorId === REDDIT_POST_SCRAPER_ACTOR_ID) {
+      return getScannerConfigById('reddit-posts');
+    }
   }
 
   if (
@@ -4247,6 +5018,37 @@ function choosePreferredGoogleOutcome(existing: Finding | null, next: GoogleFind
 
   const existingSource = readGoogleStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
   const existingOutcome: GoogleFindingOutcome = {
+    severity: existing.severity,
+    title: existing.title,
+    theme: existing.theme,
+    analysis: existing.llmAnalysis,
+    isFalsePositive: existing.isFalsePositive === true,
+    llmAnalysisPrompt: existing.llmAnalysisPrompt,
+    rawLlmResponse: existing.rawLlmResponse,
+    classificationSource: existingSource,
+  };
+
+  if (existingOutcome.classificationSource !== next.classificationSource) {
+    return next.classificationSource === 'llm' ? next : existingOutcome;
+  }
+  if (existingOutcome.isFalsePositive !== next.isFalsePositive) {
+    return existingOutcome.isFalsePositive ? next : existingOutcome;
+  }
+
+  const existingRank = getSeverityRank(existingOutcome.severity);
+  const nextRank = getSeverityRank(next.severity);
+  if (nextRank !== existingRank) {
+    return nextRank > existingRank ? next : existingOutcome;
+  }
+
+  return next;
+}
+
+function choosePreferredRedditOutcome(existing: Finding | null, next: RedditFindingOutcome): RedditFindingOutcome {
+  if (!existing) return next;
+
+  const existingSource = readRedditStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
+  const existingOutcome: RedditFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
     theme: existing.theme,
@@ -4702,6 +5504,10 @@ function buildGoogleFindingId(scanId: string, normalizedUrl: string): string {
   return `${GOOGLE_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${normalizedUrl}`).digest('hex')}`;
 }
 
+function buildRedditFindingId(scanId: string, postId: string): string {
+  return `${REDDIT_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${postId}`).digest('hex')}`;
+}
+
 function buildDiscordFindingId(scanId: string, serverId: string): string {
   return `${DISCORD_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${serverId}`).digest('hex')}`;
 }
@@ -4716,6 +5522,16 @@ function buildXFindingId(scanId: string, tweetId: string): string {
 
 function buildGitHubFindingId(scanId: string, fullName: string): string {
   return `${GITHUB_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${fullName.toLowerCase()}`).digest('hex')}`;
+}
+
+function normalizeRedditPostUrl(url: string): string | null {
+  const absoluteUrl = url.startsWith('/') ? `https://www.reddit.com${url}` : url;
+  const permalink = extractRedditPermalinkParts(absoluteUrl);
+  if (permalink) {
+    return permalink.canonicalUrl;
+  }
+
+  return normalizeUrlForFinding(absoluteUrl);
 }
 
 function normalizeUrlForFinding(url: string): string | null {
@@ -4776,6 +5592,28 @@ function readGoogleTitles(value: unknown): string[] {
       return typeof title === 'string' ? title.trim() : '';
     })
     .filter((title) => title.length > 0);
+}
+
+function readRedditPostId(item: Record<string, unknown>): string | null {
+  const id = readOptionalTrimmedString(item.id);
+  return id && id.length > 0 ? id : null;
+}
+
+function readRedditCanonicalUrl(item: Record<string, unknown>): string | null {
+  const candidates = [
+    readOptionalTrimmedString(item.canonical_url),
+    readOptionalTrimmedString(item.url),
+    readOptionalTrimmedString(item.permalink),
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+  for (const value of candidates) {
+    const normalized = normalizeRedditPostUrl(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  return null;
 }
 
 function readDiscordServerId(item: Record<string, unknown>): string | null {

@@ -146,6 +146,101 @@ export interface GoogleStoredFindingRawData extends Record<string, unknown> {
 }
 
 /**
+ * One Reddit post candidate returned by the dedicated Reddit actor.
+ */
+export interface RedditPostCandidate {
+  resultId: string;
+  postId: string;
+  url: string;
+  canonicalUrl: string;
+  title: string;
+  body?: string;
+  author?: string;
+  subreddit: string;
+  createdAt?: string;
+  score?: number;
+  upvoteRatio?: number;
+  numComments?: number;
+  flair?: string;
+  over18?: boolean;
+  isSelfPost?: boolean;
+  spoiler?: boolean;
+  locked?: boolean;
+  isVideo?: boolean;
+  domain?: string;
+  matchedQueries: string[];
+}
+
+/**
+ * Run-level Reddit context shared across chunked analysis calls.
+ */
+export interface RedditRunContext {
+  sourceQueries: string[];
+  observedSubreddits: string[];
+  observedAuthors: string[];
+  sampleTitles: string[];
+  lookbackDate?: string;
+}
+
+/**
+ * One assessed Reddit post returned by chunked AI analysis.
+ */
+export interface RedditChunkAnalysisItem {
+  resultId: string;
+  title: string;
+  severity: Severity;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+}
+
+/**
+ * The structured JSON output expected from chunked Reddit analysis.
+ */
+export interface RedditChunkAnalysisOutput {
+  items: RedditChunkAnalysisItem[];
+}
+
+/**
+ * Compact stored debug payload for Reddit findings.
+ */
+export interface RedditStoredFindingRawData extends Record<string, unknown> {
+  kind: 'reddit-normalized';
+  version: 1;
+  post: {
+    id: string;
+    url: string;
+    canonicalUrl: string;
+    title: string;
+    body?: string;
+    author?: string;
+    subreddit: string;
+    createdAt?: string;
+    score?: number;
+    upvoteRatio?: number;
+    numComments?: number;
+    flair?: string;
+    over18?: boolean;
+    isSelfPost?: boolean;
+    spoiler?: boolean;
+    locked?: boolean;
+    isVideo?: boolean;
+    domain?: string;
+    matchedQueries: string[];
+  };
+  context: RedditRunContext;
+  analysis: {
+    source: 'llm' | 'fallback';
+    runId: string;
+    findingSource: FindingSource;
+    scannerId: ScannerId;
+    searchDepth: number;
+    searchQuery?: string;
+    displayQuery?: string;
+  };
+}
+
+/**
  * One joinable Discord server candidate returned by the public-server scraper.
  */
 export interface DiscordServerCandidate {
@@ -527,6 +622,17 @@ export function parseGoogleChunkAnalysisOutput(
   raw: string,
   validResultIds: Set<string>,
 ): GoogleChunkAnalysisOutput | null {
+  const items = parseChunkAnalysisItems(raw, validResultIds);
+  return items ? { items } : null;
+}
+
+/**
+ * Parse and validate the raw JSON string returned by chunked Reddit analysis.
+ */
+export function parseRedditChunkAnalysisOutput(
+  raw: string,
+  validResultIds: Set<string>,
+): RedditChunkAnalysisOutput | null {
   const items = parseChunkAnalysisItems(raw, validResultIds);
   return items ? { items } : null;
 }

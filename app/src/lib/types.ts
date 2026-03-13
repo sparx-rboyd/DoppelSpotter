@@ -343,6 +343,7 @@ export type UserPreferenceHintsStatus = 'pending' | 'ready' | 'failed';
 export type ScannerId =
   | 'google-web'
   | 'google-reddit'
+  | 'reddit-posts'
   | 'google-tiktok'
   | 'google-youtube'
   | 'google-facebook'

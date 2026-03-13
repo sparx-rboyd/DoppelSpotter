@@ -9,6 +9,7 @@ import {
   getFindingSourceLabel,
   SCAN_SOURCE_ORDER,
   type GoogleScannerConfig,
+  type RedditScannerConfig,
 } from '@/lib/scan-sources';
 import {
   buildGoogleClassificationSurfaceLine,
@@ -24,6 +25,8 @@ import type {
   GitHubRunContext,
   GoogleRunContext,
   GoogleSearchCandidate,
+  RedditRunContext,
+  RedditPostCandidate,
   XRunContext,
   XTweetCandidate,
 } from './types';
@@ -81,6 +84,55 @@ Treat results with less caution when ...
 - Where there is clearly no signal of intent to impersonate nor defraud the brand nor its customers/users
 
 Set isFalsePositive: true if the result is clearly legitimate use of the brand name (e.g. the official website, a verified partner, a genuine news article with no intent to deceive).`;
+
+/**
+ * System prompt for chunked Reddit post classification.
+ */
+export const REDDIT_CLASSIFICATION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive a compact list of public Reddit post candidates for a brand, plus supporting context such as the search terms used and the subreddits/authors observed.
+
+Your task is to assess ONLY the provided Reddit post candidates for potential brand infringement, cheating-tool promotion, scam activity, impersonation, suspicious support claims, or other harmful brand misuse.
+Do not invent extra Reddit posts. Do not infer from Reddit comments, sidebars, related posts, or off-post discussion that is not evidenced by the provided post metadata and body.
+Use British English spelling and phrasing in all human-readable output fields.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "items": [
+    {
+      "resultId": "the exact resultId from the input candidate",
+      "title": "Short, descriptive title of the finding (max 10 words)",
+      "severity": "high" | "medium" | "low",
+      "theme": "Short theme label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
+      "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
+      "isFalsePositive": boolean
+    }
+  ]
+}
+
+Rules for "items":
+- Include exactly one item for every input Reddit post candidate and reuse the exact same resultId.
+- Assess only the provided post candidates. Do not add extra items and do not omit any candidate.
+- Each item must have all six fields: resultId, title, severity, theme, analysis, isFalsePositive.
+- Each individual analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
+- This applies to both the title and the analysis text.
+- Always return a concise "theme" label. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case.
+- If the user prompt includes existing theme labels that fit, reuse one of them exactly.
+- If none fit well, create a new short label rather than forcing a poor match.
+- Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
+- Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
+- If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current Reddit post.
+
+Severity assignment:
+- The user prompt will include this brand's definitions for "high", "medium", and "low".
+- Apply those brand-specific definitions exactly when assigning severity.
+
+Counter signals:
+Treat Reddit posts with less caution when ...
+- The post is clearly ordinary discussion, criticism, parody, or news sharing without deceptive intent
+- The brand terms are used in an unrelated context that would not realistically infringe the brand
+
+Set isFalsePositive: true if the Reddit post is clearly legitimate use of the brand name, such as ordinary commentary, benign discussion, or a clearly unrelated post with no deceptive signal.`;
 
 /**
  * System prompt for chunked Discord server classification.
@@ -372,6 +424,35 @@ For example:
 `;
 }
 
+export function buildRedditFinalSelectionSystemPrompt(
+  maxSuggestedSearches: number,
+  scanner: RedditScannerConfig,
+): string {
+  return `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive metadata about a brand, an existing ${scanner.displayName} search term about the brand that has been executed, and contextual signals observed from the resulting Reddit posts.
+
+Your task is to identify up to ${maxSuggestedSearches} follow-up Reddit searches that could be performed, that are likely to surface further evidence of potential brand misuse on Reddit.
+
+You will synthesise up to ${maxSuggestedSearches} entirely new queries based on the context that you're provided with, that you feel will help to surface the maximum number of potential threats to the brand.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "suggestedSearches": ["query 1", "query 2"]
+}
+
+Rules:
+- "suggestedSearches" is optional. Omit it entirely if no follow-up queries are warranted.
+- Suggest at most ${maxSuggestedSearches} follow-up Reddit queries.
+- Quality over quantity: return fewer than ${maxSuggestedSearches} queries when only a small number of genuinely useful follow-up searches are warranted.
+- Prefer coverage across distinct brand misuse themes. Avoid spending multiple searches on near-duplicate variants of the same theme when one broader query would cover them.
+- Any newly synthesised query must stay grounded in the context that you're provided with.
+- Do NOT suggest the original source query again or obvious paraphrases of it.
+- Do NOT suggest clearly legitimate or generic navigational queries.
+- Prefer concise Reddit-ready search terms, not full sentences.
+- Avoid overfitting to a single post title or username unless that is clearly the most important abuse signal.`;
+}
+
 /**
  * Build the user prompt for a chunk of normalized Google result candidates.
  */
@@ -450,6 +531,86 @@ Keep the theme label short: prefer 1 word where natural, never more than ${MAX_F
 For candidates with 'verifiedRedditPost', base your judgement on that verified Reddit metadata rather than on the Google snippet fields.
 
 Result candidates (${compactCandidates.length}):
+${JSON.stringify(compactCandidates, null, 2)}`;
+}
+
+export function buildRedditChunkAnalysisPrompt(params: {
+  brandName: string;
+  keywords: string[];
+  officialDomains: string[];
+  severityDefinitions: ResolvedBrandAnalysisSeverityDefinitions;
+  watchWords?: string[];
+  safeWords?: string[];
+  userPreferenceHints?: UserPreferenceHints;
+  existingThemes?: string[];
+  source: FindingSource;
+  candidates: RedditPostCandidate[];
+  runContext: RedditRunContext;
+}): string {
+  const {
+    brandName,
+    keywords,
+    officialDomains,
+    severityDefinitions,
+    watchWords,
+    safeWords,
+    userPreferenceHints,
+    existingThemes,
+    source,
+    candidates,
+    runContext,
+  } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that Reddit post): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with — if present in a Reddit post, treat it with reduced caution in the individual "analysis" field unless there are strong warning signs elsewhere): ${safeWords.join(', ')}`
+    : null;
+
+  const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
+  const existingThemesLine = `Existing theme labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingThemes && existingThemes.length > 0 ? existingThemes.join(', ') : 'none'}`;
+  const compactCandidates = candidates.map((candidate) => ({
+    resultId: candidate.resultId,
+    postId: candidate.postId,
+    url: candidate.url,
+    title: candidate.title,
+    body: candidate.body,
+    author: candidate.author,
+    subreddit: candidate.subreddit,
+    createdAt: candidate.createdAt,
+    score: candidate.score,
+    upvoteRatio: candidate.upvoteRatio,
+    numComments: candidate.numComments,
+    flair: candidate.flair,
+    over18: candidate.over18,
+    isSelfPost: candidate.isSelfPost,
+    spoiler: candidate.spoiler,
+    locked: candidate.locked,
+    isVideo: candidate.isVideo,
+    domain: candidate.domain,
+    matchedQueries: candidate.matchedQueries,
+  }));
+
+  return `Brand being protected: "${brandName}"
+Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${buildSeverityDefinitionsSection(severityDefinitions)}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
+Monitoring surface: Reddit posts
+
+Supporting Reddit discovery context:
+- Search terms used: ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.join(' | ') : 'none'}
+- Observed subreddits: ${runContext.observedSubreddits.length > 0 ? runContext.observedSubreddits.join(' | ') : 'none'}
+- Observed authors: ${runContext.observedAuthors.length > 0 ? runContext.observedAuthors.join(' | ') : 'none'}
+- Lookback date: ${runContext.lookbackDate ?? 'none'}
+
+Assess every Reddit post candidate below and return one item in the "items" array per resultId.
+Use British English in any human-readable text you generate.
+Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
+
+Reddit post candidates (${compactCandidates.length}):
 ${JSON.stringify(compactCandidates, null, 2)}`;
 }
 
@@ -799,6 +960,56 @@ People Also Ask queries returned by Google for the above search:
 ${runContext.peopleAlsoAsk.length > 0 ? runContext.peopleAlsoAsk.map((question) => `- ${question}`).join('\n') : '- none'}
 
 Maximum number of follow-up Google searches you may suggest:
+- ${maxSuggestedSearches}`;
+}
+
+export function buildRedditFinalSelectionPrompt(params: {
+  scanner: RedditScannerConfig;
+  brandName: string;
+  keywords: string[];
+  watchWords?: string[];
+  safeWords?: string[];
+  runContext: RedditRunContext;
+  maxSuggestedSearches: number;
+}): string {
+  const {
+    scanner,
+    brandName,
+    keywords,
+    watchWords,
+    safeWords,
+    runContext,
+    maxSuggestedSearches,
+  } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand; you can use slices or combinations of these in your suggested queries as you see appropriate): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with; you can use these as negative context when deciding whether a follow-up Reddit query is worthwhile): ${safeWords.join(', ')}`
+    : null;
+
+  return `Brand being protected: "${brandName}"
+
+Brand keywords (keywords that the brand owner wants to monitor and protect; you can use slices or combinations of these in your suggested queries as you see appropriate): ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+
+${watchWordsLine ? `${watchWordsLine}\n\n` : ''}${safeWordsLine ? `${safeWordsLine}\n\n` : ''}Original Reddit search query:
+${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.map((query) => `- ${query}`).join('\n') : '- none'}
+
+Surface being explored:
+- ${scanner.displayName}
+
+Observed subreddits from the Reddit results:
+${runContext.observedSubreddits.length > 0 ? runContext.observedSubreddits.map((subreddit) => `- ${subreddit}`).join('\n') : '- none'}
+
+Observed authors from the Reddit results:
+${runContext.observedAuthors.length > 0 ? runContext.observedAuthors.map((author) => `- ${author}`).join('\n') : '- none'}
+
+Sample Reddit post titles from the results:
+${runContext.sampleTitles.length > 0 ? runContext.sampleTitles.map((title) => `- ${title}`).join('\n') : '- none'}
+
+Maximum number of follow-up Reddit searches you may suggest:
 - ${maxSuggestedSearches}`;
 }
 

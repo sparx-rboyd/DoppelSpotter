@@ -39,6 +39,12 @@ export interface DiscordScannerConfig extends BaseScannerConfig {
   kind: 'discord';
 }
 
+export interface RedditScannerConfig extends BaseScannerConfig {
+  id: 'reddit-posts';
+  source: 'reddit';
+  kind: 'reddit';
+}
+
 export interface DomainRegistrationsScannerConfig extends BaseScannerConfig {
   id: 'domain-registrations';
   source: 'domains';
@@ -59,12 +65,14 @@ export interface XScannerConfig extends BaseScannerConfig {
 
 export type ScannerConfig =
   | GoogleScannerConfig
+  | RedditScannerConfig
   | DomainRegistrationsScannerConfig
   | DiscordScannerConfig
   | GitHubScannerConfig
   | XScannerConfig;
 
 export const GOOGLE_SEARCH_ACTOR_ID = 'apify/google-search-scraper';
+export const REDDIT_POST_SCRAPER_ACTOR_ID = 'fatihtahta/reddit-scraper-search-fast';
 export const DOMAIN_REGISTRATIONS_ACTOR_ID = 'doppelspotter/recent-domain-registrations';
 export const DISCORD_SERVER_SCRAPER_ACTOR_ID = 'louisdeconinck/discord-server-scraper';
 export const GITHUB_REPO_SEARCH_ACTOR_ID = 'ryanclinton/github-repo-search';
@@ -116,6 +124,15 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     displayName: 'Reddit',
     shortLabel: 'Reddit',
     siteHost: 'reddit.com',
+    supportsDeepSearch: true,
+  },
+  'reddit-posts': {
+    id: 'reddit-posts',
+    source: 'reddit',
+    actorId: REDDIT_POST_SCRAPER_ACTOR_ID,
+    kind: 'reddit',
+    displayName: 'Reddit',
+    shortLabel: 'Reddit',
     supportsDeepSearch: true,
   },
   'google-tiktok': {
@@ -229,7 +246,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
 
 const SCANNER_ID_BY_SOURCE: Record<ScanFindingSource, ScannerId> = {
   google: 'google-web',
-  reddit: 'google-reddit',
+  reddit: 'reddit-posts',
   tiktok: 'google-tiktok',
   youtube: 'google-youtube',
   facebook: 'google-facebook',

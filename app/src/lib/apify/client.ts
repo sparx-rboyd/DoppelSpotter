@@ -1,8 +1,11 @@
 import { ApifyClient, ApifyApiError } from 'apify-client';
 import type { BrandProfile, EffectiveScanSettings } from '@/lib/types';
 import {
+  getDeepSearchRedditMaxPosts,
   getInitialDomainRegistrationLimit,
   getInitialDiscordMaxTotalChargeUsd,
+  getInitialRedditMaxTotalChargeUsd,
+  getInitialRedditTotalPosts,
   getDeepSearchGooglePageCount,
   getInitialGitHubMaxResults,
   getInitialGooglePageCount,
@@ -49,6 +52,7 @@ type PreparedActorInput = {
 type ActorRunBrandContext = Pick<BrandProfile, 'name' | 'keywords'>;
 
 const GITHUB_MIN_RESULTS_PER_KEYWORD = 10;
+const REDDIT_MIN_POSTS_PER_QUERY = 10;
 
 /** Memory cap for Google Search actor runs (MB). Keeps combined account RAM well within plan limits. */
 const GOOGLE_ACTOR_MEMORY_MB = 512;
@@ -127,6 +131,23 @@ function buildActorInputs(
     const query = joinSearchTermsForDisplay(searchTerms);
     return [{
       input: { keywords: searchTerms },
+      query,
+      displayQuery: query,
+    }];
+  }
+
+  if (actor.kind === 'reddit') {
+    const query = joinSearchTermsForDisplay(searchTerms);
+    return [{
+      input: {
+        queries: searchTerms,
+        sort: 'relevance',
+        timeframe: getRedditTimeframeForLookbackDate(settings.lookbackDate),
+        maxPosts: getInitialRedditMaxPostsPerQuery(settings.searchResultPages, searchTerms.length),
+        scrapeComments: false,
+        includeNsfw: false,
+        strictTokenFilter: true,
+      },
       query,
       displayQuery: query,
     }];
@@ -283,6 +304,18 @@ export async function startDeepSearchRun(
     };
     displayQuery = sanitizeGoogleQueryForDisplay(executableQuery);
     startOptions.memory = GOOGLE_ACTOR_MEMORY_MB;
+  } else if (actor.kind === 'reddit') {
+    executableQuery = trimmedQuery;
+    runInput = {
+      queries: [trimmedQuery],
+      sort: 'relevance',
+      timeframe: getRedditTimeframeForLookbackDate(lookbackDate),
+      maxPosts: getDeepSearchRedditMaxPosts(),
+      scrapeComments: false,
+      includeNsfw: false,
+      strictTokenFilter: true,
+    };
+    displayQuery = trimmedQuery;
   } else {
     throw new Error(`Deep search is not implemented for ${actor.displayName}`);
   }
@@ -337,8 +370,10 @@ export async function runActor(
   const { input } = actorInputs[0];
 
   const runOptions: Record<string, unknown> = { input };
-  if (actor.kind === 'discord') {
-    runOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(settings.searchResultPages);
+  if (actor.kind === 'discord' || actor.kind === 'reddit') {
+    runOptions.maxTotalChargeUsd = actor.kind === 'discord'
+      ? getInitialDiscordMaxTotalChargeUsd(settings.searchResultPages)
+      : getInitialRedditMaxTotalChargeUsd(settings.searchResultPages);
   }
 
   if (webhookUrl) {
@@ -383,6 +418,29 @@ function joinSearchTermsForDisplay(values: string[]): string {
   return values.join(' | ');
 }
 
+function getInitialRedditMaxPostsPerQuery(searchResultPages: unknown, queryCount: number): number {
+  const totalPosts = getInitialRedditTotalPosts(searchResultPages);
+  return Math.max(REDDIT_MIN_POSTS_PER_QUERY, Math.ceil(totalPosts / Math.max(1, queryCount)));
+}
+
+function getRedditTimeframeForLookbackDate(lookbackDate?: string): 'hour' | 'day' | 'week' | 'month' | 'year' | 'all' {
+  if (!lookbackDate) {
+    return 'all';
+  }
+
+  const targetMs = Date.parse(`${lookbackDate}T00:00:00.000Z`);
+  if (!Number.isFinite(targetMs)) {
+    return 'all';
+  }
+
+  const ageDays = Math.max(0, (Date.now() - targetMs) / 86_400_000);
+  if (ageDays <= 1) return 'day';
+  if (ageDays <= 7) return 'week';
+  if (ageDays <= 31) return 'month';
+  if (ageDays <= 366) return 'year';
+  return 'all';
+}
+
 function buildActorStartOptions(
   actor: ActorConfig,
   settings: EffectiveScanSettings,
@@ -398,8 +456,10 @@ function buildActorStartOptions(
     ],
   };
 
-  if (actor.kind === 'discord') {
-    startOptions.maxTotalChargeUsd = getInitialDiscordMaxTotalChargeUsd(settings.searchResultPages);
+  if (actor.kind === 'discord' || actor.kind === 'reddit') {
+    startOptions.maxTotalChargeUsd = actor.kind === 'discord'
+      ? getInitialDiscordMaxTotalChargeUsd(settings.searchResultPages)
+      : getInitialRedditMaxTotalChargeUsd(settings.searchResultPages);
   }
 
   if (actor.kind === 'google') {

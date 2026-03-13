@@ -83,6 +83,23 @@ export function getInitialDiscordMaxTotalChargeUsd(searchResultPages?: unknown):
   return Math.round(value * 100) / 100;
 }
 
+export function getInitialRedditTotalPosts(searchResultPages?: unknown): number {
+  return normalizeSearchResultPages(searchResultPages) * 60;
+}
+
+export function getInitialRedditMaxTotalChargeUsd(searchResultPages?: unknown): number {
+  const depth = normalizeSearchResultPages(searchResultPages);
+  const minUsd = 0.1;
+  const maxUsd = 0.5;
+  const ratio = (depth - MIN_SEARCH_RESULT_PAGES) / Math.max(1, MAX_SEARCH_RESULT_PAGES - MIN_SEARCH_RESULT_PAGES);
+  const value = minUsd + ((maxUsd - minUsd) * ratio);
+  return Math.round(value * 100) / 100;
+}
+
+export function getDeepSearchRedditMaxPosts(): number {
+  return 20;
+}
+
 export function getInitialGitHubMaxResults(searchResultPages?: unknown): number {
   return normalizeSearchResultPages(searchResultPages) * 50;
 }
