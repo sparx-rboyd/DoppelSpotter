@@ -49,7 +49,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │       ├── settings/             # Authenticated account settings page (password + account deletion)
 │       └── lib/
 │           ├── apify/
-│           │   ├── actors.ts     # Logical scanner registry (Google + Reddit + Discord + GitHub + X) + Apify actor lookup helpers
+│           │   ├── actors.ts     # Logical scanner registry (Google + Reddit + TikTok + Discord + GitHub + X) + Apify actor lookup helpers
 │           │   └── client.ts     # Apify client: source-specific actor input builders, run start helpers, dataset fetch
 │           ├── account-deletion.ts # Account-wide cleanup helper: cancel active runs, delete owned data
 │           ├── dashboard.ts      # Dashboard metrics helpers: terminal-scan totals + source/theme rollups from stored scan summaries
@@ -61,9 +61,9 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │           ├── scan-schedules.ts # Schedule validation, timezone-aware recurrence, next-run helpers
 │           └── analysis/
 │               ├── google-scanner-policy.ts # Small prompt-policy helpers for Google specialist scans
-│               ├── prompts.ts    # Google + Reddit + Discord + GitHub + X classification, deep-search, and scan-summary prompts
+│               ├── prompts.ts    # Google + Reddit + TikTok + Discord + GitHub + X classification, deep-search, and scan-summary prompts
 │               ├── openrouter.ts # AI analysis client: chatCompletion()
-│               └── types.ts      # Google + Reddit + Discord + GitHub + X analysis output interfaces + parsers
+│               └── types.ts      # Google + Reddit + TikTok + Discord + GitHub + X analysis output interfaces + parsers
 └── docs/
     ├── GCP_SETUP.md
     └── PIPELINE_SETUP.md
@@ -73,11 +73,11 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 
 ## Actor Registry
 
-The scan pipeline now has thirteen logical scanner variants backed by six physical Apify actors:
+The scan pipeline now has thirteen active logical scanner variants backed by seven physical Apify actors:
 
 - `google-web` → normal web search
 - `reddit-posts` → public Reddit post discovery via the dedicated Reddit search actor
-- `google-tiktok` → Google Search constrained to `site:tiktok.com`
+- `tiktok-posts` → public TikTok video discovery via the dedicated TikTok search actor
 - `google-youtube` → Google Search constrained to `site:youtube.com`
 - `google-facebook` → Google Search constrained to `site:facebook.com`
 - `google-instagram` → Google Search constrained to `site:instagram.com`
@@ -89,9 +89,10 @@ The scan pipeline now has thirteen logical scanner variants backed by six physic
 - `github-repos` → public GitHub repository discovery via the Apify GitHub repo-search actor
 - `x-search` → public X post discovery via the Apify tweet-search actor
 
-The eight Google logical scanners all reuse the same physical Apify actor
+The seven active Google logical scanners all reuse the same physical Apify actor
 `apify/google-search-scraper`. `reddit-posts` uses
-`fatihtahta/reddit-scraper-search-fast`. `domain-registrations` uses
+`fatihtahta/reddit-scraper-search-fast`, `tiktok-posts` uses
+`apidojo/tiktok-scraper`, and `domain-registrations` uses
 `doppelspotter/recent-domain-registrations`, `discord-servers` uses
 `louisdeconinck/discord-server-scraper`, `github-repos` uses
 `ryanclinton/github-repo-search`, and `x-search` uses `apidojo/tweet-scraper`.
@@ -117,6 +118,17 @@ post, derives the canonical Reddit post URL as the user-visible URL, uses Reddit
 canonical identity for per-scan upserts and historical repeat suppression. Reddit now also
 supports AI-requested deep-search follow-up runs: each follow-up query starts a new Reddit actor
 run capped at `maxPosts = 20`, still ignores comments, and never recurses beyond depth 1.
+
+`tiktok-posts` is a video-level TikTok source. It no longer uses Google SERPs. Instead it queries
+the dedicated TikTok search actor with one actor run per brand search term, mapping the brand-page
+`Search depth` setting (`1..5`) to a total post budget of `100..500` distributed across keyword
+runs (`maxItems`, minimum 10 posts per query). The scan's exact `lookbackDate` is approximated to
+the actor's `dateRange` bucket and then applied again as an exact created-at filter inside the
+webhook before analysis. Stores one finding per TikTok video, derives the canonical TikTok post
+URL as the user-visible URL, uses TikTok video `id` as the canonical identity for per-scan
+upserts and historical repeat suppression, and supports AI-requested deep-search follow-up runs:
+each follow-up query starts a new TikTok actor run capped at `maxItems = 50` and never recurses
+beyond depth 1.
 
 `discord-servers` is a non-Google source. It does not use `site:` operators or SERP
 pages. Instead it queries Discord's public server-discovery index through the Apify actor,
@@ -153,10 +165,10 @@ and historical repeat suppression, and does **not** support deep-search follow-u
 ```
 Brand add/edit pages
  └─ persist `brands.sendScanSummaryEmails` to opt the brand into post-scan summary emails
- └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Reddit maps it to a total post budget (`60..300`, distributed across query terms with a minimum 10 posts per query) plus an Apify spend cap (`$0.10..$0.50` per run), Domain registrations map it to requested domain volume (`100..500`), Discord maps it to an Apify spend cap (`$0.20..$0.60` per run), GitHub maps it to a per-keyword result budget from a `50..250` total (minimum 10 per keyword), and X maps it to requested tweet volume (`50..250`)
- └─ persist `brands.lookbackPeriod` as the user-facing `Lookback period` setting (`1year` | `1month` | `1week` | `since_last_scan`, default `1year`); at scan-start time this is resolved to a concrete `YYYY-MM-DD` date (with a 1-day buffer) and snapshotted as `scans.effectiveSettings.lookbackDate`; Google-backed scans append `after:YYYY-MM-DD` to the search query, Reddit maps the date to the closest actor `timeframe` bucket and the webhook then exact-filters posts by `created_utc >= lookbackDate`, Domain registrations use it as the `date` filter, GitHub appends `created:>YYYY-MM-DD pushed:>YYYY-MM-DD` qualifiers, X passes it as `tweetDateSince`; Discord is unaffected; the `since_last_scan` option resolves to the brand's last completed scan date, falling back to 1 year when no prior scan exists
- └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches on supported Google-backed scan types
- └─ persist `brands.maxAiDeepSearches` as the user-facing `Google deep search breadth` setting; it caps AI-requested follow-up searches from 1-5 on supported Google-backed scan types
+ └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Reddit maps it to a total post budget (`60..300`, distributed across query terms with a minimum 10 posts per query) plus an Apify spend cap (`$0.10..$0.50` per run), TikTok maps it to a total video budget (`100..500`, distributed across query terms with a minimum 10 posts per query), Domain registrations map it to requested domain volume (`100..500`), Discord maps it to an Apify spend cap (`$0.20..$0.60` per run), GitHub maps it to a per-keyword result budget from a `50..250` total (minimum 10 per keyword), and X maps it to requested tweet volume (`50..250`)
+ └─ persist `brands.lookbackPeriod` as the user-facing `Lookback period` setting (`1year` | `1month` | `1week` | `since_last_scan`, default `1year`); at scan-start time this is resolved to a concrete `YYYY-MM-DD` date (with a 1-day buffer) and snapshotted as `scans.effectiveSettings.lookbackDate`; Google-backed scans append `after:YYYY-MM-DD` to the search query, Reddit maps the date to the closest actor `timeframe` bucket and the webhook then exact-filters posts by `created_utc >= lookbackDate`, TikTok maps the date to the closest actor `dateRange` bucket and the webhook then exact-filters videos by created-at time, Domain registrations use it as the `date` filter, GitHub appends `created:>YYYY-MM-DD pushed:>YYYY-MM-DD` qualifiers, X passes it as `tweetDateSince`; Discord is unaffected; the `since_last_scan` option resolves to the brand's last completed scan date, falling back to 1 year when no prior scan exists
+ └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches on supported deep-search-capable scan types
+ └─ persist `brands.maxAiDeepSearches` as the user-facing deep-search breadth setting; it caps AI-requested follow-up searches from 1-5 on supported deep-search-capable scan types
  └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|telegram|apple_app_store|google_play|domains|discord|github|x` so each scan surface can be enabled or disabled per brand
  └─ persist optional `brands.analysisSeverityDefinitions.high|medium|low` overrides so each brand can customise the severity definitions injected into finding-classification prompts
  └─ persist `brands.scanSchedule` with `enabled`, `frequency`, `timeZone`, `startAt`, and `nextRunAt`
@@ -180,9 +192,9 @@ POST /api/scan
  └─ snapshots the resolved per-run `scans.effectiveSettings` onto the scan so later webhook processing stays deterministic even if brand settings change mid-scan
  └─ also snapshots the resolved `scans.analysisSeverityDefinitions` so classification thresholds stay deterministic if the brand settings are edited mid-scan
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
- └─ resolves the scan's enabled logical scanners (`google-web`, `reddit-posts`, `google-tiktok`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `google-apple-app-store`, `google-play`, `domain-registrations`, `discord-servers`, `github-repos`, `x-search`) from `scans.effectiveSettings.scanSources`
- └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Reddit maps the same setting to a `60..300` total post budget distributed across `queries[]` via `maxPosts` (minimum 10 per query) plus `maxTotalChargeUsd = $0.10..$0.50` per run; Domain registrations map it to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to a per-keyword `maxResults` from a `50..250` total budget (minimum 10 per keyword); X maps it to `maxItems = 50..250`
- └─ applies `scans.effectiveSettings.lookbackDate` (pre-resolved YYYY-MM-DD with 1-day buffer) to time-constrain actor queries: Google appends `after:YYYY-MM-DD`, Reddit maps it to the closest actor `timeframe` bucket and then exact-filters posts in the webhook by `created_utc`, Domain registrations pass it as the `date` + `gte` filter, GitHub appends `created:>` + `pushed:>` qualifiers, X passes `tweetDateSince`; Discord is unaffected
+ └─ resolves the scan's enabled logical scanners (`google-web`, `reddit-posts`, `tiktok-posts`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `google-apple-app-store`, `google-play`, `domain-registrations`, `discord-servers`, `github-repos`, `x-search`) from `scans.effectiveSettings.scanSources`
+ └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Reddit maps the same setting to a `60..300` total post budget distributed across `queries[]` via `maxPosts` (minimum 10 per query) plus `maxTotalChargeUsd = $0.10..$0.50` per run; TikTok maps it to a `100..500` total video budget distributed across keyword runs via `maxItems` (minimum 10 per query); Domain registrations map it to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to a per-keyword `maxResults` from a `50..250` total budget (minimum 10 per keyword); X maps it to `maxItems = 50..250`
+ └─ applies `scans.effectiveSettings.lookbackDate` (pre-resolved YYYY-MM-DD with 1-day buffer) to time-constrain actor queries: Google appends `after:YYYY-MM-DD`, Reddit maps it to the closest actor `timeframe` bucket and then exact-filters posts in the webhook by `created_utc`, TikTok maps it to the closest actor `dateRange` bucket and then exact-filters videos in the webhook by created-at time, Domain registrations pass it as the `date` + `gte` filter, GitHub appends `created:>` + `pushed:>` qualifiers, X passes `tweetDateSince`; Discord is unaffected
  └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
  └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
  └─ once the scan-level preference hints are ready (or deliberately fail open), replays any deferred succeeded webhooks and then flips the scan to `running`
@@ -252,7 +264,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ if the scan's preference hints are still `pending`, the run is parked in `actorRuns.*.status = 'waiting_for_preference_hints'` and no analysis starts yet
  └─ once the scan-level preference hints are `ready` or `failed`, deferred succeeded callbacks are replayed through the same webhook route so they resume normal processing
  └─ duplicate callbacks for a run already in `fetching_dataset` / `analysing` are acknowledged and skipped before expensive work starts
- └─ fetches source-specific capped items from Apify dataset (source-level actor limits still apply before post-normalization chunked analysis: Google via requested SERP pages, Reddit via `maxPosts` + `maxTotalChargeUsd`, Discord via `maxTotalChargeUsd` spend cap, and GitHub / X via the requested `50..250` result volume)
+ └─ fetches source-specific capped items from Apify dataset (source-level actor limits still apply before post-normalization chunked analysis: Google via requested SERP pages, Reddit via `maxPosts` + `maxTotalChargeUsd`, TikTok via `maxItems`, Discord via `maxTotalChargeUsd` spend cap, and GitHub / X via the requested `50..250` result volume)
  └─ Google Search mode: normalize SERP pages into compact organic-result candidates
       └─ excludes ads from AI analysis; keeps `relatedQueries` + `peopleAlsoAsk` as run-level context
       └─ stores scanner-aware sighting/debug metadata so merged findings can retain which logical scan surfaces saw a URL
@@ -269,6 +281,14 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
       └─ stores one finding per Reddit post with canonical Reddit URL, matched query list, and post-level metadata in normalized debug payloads
       └─ depth 0 runs may ask the LLM for follow-up Reddit queries; each follow-up run is capped at `maxPosts = 20`, still ignores comments, and runs at depth 1 only
+ └─ TikTok mode: normalize dedicated TikTok actor records into compact video candidates
+      └─ accepts both the actor's richer structured video shape and raw `aweme_id` / `author` / `statistics` variants, then canonicalises to TikTok post URLs
+      └─ exact-filters candidates by created-at time after the actor's coarse `dateRange` filter
+      └─ dedupes repeated TikTok video ids within the run before analysis
+      └─ skips TikTok video ids that already appeared in previous scans for the same brand before any LLM analysis
+      └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
+      └─ stores one finding per TikTok video with caption, author, hashtag, music, stats, matched query list, and run-level context in normalized debug payloads
+      └─ depth 0 runs may ask the LLM for follow-up TikTok queries; each follow-up run is capped at `maxItems = 50` and runs at depth 1 only
  └─ Discord server mode: normalize joinable public-server records into compact server candidates
       └─ drops items without `vanity_url_code` because they do not yield a user-actionable invite URL
       └─ derives `https://discord.gg/<vanity_url_code>` as the stored/displayed URL
@@ -292,7 +312,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ X findings denormalize `xAuthorId`, `xAuthorHandle`, `xAuthorUrl`, and `xMatchBasis` for lightweight list/search/UI use
       └─ does not run deep-search suggestion generation or follow-up runs
  └─ final deep-search selection defaults to a dedicated LLM pass that sees the full run-level intent signals and synthesizes follow-up queries directly; prompts inject the brand's allowed deep-search count and scanner-specific focus, and steer the model away from narrow named-site/platform/resource queries unless they are materially distinct abuse vectors
-└─ AI-requested deep-search eligibility and breadth are read from `scans.effectiveSettings` when present, falling back to brand defaults only for older scans; Google deep-search runs reuse the brand's page depth, while Reddit deep-search runs always cap each follow-up query at `maxPosts = 20`
+└─ AI-requested deep-search eligibility and breadth are read from `scans.effectiveSettings` when present, falling back to brand defaults only for older scans; Google deep-search runs reuse the brand's page depth, Reddit deep-search runs always cap each follow-up query at `maxPosts = 20`, and TikTok deep-search runs always cap each follow-up query at `maxItems = 50`
 └─ before each finding-level classification pass, the webhook loads the brand's existing finding `theme` labels so the LLM can preferentially reuse them
 └─ for every chunked classification source, a failed or incomplete LLM chunk is retried once; if the retry also fails, that chunk's candidates are discarded entirely rather than stored as manual-review fallbacks
  └─ each classification prompt also receives the scan's resolved high/medium/low severity definitions, falling back to the current brand defaults only for older scans that predate the snapshot
@@ -306,6 +326,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ each deep-search run inherits the parent scanner policy, is registered on the scan document (actorRunIds, actorRuns), and preserves raw vs display query text separately
       └─ each deep-search Google run uses the same `brands.searchResultPages` setting as the initial search
       └─ each deep-search Reddit run uses the same `lookbackDate` as the initial Reddit scan but hard-caps the actor input to `maxPosts = 20`
+      └─ each deep-search TikTok run uses the same `lookbackDate` as the initial TikTok scan but hard-caps the actor input to `maxItems = 50`
       └─ `actorRuns.*.analysedCount` increments as chunks finish so the UI can show meaningful `X / N` AI-analysis progress
       └─ `actorRuns.*.skippedDuplicateCount` tracks how many previous-scan duplicate URLs were filtered out for progress UI + scan summaries
       └─ unexpected processing errors after partial finding writes reconcile scan counts from persisted findings, mark the affected run terminal, and let the scan complete normally when useful results already exist
@@ -327,12 +348,13 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **File:** `app/src/lib/analysis/`
 - **When:** After each Apify actor run completes, inside the webhook handler
 - **Model:** `deepseek/deepseek-v3.2` via OpenRouter (overridable via `OPENROUTER_MODEL`)
-- **Prompts:** `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `REDDIT_CLASSIFICATION_SYSTEM_PROMPT` + `buildRedditChunkAnalysisPrompt()` for chunked Reddit post classification; `DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT` + `buildDomainRegistrationChunkAnalysisPrompt()` for chunked recent-domain-registration classification; `DISCORD_CLASSIFICATION_SYSTEM_PROMPT` + `buildDiscordChunkAnalysisPrompt()` for chunked Discord server classification; `GITHUB_CLASSIFICATION_SYSTEM_PROMPT` + `buildGitHubChunkAnalysisPrompt()` for chunked GitHub repository classification; `X_CLASSIFICATION_SYSTEM_PROMPT` + `buildXChunkAnalysisPrompt()` for chunked X post classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for Google deep-search selection; `buildRedditFinalSelectionSystemPrompt()` + `buildRedditFinalSelectionPrompt()` for Reddit deep-search selection; `SCAN_SUMMARY_SYSTEM_PROMPT` + `buildScanSummaryPrompt()` for the final scan summary
+- **Prompts:** `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `REDDIT_CLASSIFICATION_SYSTEM_PROMPT` + `buildRedditChunkAnalysisPrompt()` for chunked Reddit post classification; `TIKTOK_CLASSIFICATION_SYSTEM_PROMPT` + `buildTikTokChunkAnalysisPrompt()` for chunked TikTok video classification; `DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT` + `buildDomainRegistrationChunkAnalysisPrompt()` for chunked recent-domain-registration classification; `DISCORD_CLASSIFICATION_SYSTEM_PROMPT` + `buildDiscordChunkAnalysisPrompt()` for chunked Discord server classification; `GITHUB_CLASSIFICATION_SYSTEM_PROMPT` + `buildGitHubChunkAnalysisPrompt()` for chunked GitHub repository classification; `X_CLASSIFICATION_SYSTEM_PROMPT` + `buildXChunkAnalysisPrompt()` for chunked X post classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for Google deep-search selection; `buildRedditFinalSelectionSystemPrompt()` + `buildRedditFinalSelectionPrompt()` for Reddit deep-search selection; `buildTikTokFinalSelectionSystemPrompt()` + `buildTikTokFinalSelectionPrompt()` for TikTok deep-search selection; `SCAN_SUMMARY_SYSTEM_PROMPT` + `buildScanSummaryPrompt()` for the final scan summary
 - **Scan-level summary:** after all actor runs finish, the webhook runs one final LLM pass over the scan's actionable findings and stores a concise `aiSummary` on the scan document for the brand page
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
 - **Historical URL suppression:** Google runs load previously seen normalized finding URLs for the brand and filter them out before any LLM classification begins
 - **Historical Reddit suppression:** Reddit runs load previously seen Reddit post ids for the brand and filter them out before any LLM classification begins, including legacy Google-Reddit findings where the post id can still be recovered from stored URLs/debug data
+- **Historical TikTok suppression:** TikTok runs load previously seen TikTok video ids for the brand and filter them out before any LLM classification begins
 - **Historical Discord suppression:** Discord runs load previously seen Discord server ids for the brand and filter them out before any LLM classification begins
 - **Historical GitHub suppression:** GitHub runs load previously seen repository `fullName` values for the brand and filter them out before any LLM classification begins
 - **Historical X suppression:** X runs load previously seen tweet ids for the brand and filter them out before any LLM classification begins; after classification, handle-only hits are additionally suppressed for accounts that already have a previous real X finding for the brand
@@ -361,6 +383,16 @@ webhook keeps only `kind: "post"` items, exact-filters them by the resolved `loo
 dedupes by Reddit post `id`, and classifies those candidates in bounded chunks. Reddit findings
 store a compact normalized debug payload (`kind: 'reddit-normalized'`) with post metadata,
 matched query terms, and run-level context rather than raw actor responses.
+
+### TikTok Analysis Shape
+
+TikTok video results arrive from the dedicated TikTok search actor as public video records. The
+webhook normalizes both the actor's richer `title` / `channel` / `song` shape and its raw
+`aweme_id` / `author` / `statistics` variant into compact video candidates, exact-filters them by
+the resolved `lookbackDate`, dedupes by TikTok video `id`, and classifies those candidates in
+bounded chunks. TikTok findings store a compact normalized debug payload
+(`kind: 'tiktok-normalized'`) with caption, author, hashtag, music, stats, matched query terms,
+and run-level context rather than raw actor responses.
 
 See `REVIEW.md` for full prompt text and AI analysis pipeline details.
 
@@ -408,6 +440,12 @@ run's observed subreddits, authors, and sample post titles as context. Each sugg
 query starts a separate follow-up Reddit actor run capped at `maxPosts = 20`, still with
 `scrapeComments = false`, and those follow-up runs stop at depth 1.
 
+When `tiktok-posts` runs at depth 0, the webhook can also ask a dedicated TikTok deep-search
+chooser for up to the brand's configured `maxAiDeepSearches` follow-up TikTok queries using the
+run's observed author handles, hashtags, and sample captions as context. Each suggested TikTok
+query starts a separate follow-up TikTok actor run capped at `maxItems = 50`, and those
+follow-up runs stop at depth 1.
+
 `discord-servers` does not support deep search. Even when the brand-level deep-search toggle is
 enabled, Discord runs stay initial-scan-only and never reserve or execute follow-up searches.
 
@@ -421,12 +459,12 @@ X runs stay initial-scan-only and never reserve or execute follow-up searches.
 `github-repos` also does not support deep search. Even when the brand-level deep-search toggle is
 enabled, GitHub runs stay initial-scan-only and never reserve or execute follow-up searches.
 
-Deep search is only enabled for supported Google-backed scan types when the brand's
-`allowAiDeepSearches` setting is true.
+Deep search is only enabled for supported Google-backed, Reddit, and TikTok scan types when the
+brand's `allowAiDeepSearches` setting is true.
 
-The webhook handler calls `startDeepSearchRun()` for each supported Google-backed suggested query,
-registers the new Apify run IDs on the scan document, and processes results via the same webhook
-pipeline at depth 1. Deep-search runs never produce further follow-ups (hard loop guard:
+The webhook handler calls `startDeepSearchRun()` for each supported suggested query, registers the
+new Apify run IDs on the scan document, and processes results via the same webhook pipeline at
+depth 1. Deep-search runs never produce further follow-ups (hard loop guard:
 `searchDepth === 0` check before triggering). Suggested queries are reserved on the originating
 run before any new Apify runs are started, so duplicate webhook callbacks do not fan out
 duplicate deep-search runs.
@@ -434,7 +472,8 @@ duplicate deep-search runs.
 its transaction, so dynamically-added runs are counted correctly for scan completion. Deep-search
 runs are skipped entirely when `allowAiDeepSearches` is false for the brand. When enabled, both
 the initial Google scan and each deep-search Google run use the brand's `searchResultPages`
-setting, which defaults to 3 and is constrained to 1-5.
+setting, while TikTok initial runs map the same depth to a `100..500` total video budget and each
+deep-search TikTok run stays fixed at `maxItems = 50`.
 
 `ActorRunInfo` now carries `scannerId`, `searchDepth`, raw `searchQuery`, and operator-free
 `displayQuery`. The brand page progress indicator groups active work by source (`Web search`,

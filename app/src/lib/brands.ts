@@ -87,6 +87,10 @@ export function getInitialRedditTotalPosts(searchResultPages?: unknown): number 
   return normalizeSearchResultPages(searchResultPages) * 60;
 }
 
+export function getInitialTikTokTotalPosts(searchResultPages?: unknown): number {
+  return normalizeSearchResultPages(searchResultPages) * 100;
+}
+
 export function getInitialRedditMaxTotalChargeUsd(searchResultPages?: unknown): number {
   const depth = normalizeSearchResultPages(searchResultPages);
   const minUsd = 0.1;
@@ -98,6 +102,10 @@ export function getInitialRedditMaxTotalChargeUsd(searchResultPages?: unknown): 
 
 export function getDeepSearchRedditMaxPosts(): number {
   return 20;
+}
+
+export function getDeepSearchTikTokMaxItems(): number {
+  return 50;
 }
 
 export function getInitialGitHubMaxResults(searchResultPages?: unknown): number {

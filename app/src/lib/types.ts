@@ -344,7 +344,7 @@ export type ScannerId =
   | 'google-web'
   | 'google-reddit'
   | 'reddit-posts'
-  | 'google-tiktok'
+  | 'tiktok-posts'
   | 'google-youtube'
   | 'google-facebook'
   | 'google-instagram'
@@ -360,7 +360,6 @@ export type GoogleScannerId = Extract<
   ScannerId,
   | 'google-web'
   | 'google-reddit'
-  | 'google-tiktok'
   | 'google-youtube'
   | 'google-facebook'
   | 'google-instagram'

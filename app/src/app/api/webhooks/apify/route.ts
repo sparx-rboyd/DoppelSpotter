@@ -13,8 +13,10 @@ import {
   GOOGLE_CLASSIFICATION_SYSTEM_PROMPT,
   REDDIT_CLASSIFICATION_SYSTEM_PROMPT,
   SCAN_SUMMARY_SYSTEM_PROMPT,
+  TIKTOK_CLASSIFICATION_SYSTEM_PROMPT,
   X_CLASSIFICATION_SYSTEM_PROMPT,
   buildRedditChunkAnalysisPrompt,
+  buildTikTokChunkAnalysisPrompt,
   buildDiscordChunkAnalysisPrompt,
   buildDomainRegistrationChunkAnalysisPrompt,
   buildGitHubChunkAnalysisPrompt,
@@ -23,12 +25,15 @@ import {
   buildGoogleChunkAnalysisPrompt,
   buildRedditFinalSelectionPrompt,
   buildRedditFinalSelectionSystemPrompt,
+  buildTikTokFinalSelectionPrompt,
+  buildTikTokFinalSelectionSystemPrompt,
   buildScanSummaryPrompt,
   buildXChunkAnalysisPrompt,
   formatLlmPromptForDebug,
 } from '@/lib/analysis/prompts';
 import {
   parseRedditChunkAnalysisOutput,
+  parseTikTokChunkAnalysisOutput,
   parseDiscordChunkAnalysisOutput,
   parseDomainRegistrationChunkAnalysisOutput,
   parseGitHubChunkAnalysisOutput,
@@ -57,6 +62,10 @@ import {
   type RedditPostCandidate,
   type RedditRunContext,
   type RedditStoredFindingRawData,
+  type TikTokChunkAnalysisItem,
+  type TikTokRunContext,
+  type TikTokStoredFindingRawData,
+  type TikTokVideoCandidate,
   type VerifiedRedditCommentSnapshot,
   type VerifiedRedditPostSnapshot,
   type XChunkAnalysisItem,
@@ -66,13 +75,16 @@ import {
 } from '@/lib/analysis/types';
 import type { BrandProfile, Finding, Scan, ActorRunInfo, GoogleScannerId, XFindingMatchBasis } from '@/lib/types';
 import {
+  getDeepSearchTikTokMaxItems,
   getEffectiveScanSettings,
+  getInitialTikTokTotalPosts,
 } from '@/lib/brands';
 import { rebuildAndPersistDashboardBreakdownsForScanIds } from '@/lib/dashboard-aggregates';
 import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
 import {
   GOOGLE_SEARCH_ACTOR_ID,
   REDDIT_POST_SCRAPER_ACTOR_ID,
+  TIKTOK_POST_SCRAPER_ACTOR_ID,
   buildGoogleScannerQuery,
   getScannerConfigById,
   getScannerConfigBySource,
@@ -80,6 +92,7 @@ import {
   type GoogleScannerConfig,
   type RedditScannerConfig,
   type ScannerConfig,
+  type TikTokScannerConfig,
 } from '@/lib/scan-sources';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
@@ -89,6 +102,8 @@ const GOOGLE_ANALYSIS_CHUNK_SIZE = 10;
 const GOOGLE_ANALYSIS_CONCURRENCY = 6;
 const REDDIT_ANALYSIS_CHUNK_SIZE = 10;
 const REDDIT_ANALYSIS_CONCURRENCY = 6;
+const TIKTOK_ANALYSIS_CHUNK_SIZE = 10;
+const TIKTOK_ANALYSIS_CONCURRENCY = 6;
 const REDDIT_VERIFICATION_CONCURRENCY = 4;
 const REDDIT_JSON_FETCH_TIMEOUT_MS = 8000;
 const MAX_REDDIT_POST_TITLE_LENGTH = 300;
@@ -107,6 +122,8 @@ const GOOGLE_FINDING_ID_PREFIX = 'google';
 const GOOGLE_RAW_DATA_VERSION = 3;
 const REDDIT_FINDING_ID_PREFIX = 'reddit';
 const REDDIT_RAW_DATA_VERSION = 1;
+const TIKTOK_FINDING_ID_PREFIX = 'tiktok';
+const TIKTOK_RAW_DATA_VERSION = 1;
 const DISCORD_FINDING_ID_PREFIX = 'discord';
 const DISCORD_RAW_DATA_VERSION = 1;
 const DOMAIN_REGISTRATION_FINDING_ID_PREFIX = 'domains';
@@ -390,6 +407,13 @@ async function handleSucceededRun({
       currentScanId: scan.id ?? scanDoc.id,
     })
     : undefined;
+  const previousTikTokVideoIds = scannerConfig.kind === 'tiktok'
+    ? await loadPreviousTikTokVideoIds({
+      brandId: scan.brandId,
+      userId: scan.userId,
+      currentScanId: scan.id ?? scanDoc.id,
+    })
+    : undefined;
   const previousDiscordServerIds = scannerConfig.kind === 'discord'
     ? await loadPreviousDiscordServerIds({
       brandId: scan.brandId,
@@ -495,6 +519,25 @@ async function handleSucceededRun({
         displayQuery,
         userPreferenceHints,
         previousPostIds: previousRedditPostIds,
+        existingTaxonomy,
+        scannerConfig,
+        effectiveSettings,
+      })
+    : scannerConfig.kind === 'tiktok'
+      ? await analyseAndWriteTikTokBatch({
+        scanDoc,
+        scan,
+        brand,
+        source,
+        actorId,
+        datasetId,
+        runId,
+        items,
+        searchDepth,
+        searchQuery,
+        displayQuery,
+        userPreferenceHints,
+        previousVideoIds: previousTikTokVideoIds,
         existingTaxonomy,
         scannerConfig,
         effectiveSettings,
@@ -701,6 +744,38 @@ async function loadPreviousRedditPostIds({
   }
 
   return postIds;
+}
+
+async function loadPreviousTikTokVideoIds({
+  brandId,
+  userId,
+  currentScanId,
+}: {
+  brandId: string;
+  userId: string;
+  currentScanId: string;
+}): Promise<Set<string>> {
+  const previousFindingsSnap = await db
+    .collection('findings')
+    .where('brandId', '==', brandId)
+    .where('userId', '==', userId)
+    .select('scanId', 'rawData')
+    .get();
+
+  const videoIds = new Set<string>();
+  for (const doc of previousFindingsSnap.docs) {
+    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown> };
+    if (data.scanId === currentScanId) {
+      continue;
+    }
+
+    const videoId = readTikTokStoredFindingRawData(data.rawData)?.video.id;
+    if (typeof videoId === 'string' && videoId.trim().length > 0) {
+      videoIds.add(videoId.trim());
+    }
+  }
+
+  return videoIds;
 }
 
 async function loadPreviousDiscordServerIds({
@@ -1164,6 +1239,158 @@ async function analyseAndWriteRedditBatch({
 
   for (const { candidate, outcome } of outcomes.values()) {
     const delta = await upsertRedditFinding({
+      scanDoc,
+      scan,
+      source,
+      actorId,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      candidate,
+      runContext: normalizedRun.runContext,
+      outcome,
+      scannerConfig,
+    });
+
+    findingCount += delta.findingCount;
+    counts.high += delta.counts.high;
+    counts.medium += delta.counts.medium;
+    counts.low += delta.counts.low;
+    counts.nonHit += delta.counts.nonHit;
+  }
+
+  return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
+}
+
+async function analyseAndWriteTikTokBatch({
+  scanDoc,
+  scan,
+  brand,
+  source,
+  scannerConfig,
+  actorId,
+  datasetId,
+  runId,
+  items,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  userPreferenceHints,
+  previousVideoIds,
+  existingTaxonomy,
+  effectiveSettings,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  brand: BrandProfile;
+  source: Finding['source'];
+  scannerConfig: TikTokScannerConfig;
+  actorId: string;
+  datasetId: string;
+  runId: string;
+  items: Record<string, unknown>[];
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  userPreferenceHints?: Scan['userPreferenceHints'];
+  previousVideoIds?: ReadonlySet<string>;
+  existingTaxonomy: { themes: string[] };
+  effectiveSettings: ReturnType<typeof getEffectiveScanSettings>;
+}): Promise<{
+  findingCount: number;
+  suggestedSearches?: string[];
+  counts: { high: number; medium: number; low: number; nonHit: number };
+  skippedDuplicateCount: number;
+}> {
+  let findingCount = 0;
+  let suggestedSearches: string[] | undefined;
+  const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const severityDefinitions = scan.analysisSeverityDefinitions
+    ?? resolveBrandAnalysisSeverityDefinitions(brand.analysisSeverityDefinitions);
+  const canRunDeepSearchSelection = searchDepth === 0 && effectiveSettings.allowAiDeepSearches;
+  const maxSuggestedSearches = effectiveSettings.maxAiDeepSearches;
+
+  const normalizedRun = normalizeTikTokRun({
+    searchQuery,
+    displayQuery,
+    lookbackDate: effectiveSettings.lookbackDate,
+    items,
+  });
+  const candidatesToAnalyse = normalizedRun.candidates.filter(
+    (candidate) => !previousVideoIds?.has(candidate.videoId),
+  );
+  const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
+
+  await scanDoc.ref.update({
+    [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
+    [`actorRuns.${runId}.analysedCount`]: 0,
+    [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
+  });
+
+  if (candidatesToAnalyse.length === 0) {
+    return { findingCount, counts, skippedDuplicateCount };
+  }
+
+  const outcomes = new Map<string, { candidate: TikTokVideoCandidate; outcome: TikTokFindingOutcome }>();
+  const chunks = chunkArray(candidatesToAnalyse, TIKTOK_ANALYSIS_CHUNK_SIZE);
+  const chunkResults = await mapWithConcurrency(
+    chunks,
+    TIKTOK_ANALYSIS_CONCURRENCY,
+    async (chunk, chunkIndex): Promise<TikTokChunkAnalysisResult | null> => {
+      const prompt = buildTikTokChunkAnalysisPrompt({
+        brandName: brand.name,
+        keywords: brand.keywords,
+        officialDomains: brand.officialDomains,
+        severityDefinitions,
+        watchWords: brand.watchWords,
+        safeWords: brand.safeWords,
+        userPreferenceHints,
+        existingThemes: existingTaxonomy.themes,
+        source,
+        candidates: chunk,
+        runContext: normalizedRun.runContext,
+      });
+      const llmAnalysisPrompt = formatLlmPromptForDebug(TIKTOK_CLASSIFICATION_SYSTEM_PROMPT, prompt);
+
+      try {
+        return await retryChunkAnalysisOnce({
+          sourceLabel: 'TikTok',
+          datasetId,
+          chunkIndex,
+          totalChunks: chunks.length,
+          analyse: () => analyseTikTokChunk({
+            candidates: chunk,
+            prompt,
+            llmAnalysisPrompt,
+          }),
+        });
+      } finally {
+        await scanDoc.ref.update({
+          [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
+        });
+      }
+    },
+  );
+
+  for (const chunkResult of chunkResults) {
+    if (!chunkResult) continue;
+    for (const [videoId, value] of chunkResult.outcomes.entries()) {
+      outcomes.set(videoId, value);
+    }
+  }
+
+  if (canRunDeepSearchSelection) {
+    suggestedSearches = await finalizeTikTokSuggestedSearches({
+      brand,
+      scannerConfig,
+      runContext: normalizedRun.runContext,
+      maxSuggestedSearches,
+    });
+  }
+
+  for (const { candidate, outcome } of outcomes.values()) {
+    const delta = await upsertTikTokFinding({
       scanDoc,
       scan,
       source,
@@ -1779,6 +2006,21 @@ type RedditChunkAnalysisResult = {
   outcomes: Map<string, { candidate: RedditPostCandidate; outcome: RedditFindingOutcome }>;
 };
 
+type TikTokFindingOutcome = {
+  severity: Finding['severity'];
+  title: string;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+  llmAnalysisPrompt?: string;
+  rawLlmResponse?: string;
+  classificationSource: 'llm' | 'fallback';
+};
+
+type TikTokChunkAnalysisResult = {
+  outcomes: Map<string, { candidate: TikTokVideoCandidate; outcome: TikTokFindingOutcome }>;
+};
+
 type DiscordFindingOutcome = {
   severity: Finding['severity'];
   title: string;
@@ -2376,6 +2618,106 @@ function isRedditPostWithinLookback(createdAt?: string, lookbackDate?: string): 
   return createdAtMs >= lookbackMs;
 }
 
+function normalizeTikTokRun({
+  searchQuery,
+  displayQuery,
+  lookbackDate,
+  items,
+}: {
+  searchQuery?: string;
+  displayQuery?: string;
+  lookbackDate?: string;
+  items: Record<string, unknown>[];
+}): { candidates: TikTokVideoCandidate[]; runContext: TikTokRunContext } {
+  const candidateMap = new Map<string, TikTokVideoCandidate>();
+  const sourceQueries = new Set<string>();
+  const observedAuthorHandles = new Set<string>();
+  const observedHashtags = new Set<string>();
+  const sampleCaptions = new Set<string>();
+  let nextResultId = 1;
+
+  for (const sourceQuery of readDelimitedQueries(displayQuery ?? searchQuery)) {
+    sourceQueries.add(sourceQuery);
+  }
+
+  for (const item of items) {
+    const videoId = readTikTokVideoId(item);
+    const url = readTikTokVideoUrl(item);
+    if (!videoId || !url) continue;
+
+    const createdAt = readTikTokCreatedAt(item);
+    if (!isTikTokVideoWithinLookback(createdAt, lookbackDate)) continue;
+
+    const caption = trimToLength(readTikTokCaption(item), 2000);
+    const region = readOptionalTrimmedString(item.region);
+    const author = readTikTokAuthor(item);
+    const hashtags = readTikTokHashtags(item);
+    const mentions = readTikTokMentions(item);
+    const music = readTikTokMusic(item);
+    const stats = readTikTokStats(item);
+    const matchedQuery = readTikTokMatchedQuery(item);
+
+    if (caption) sampleCaptions.add(caption);
+    if (author.uniqueId) observedAuthorHandles.add(author.uniqueId);
+    for (const hashtag of hashtags) observedHashtags.add(hashtag);
+    if (matchedQuery) sourceQueries.add(matchedQuery);
+
+    const existing = candidateMap.get(videoId);
+    if (existing) {
+      existing.matchedQueries = uniqueStrings([...existing.matchedQueries, ...(matchedQuery ? [matchedQuery] : [])]);
+      if (!existing.caption && caption) existing.caption = caption;
+      if (!existing.createdAt && createdAt) existing.createdAt = createdAt;
+      if (!existing.region && region) existing.region = region;
+      existing.author = mergeTikTokAuthors(existing.author, author);
+      existing.hashtags = uniqueStrings([...existing.hashtags, ...hashtags]);
+      existing.mentions = uniqueStrings([...existing.mentions, ...mentions]);
+      existing.music = mergeTikTokMusic(existing.music, music);
+      existing.stats = mergeTikTokStats(existing.stats, stats);
+      continue;
+    }
+
+    candidateMap.set(videoId, {
+      resultId: `tt${nextResultId++}`,
+      videoId,
+      url,
+      ...(caption ? { caption } : {}),
+      ...(createdAt ? { createdAt } : {}),
+      ...(region ? { region } : {}),
+      author,
+      hashtags,
+      mentions,
+      ...(music ? { music } : {}),
+      stats,
+      matchedQueries: matchedQuery ? [matchedQuery] : [],
+    });
+  }
+
+  return {
+    candidates: Array.from(candidateMap.values()),
+    runContext: {
+      sourceQueries: uniqueStrings(Array.from(sourceQueries)),
+      observedAuthorHandles: uniqueStrings(Array.from(observedAuthorHandles)),
+      observedHashtags: uniqueStrings(Array.from(observedHashtags)),
+      sampleCaptions: uniqueStrings(Array.from(sampleCaptions)).slice(0, 12),
+      ...(lookbackDate ? { lookbackDate } : {}),
+    },
+  };
+}
+
+function isTikTokVideoWithinLookback(createdAt?: string, lookbackDate?: string): boolean {
+  if (!createdAt || !lookbackDate) {
+    return true;
+  }
+
+  const createdAtMs = Date.parse(createdAt);
+  const lookbackMs = Date.parse(`${lookbackDate}T00:00:00.000Z`);
+  if (!Number.isFinite(createdAtMs) || !Number.isFinite(lookbackMs)) {
+    return true;
+  }
+
+  return createdAtMs >= lookbackMs;
+}
+
 function normalizeDiscordServerRun({
   searchQuery,
   displayQuery,
@@ -2790,6 +3132,40 @@ async function analyseRedditChunk({
   return { outcomes };
 }
 
+async function analyseTikTokChunk({
+  candidates,
+  prompt,
+  llmAnalysisPrompt,
+}: {
+  candidates: TikTokVideoCandidate[];
+  prompt: string;
+  llmAnalysisPrompt: string;
+}): Promise<TikTokChunkAnalysisResult> {
+  const raw = await chatCompletion([
+    { role: 'system', content: TIKTOK_CLASSIFICATION_SYSTEM_PROMPT },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseTikTokChunkAnalysisOutput(raw, new Set(candidates.map((candidate) => candidate.resultId)));
+  if (!parsed) {
+    throw new Error(`Failed to parse TikTok chunk analysis output: ${raw.slice(0, 200)}`);
+  }
+
+  const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  assertChunkAnalysisCoveredCandidates('TikTok', candidates, byResultId);
+  const outcomes = new Map<string, { candidate: TikTokVideoCandidate; outcome: TikTokFindingOutcome }>();
+
+  for (const candidate of candidates) {
+    const item = byResultId.get(candidate.resultId)!;
+    outcomes.set(candidate.videoId, {
+      candidate,
+      outcome: buildTikTokFindingOutcome(item, raw, llmAnalysisPrompt),
+    });
+  }
+
+  return { outcomes };
+}
+
 async function analyseDiscordChunk({
   candidates,
   prompt,
@@ -2996,6 +3372,41 @@ async function analyseRedditFinalSelection({
   return parsed.suggestedSearches;
 }
 
+async function analyseTikTokFinalSelection({
+  brand,
+  scannerConfig,
+  runContext,
+  maxSuggestedSearches,
+}: {
+  brand: BrandProfile;
+  scannerConfig: TikTokScannerConfig;
+  runContext: TikTokRunContext;
+  maxSuggestedSearches: number;
+}): Promise<string[] | undefined> {
+  const prompt = buildTikTokFinalSelectionPrompt({
+    scanner: scannerConfig,
+    brandName: brand.name,
+    keywords: brand.keywords,
+    watchWords: brand.watchWords,
+    safeWords: brand.safeWords,
+    runContext,
+    maxSuggestedSearches,
+  });
+  const systemPrompt = buildTikTokFinalSelectionSystemPrompt(maxSuggestedSearches, scannerConfig);
+
+  const raw = await chatCompletion([
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseSuggestedSearchOutput(raw, maxSuggestedSearches);
+  if (!parsed) {
+    throw new Error(`Failed to parse TikTok final selection output: ${raw.slice(0, 200)}`);
+  }
+
+  return parsed.suggestedSearches;
+}
+
 async function finalizeSuggestedSearches({
   brand,
   scannerConfig,
@@ -3078,6 +3489,49 @@ async function finalizeRedditSuggestedSearches({
     return filteredSuggestions;
   } catch (err) {
     console.error('[webhook] Reddit final deep-search selection failed:', err);
+    return undefined;
+  }
+}
+
+async function finalizeTikTokSuggestedSearches({
+  brand,
+  scannerConfig,
+  runContext,
+  maxSuggestedSearches,
+}: {
+  brand: BrandProfile;
+  scannerConfig: TikTokScannerConfig;
+  runContext: TikTokRunContext;
+  maxSuggestedSearches: number;
+}): Promise<string[] | undefined> {
+  try {
+    const llmSuggestedSearches = await analyseTikTokFinalSelection({
+      brand,
+      scannerConfig,
+      runContext,
+      maxSuggestedSearches,
+    });
+
+    if (!llmSuggestedSearches || llmSuggestedSearches.length === 0) {
+      console.log(
+        `[webhook] TikTok deep-search final selection authors=${runContext.observedAuthorHandles.length} hashtags=${runContext.observedHashtags.length} selected=[]`,
+      );
+      return undefined;
+    }
+
+    const sourceQueryKeys = new Set(runContext.sourceQueries.map(normalizeSuggestedSearchKey));
+    const filteredSuggestions = llmSuggestedSearches.filter((query) => !sourceQueryKeys.has(normalizeSuggestedSearchKey(query)));
+    if (filteredSuggestions.length === 0) {
+      console.warn('[webhook] TikTok final deep-search selection returned only source-query duplicates');
+      return undefined;
+    }
+
+    console.log(
+      `[webhook] TikTok deep-search final selection authors=${runContext.observedAuthorHandles.length} hashtags=${runContext.observedHashtags.length} selected=${JSON.stringify(filteredSuggestions)}`,
+    );
+    return filteredSuggestions;
+  } catch (err) {
+    console.error('[webhook] TikTok final deep-search selection failed:', err);
     return undefined;
   }
 }
@@ -3243,6 +3697,132 @@ async function upsertRedditFinding({
     const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
     const preferredOutcome = choosePreferredRedditOutcome(existing, outcome);
     const mergedRawData = buildRedditStoredFindingRawData({
+      existingRawData: existing?.rawData,
+      candidate,
+      runContext,
+      source,
+      scannerConfig,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      classificationSource: preferredOutcome.classificationSource,
+    });
+    const preferredSource = choosePreferredFindingSource(existing?.source, source);
+
+    const previousState = existing ? getFindingCountState(existing) : emptyFindingCountState();
+    const nextState = getOutcomeCountState(preferredOutcome);
+
+    if (!existing) {
+      const finding: Omit<Finding, 'id'> = {
+        scanId,
+        brandId: scan.brandId,
+        userId: scan.userId,
+        source: preferredSource,
+        actorId,
+        severity: preferredOutcome.severity,
+        title: preferredOutcome.title,
+        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        description: preferredOutcome.analysis,
+        llmAnalysis: preferredOutcome.analysis,
+        url: candidate.url,
+        rawData: mergedRawData,
+        isFalsePositive: preferredOutcome.isFalsePositive,
+        ...(preferredOutcome.isFalsePositive && {
+          isIgnored: true,
+          ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+        }),
+        ...(typeof preferredOutcome.llmAnalysisPrompt === 'string' && {
+          llmAnalysisPrompt: preferredOutcome.llmAnalysisPrompt,
+        }),
+        ...(typeof preferredOutcome.rawLlmResponse === 'string' && {
+          rawLlmResponse: preferredOutcome.rawLlmResponse,
+        }),
+        createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+      };
+      tx.set(findingRef, finding);
+      return diffFindingStates(previousState, nextState);
+    }
+
+    const updates: Record<string, unknown> = {
+      source: preferredSource,
+      severity: preferredOutcome.severity,
+      title: preferredOutcome.title,
+      platform: FieldValue.delete(),
+      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      description: preferredOutcome.analysis,
+      llmAnalysis: preferredOutcome.analysis,
+      url: candidate.url,
+      rawData: mergedRawData,
+      isFalsePositive: preferredOutcome.isFalsePositive,
+    };
+
+    const llmAnalysisPrompt = preferredOutcome.llmAnalysisPrompt ?? existing.llmAnalysisPrompt;
+    if (typeof llmAnalysisPrompt === 'string') {
+      updates.llmAnalysisPrompt = llmAnalysisPrompt;
+    }
+
+    const rawLlmResponse = preferredOutcome.rawLlmResponse ?? existing.rawLlmResponse;
+    if (typeof rawLlmResponse === 'string') {
+      updates.rawLlmResponse = rawLlmResponse;
+    }
+
+    if (preferredOutcome.isFalsePositive) {
+      updates.isIgnored = true;
+      if (existing.isIgnored !== true) {
+        updates.ignoredAt = FieldValue.serverTimestamp();
+      }
+      updates.isAddressed = false;
+      if (existing.addressedAt) {
+        updates.addressedAt = FieldValue.delete();
+      }
+    } else {
+      updates.isIgnored = false;
+      if (existing.ignoredAt) {
+        updates.ignoredAt = FieldValue.delete();
+      }
+    }
+
+    tx.update(findingRef, updates);
+    return diffFindingStates(previousState, nextState);
+  });
+}
+
+async function upsertTikTokFinding({
+  scanDoc,
+  scan,
+  source,
+  scannerConfig,
+  actorId,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  candidate,
+  runContext,
+  outcome,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  candidate: TikTokVideoCandidate;
+  runContext: TikTokRunContext;
+  outcome: TikTokFindingOutcome;
+}): Promise<FindingDelta> {
+  const scanId = scan.id ?? scanDoc.id;
+  const findingRef = db.collection('findings').doc(buildTikTokFindingId(scanId, candidate.videoId));
+
+  return db.runTransaction(async (tx) => {
+    const existingSnap = await tx.get(findingRef);
+    const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
+    const preferredOutcome = choosePreferredTikTokOutcome(existing, outcome);
+    const mergedRawData = buildTikTokStoredFindingRawData({
       existingRawData: existing?.rawData,
       candidate,
       runContext,
@@ -4025,6 +4605,23 @@ function buildRedditFindingOutcome(
   };
 }
 
+function buildTikTokFindingOutcome(
+  item: TikTokChunkAnalysisItem,
+  rawLlmResponse: string,
+  llmAnalysisPrompt: string,
+): TikTokFindingOutcome {
+  return {
+    severity: item.severity,
+    title: item.title,
+    theme: item.theme,
+    analysis: item.analysis,
+    isFalsePositive: item.isFalsePositive,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'llm',
+  };
+}
+
 function buildDiscordFindingOutcome(
   item: DiscordChunkAnalysisItem,
   rawLlmResponse: string,
@@ -4341,6 +4938,149 @@ function readRedditStoredFindingRawData(rawData?: Record<string, unknown>): Redd
       runId: typeof analysis.runId === 'string' ? analysis.runId : '',
       findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'reddit',
       scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'reddit-posts',
+      searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
+      searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
+      displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
+    },
+  };
+}
+
+function buildTikTokStoredFindingRawData({
+  existingRawData,
+  candidate,
+  runContext,
+  source,
+  scannerConfig,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  classificationSource,
+}: {
+  existingRawData?: Record<string, unknown>;
+  candidate: TikTokVideoCandidate;
+  runContext: TikTokRunContext;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  classificationSource: 'llm' | 'fallback';
+}): TikTokStoredFindingRawData {
+  const existing = readTikTokStoredFindingRawData(existingRawData);
+  return stripUndefinedDeep({
+    kind: 'tiktok-normalized',
+    version: TIKTOK_RAW_DATA_VERSION,
+    video: {
+      id: candidate.videoId,
+      url: candidate.url,
+      ...(candidate.caption ? { caption: candidate.caption } : {}),
+      ...(candidate.createdAt ? { createdAt: candidate.createdAt } : {}),
+      ...(candidate.region ? { region: candidate.region } : {}),
+      author: mergeTikTokAuthors(existing?.video.author, candidate.author),
+      hashtags: uniqueStrings([...(existing?.video.hashtags ?? []), ...candidate.hashtags]),
+      mentions: uniqueStrings([...(existing?.video.mentions ?? []), ...candidate.mentions]),
+      ...(mergeTikTokMusic(existing?.video.music, candidate.music) ? { music: mergeTikTokMusic(existing?.video.music, candidate.music) } : {}),
+      stats: mergeTikTokStats(existing?.video.stats, candidate.stats),
+      matchedQueries: uniqueStrings([...(existing?.video.matchedQueries ?? []), ...candidate.matchedQueries]),
+    },
+    context: {
+      sourceQueries: uniqueStrings([...(existing?.context.sourceQueries ?? []), ...runContext.sourceQueries]),
+      observedAuthorHandles: uniqueStrings([...(existing?.context.observedAuthorHandles ?? []), ...runContext.observedAuthorHandles]),
+      observedHashtags: uniqueStrings([...(existing?.context.observedHashtags ?? []), ...runContext.observedHashtags]),
+      sampleCaptions: uniqueStrings([...(existing?.context.sampleCaptions ?? []), ...runContext.sampleCaptions]).slice(0, 12),
+      ...(runContext.lookbackDate ?? existing?.context.lookbackDate
+        ? { lookbackDate: runContext.lookbackDate ?? existing?.context.lookbackDate }
+        : {}),
+    },
+    analysis: {
+      source: classificationSource,
+      runId,
+      findingSource: source,
+      scannerId: scannerConfig.id,
+      searchDepth,
+      ...(searchQuery ? { searchQuery } : {}),
+      ...(displayQuery ? { displayQuery } : {}),
+    },
+  }) as TikTokStoredFindingRawData;
+}
+
+function readTikTokStoredFindingRawData(rawData?: Record<string, unknown>): TikTokStoredFindingRawData | null {
+  if (!rawData || rawData.kind !== 'tiktok-normalized' || rawData.version !== TIKTOK_RAW_DATA_VERSION) {
+    return null;
+  }
+
+  const video = typeof rawData.video === 'object' && rawData.video !== null ? rawData.video as Record<string, unknown> : {};
+  const author = typeof video.author === 'object' && video.author !== null ? video.author as Record<string, unknown> : {};
+  const music = typeof video.music === 'object' && video.music !== null ? video.music as Record<string, unknown> : undefined;
+  const stats = typeof video.stats === 'object' && video.stats !== null ? video.stats as Record<string, unknown> : {};
+  const context = typeof rawData.context === 'object' && rawData.context !== null ? rawData.context as Record<string, unknown> : {};
+  const analysis = typeof rawData.analysis === 'object' && rawData.analysis !== null ? rawData.analysis as Record<string, unknown> : {};
+
+  return {
+    kind: 'tiktok-normalized',
+    version: TIKTOK_RAW_DATA_VERSION,
+    video: {
+      id: typeof video.id === 'string' ? video.id : '',
+      url: typeof video.url === 'string' ? video.url : '',
+      caption: typeof video.caption === 'string' ? video.caption : undefined,
+      createdAt: typeof video.createdAt === 'string' ? video.createdAt : undefined,
+      region: typeof video.region === 'string' ? video.region : undefined,
+      author: {
+        id: typeof author.id === 'string' ? author.id : undefined,
+        uniqueId: typeof author.uniqueId === 'string' ? author.uniqueId : undefined,
+        nickname: typeof author.nickname === 'string' ? author.nickname : undefined,
+        signature: typeof author.signature === 'string' ? author.signature : undefined,
+        verified: typeof author.verified === 'boolean' ? author.verified : undefined,
+        url: typeof author.url === 'string' ? author.url : undefined,
+      },
+      hashtags: Array.isArray(video.hashtags)
+        ? video.hashtags.filter((value): value is string => typeof value === 'string')
+        : [],
+      mentions: Array.isArray(video.mentions)
+        ? video.mentions.filter((value): value is string => typeof value === 'string')
+        : [],
+      music: music
+        ? {
+          id: typeof music.id === 'string' ? music.id : undefined,
+          title: typeof music.title === 'string' ? music.title : undefined,
+          author: typeof music.author === 'string' ? music.author : undefined,
+          ownerHandle: typeof music.ownerHandle === 'string' ? music.ownerHandle : undefined,
+          isOriginalSound: typeof music.isOriginalSound === 'boolean' ? music.isOriginalSound : undefined,
+        }
+        : undefined,
+      stats: {
+        playCount: typeof stats.playCount === 'number' ? stats.playCount : undefined,
+        diggCount: typeof stats.diggCount === 'number' ? stats.diggCount : undefined,
+        commentCount: typeof stats.commentCount === 'number' ? stats.commentCount : undefined,
+        shareCount: typeof stats.shareCount === 'number' ? stats.shareCount : undefined,
+        collectCount: typeof stats.collectCount === 'number' ? stats.collectCount : undefined,
+      },
+      matchedQueries: Array.isArray(video.matchedQueries)
+        ? video.matchedQueries.filter((value): value is string => typeof value === 'string')
+        : [],
+    },
+    context: {
+      sourceQueries: Array.isArray(context.sourceQueries)
+        ? context.sourceQueries.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedAuthorHandles: Array.isArray(context.observedAuthorHandles)
+        ? context.observedAuthorHandles.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedHashtags: Array.isArray(context.observedHashtags)
+        ? context.observedHashtags.filter((value): value is string => typeof value === 'string')
+        : [],
+      sampleCaptions: Array.isArray(context.sampleCaptions)
+        ? context.sampleCaptions.filter((value): value is string => typeof value === 'string')
+        : [],
+      lookbackDate: typeof context.lookbackDate === 'string' ? context.lookbackDate : undefined,
+    },
+    analysis: {
+      source: analysis.source === 'fallback' ? 'fallback' : 'llm',
+      runId: typeof analysis.runId === 'string' ? analysis.runId : '',
+      findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'tiktok',
+      scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'tiktok-posts',
       searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
       searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
       displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
@@ -4912,7 +5652,7 @@ function isKnownScannerId(value: unknown): value is ActorRunInfo['scannerId'] {
     value === 'google-web'
     || value === 'google-reddit'
     || value === 'reddit-posts'
-    || value === 'google-tiktok'
+    || value === 'tiktok-posts'
     || value === 'google-youtube'
     || value === 'google-facebook'
     || value === 'google-instagram'
@@ -4930,7 +5670,6 @@ function isKnownGoogleScannerId(value: unknown): value is GoogleScannerId {
   return (
     value === 'google-web'
     || value === 'google-reddit'
-    || value === 'google-tiktok'
     || value === 'google-youtube'
     || value === 'google-facebook'
     || value === 'google-instagram'
@@ -4952,6 +5691,10 @@ function resolveScannerConfig(actorRunInfo?: Partial<ActorRunInfo>): ScannerConf
     if (actorRunInfo.actorId === REDDIT_POST_SCRAPER_ACTOR_ID) {
       return getScannerConfigById('reddit-posts');
     }
+  }
+
+  if (actorRunInfo?.source === 'tiktok' && actorRunInfo.actorId === TIKTOK_POST_SCRAPER_ACTOR_ID) {
+    return getScannerConfigById('tiktok-posts');
   }
 
   if (
@@ -5049,6 +5792,37 @@ function choosePreferredRedditOutcome(existing: Finding | null, next: RedditFind
 
   const existingSource = readRedditStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
   const existingOutcome: RedditFindingOutcome = {
+    severity: existing.severity,
+    title: existing.title,
+    theme: existing.theme,
+    analysis: existing.llmAnalysis,
+    isFalsePositive: existing.isFalsePositive === true,
+    llmAnalysisPrompt: existing.llmAnalysisPrompt,
+    rawLlmResponse: existing.rawLlmResponse,
+    classificationSource: existingSource,
+  };
+
+  if (existingOutcome.classificationSource !== next.classificationSource) {
+    return next.classificationSource === 'llm' ? next : existingOutcome;
+  }
+  if (existingOutcome.isFalsePositive !== next.isFalsePositive) {
+    return existingOutcome.isFalsePositive ? next : existingOutcome;
+  }
+
+  const existingRank = getSeverityRank(existingOutcome.severity);
+  const nextRank = getSeverityRank(next.severity);
+  if (nextRank !== existingRank) {
+    return nextRank > existingRank ? next : existingOutcome;
+  }
+
+  return next;
+}
+
+function choosePreferredTikTokOutcome(existing: Finding | null, next: TikTokFindingOutcome): TikTokFindingOutcome {
+  if (!existing) return next;
+
+  const existingSource = readTikTokStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
+  const existingOutcome: TikTokFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
     theme: existing.theme,
@@ -5508,6 +6282,10 @@ function buildRedditFindingId(scanId: string, postId: string): string {
   return `${REDDIT_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${postId}`).digest('hex')}`;
 }
 
+function buildTikTokFindingId(scanId: string, videoId: string): string {
+  return `${TIKTOK_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${videoId}`).digest('hex')}`;
+}
+
 function buildDiscordFindingId(scanId: string, serverId: string): string {
   return `${DISCORD_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${serverId}`).digest('hex')}`;
 }
@@ -5614,6 +6392,259 @@ function readRedditCanonicalUrl(item: Record<string, unknown>): string | null {
   }
 
   return null;
+}
+
+function readTikTokVideoId(item: Record<string, unknown>): string | null {
+  const candidates = [item.aweme_id, item.id, item.videoId];
+  for (const value of candidates) {
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  }
+  return null;
+}
+
+function readTikTokVideoUrl(item: Record<string, unknown>): string | null {
+  const directCandidates = [
+    readOptionalTrimmedString(item.postPage),
+    readOptionalTrimmedString(item.webVideoUrl),
+    readOptionalTrimmedString(item.shareUrl),
+    readOptionalTrimmedString(item.url),
+  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
+
+  for (const value of directCandidates) {
+    const normalized = normalizeUrlForFinding(value);
+    if (normalized && /:\/\/(?:www\.)?tiktok\.com\//i.test(normalized)) {
+      return normalized;
+    }
+  }
+
+  const videoId = readTikTokVideoId(item);
+  const author = readTikTokAuthor(item);
+  if (!videoId || !author.uniqueId) {
+    return null;
+  }
+
+  return normalizeUrlForFinding(`https://www.tiktok.com/@${author.uniqueId}/video/${videoId}`);
+}
+
+function readTikTokCaption(item: Record<string, unknown>): string | undefined {
+  return readOptionalTrimmedString(item.desc)
+    ?? readOptionalTrimmedString(item.title)
+    ?? readOptionalTrimmedString(item.description);
+}
+
+function readTikTokCreatedAt(item: Record<string, unknown>): string | undefined {
+  const formatted = readOptionalTrimmedString(item.uploadedAtFormatted) ?? readOptionalTrimmedString(item.createTimeISO);
+  if (formatted) {
+    const parsed = Date.parse(formatted);
+    if (Number.isFinite(parsed)) {
+      return new Date(parsed).toISOString();
+    }
+  }
+
+  const numericCandidate = readOptionalFiniteNumber(item.uploadedAt)
+    ?? readOptionalFiniteNumber(item.createTime)
+    ?? readOptionalFiniteNumber(item.create_time);
+  if (numericCandidate === undefined) {
+    return undefined;
+  }
+
+  const milliseconds = numericCandidate > 1_000_000_000_000 ? numericCandidate : numericCandidate * 1000;
+  return Number.isFinite(milliseconds) ? new Date(milliseconds).toISOString() : undefined;
+}
+
+function readTikTokAuthor(item: Record<string, unknown>): TikTokVideoCandidate['author'] {
+  const author = typeof item.author === 'object' && item.author !== null
+    ? item.author as Record<string, unknown>
+    : (typeof item.channel === 'object' && item.channel !== null
+      ? item.channel as Record<string, unknown>
+      : {});
+
+  const uniqueId = readOptionalTrimmedString(author.unique_id)
+    ?? readOptionalTrimmedString(author.uniqueId)
+    ?? readOptionalTrimmedString(author.username)
+    ?? readOptionalTrimmedString(author.name);
+  const url = readOptionalTrimmedString(author.url)
+    ?? (uniqueId ? `https://www.tiktok.com/@${uniqueId}` : undefined);
+
+  return {
+    ...(typeof author.user_id === 'string' && author.user_id.trim().length > 0 ? { id: author.user_id.trim() } : {}),
+    ...(typeof author.id === 'string' && author.id.trim().length > 0 ? { id: author.id.trim() } : {}),
+    ...(uniqueId ? { uniqueId } : {}),
+    ...(readOptionalTrimmedString(author.nickname) ? { nickname: readOptionalTrimmedString(author.nickname) } : {}),
+    ...(readOptionalTrimmedString(author.signature) ? { signature: readOptionalTrimmedString(author.signature) } : {}),
+    ...(readOptionalTrimmedString(author.bio) ? { signature: readOptionalTrimmedString(author.bio) } : {}),
+    ...(typeof author.verified === 'boolean' ? { verified: author.verified } : {}),
+    ...(url ? { url } : {}),
+  };
+}
+
+function readTikTokHashtags(item: Record<string, unknown>): string[] {
+  if (!Array.isArray(item.hashtags)) return [];
+
+  return uniqueStrings(
+    item.hashtags
+      .map((entry) => {
+        if (typeof entry === 'string') return entry.trim().replace(/^#/, '');
+        if (typeof entry === 'object' && entry !== null) {
+          const objectEntry = entry as Record<string, unknown>;
+          return readOptionalTrimmedString(objectEntry.name)
+            ?? readOptionalTrimmedString(objectEntry.hashtagName)
+            ?? readOptionalTrimmedString(objectEntry.title)
+            ?? '';
+        }
+        return '';
+      })
+      .map((value) => value.replace(/^#/, '').trim())
+      .filter((value) => value.length > 0),
+  );
+}
+
+function readTikTokMentions(item: Record<string, unknown>): string[] {
+  if (!Array.isArray(item.mentions)) return [];
+
+  return uniqueStrings(
+    item.mentions
+      .map((entry) => {
+        if (typeof entry === 'string') return entry.trim().replace(/^@/, '');
+        if (typeof entry === 'object' && entry !== null) {
+          const objectEntry = entry as Record<string, unknown>;
+          return readOptionalTrimmedString(objectEntry.unique_id)
+            ?? readOptionalTrimmedString(objectEntry.uniqueId)
+            ?? readOptionalTrimmedString(objectEntry.username)
+            ?? readOptionalTrimmedString(objectEntry.name)
+            ?? '';
+        }
+        return '';
+      })
+      .map((value) => value.replace(/^@/, '').trim())
+      .filter((value) => value.length > 0),
+  );
+}
+
+function readTikTokMusic(item: Record<string, unknown>): TikTokVideoCandidate['music'] | undefined {
+  const music = typeof item.music === 'object' && item.music !== null
+    ? item.music as Record<string, unknown>
+    : (typeof item.song === 'object' && item.song !== null
+      ? item.song as Record<string, unknown>
+      : null);
+  if (!music) {
+    return undefined;
+  }
+
+  const idValue = music.id;
+  const id = typeof idValue === 'string'
+    ? idValue.trim()
+    : (typeof idValue === 'number' && Number.isFinite(idValue) ? String(idValue) : undefined);
+  const title = readOptionalTrimmedString(music.title);
+  const author = readOptionalTrimmedString(music.author) ?? readOptionalTrimmedString(music.artist);
+  const ownerHandle = readOptionalTrimmedString(music.owner_handle);
+  const isOriginalSound = typeof music.is_original_sound === 'boolean'
+    ? music.is_original_sound
+    : (typeof music.isOriginalSound === 'boolean' ? music.isOriginalSound : undefined);
+
+  if (!id && !title && !author && !ownerHandle && isOriginalSound === undefined) {
+    return undefined;
+  }
+
+  return {
+    ...(id ? { id } : {}),
+    ...(title ? { title } : {}),
+    ...(author ? { author } : {}),
+    ...(ownerHandle ? { ownerHandle } : {}),
+    ...(isOriginalSound !== undefined ? { isOriginalSound } : {}),
+  };
+}
+
+function readTikTokStats(item: Record<string, unknown>): TikTokVideoCandidate['stats'] {
+  const statistics = typeof item.statistics === 'object' && item.statistics !== null
+    ? item.statistics as Record<string, unknown>
+    : {};
+
+  return {
+    ...(readOptionalFiniteNumber(statistics.play_count ?? item.views) !== undefined
+      ? { playCount: readOptionalFiniteNumber(statistics.play_count ?? item.views) }
+      : {}),
+    ...(readOptionalFiniteNumber(statistics.digg_count ?? item.likes) !== undefined
+      ? { diggCount: readOptionalFiniteNumber(statistics.digg_count ?? item.likes) }
+      : {}),
+    ...(readOptionalFiniteNumber(statistics.comment_count ?? item.comments) !== undefined
+      ? { commentCount: readOptionalFiniteNumber(statistics.comment_count ?? item.comments) }
+      : {}),
+    ...(readOptionalFiniteNumber(statistics.share_count ?? item.shares) !== undefined
+      ? { shareCount: readOptionalFiniteNumber(statistics.share_count ?? item.shares) }
+      : {}),
+    ...(readOptionalFiniteNumber(statistics.collect_count ?? item.bookmarks) !== undefined
+      ? { collectCount: readOptionalFiniteNumber(statistics.collect_count ?? item.bookmarks) }
+      : {}),
+  };
+}
+
+function readTikTokMatchedQuery(item: Record<string, unknown>): string | undefined {
+  return readOptionalTrimmedString(item.searchKeyword)
+    ?? readOptionalTrimmedString(item.searchQuery)
+    ?? readOptionalTrimmedString(item.query)
+    ?? readOptionalTrimmedString(item.keyword);
+}
+
+function mergeTikTokAuthors(
+  existing?: TikTokVideoCandidate['author'],
+  next?: TikTokVideoCandidate['author'],
+): TikTokVideoCandidate['author'] {
+  return {
+    ...(existing?.id ? { id: existing.id } : {}),
+    ...(next?.id ? { id: next.id } : {}),
+    ...(existing?.uniqueId ? { uniqueId: existing.uniqueId } : {}),
+    ...(next?.uniqueId ? { uniqueId: next.uniqueId } : {}),
+    ...(existing?.nickname ? { nickname: existing.nickname } : {}),
+    ...(next?.nickname ? { nickname: next.nickname } : {}),
+    ...(existing?.signature ? { signature: existing.signature } : {}),
+    ...(next?.signature ? { signature: next.signature } : {}),
+    ...(existing?.verified !== undefined ? { verified: existing.verified } : {}),
+    ...(next?.verified !== undefined ? { verified: next.verified } : {}),
+    ...(existing?.url ? { url: existing.url } : {}),
+    ...(next?.url ? { url: next.url } : {}),
+  };
+}
+
+function mergeTikTokMusic(
+  existing?: TikTokVideoCandidate['music'],
+  next?: TikTokVideoCandidate['music'],
+): TikTokVideoCandidate['music'] | undefined {
+  if (!existing && !next) {
+    return undefined;
+  }
+
+  return {
+    ...(existing?.id ? { id: existing.id } : {}),
+    ...(next?.id ? { id: next.id } : {}),
+    ...(existing?.title ? { title: existing.title } : {}),
+    ...(next?.title ? { title: next.title } : {}),
+    ...(existing?.author ? { author: existing.author } : {}),
+    ...(next?.author ? { author: next.author } : {}),
+    ...(existing?.ownerHandle ? { ownerHandle: existing.ownerHandle } : {}),
+    ...(next?.ownerHandle ? { ownerHandle: next.ownerHandle } : {}),
+    ...(existing?.isOriginalSound !== undefined ? { isOriginalSound: existing.isOriginalSound } : {}),
+    ...(next?.isOriginalSound !== undefined ? { isOriginalSound: next.isOriginalSound } : {}),
+  };
+}
+
+function mergeTikTokStats(
+  existing?: TikTokVideoCandidate['stats'],
+  next?: TikTokVideoCandidate['stats'],
+): TikTokVideoCandidate['stats'] {
+  return {
+    ...(existing?.playCount !== undefined ? { playCount: existing.playCount } : {}),
+    ...(next?.playCount !== undefined ? { playCount: next.playCount } : {}),
+    ...(existing?.diggCount !== undefined ? { diggCount: existing.diggCount } : {}),
+    ...(next?.diggCount !== undefined ? { diggCount: next.diggCount } : {}),
+    ...(existing?.commentCount !== undefined ? { commentCount: existing.commentCount } : {}),
+    ...(next?.commentCount !== undefined ? { commentCount: next.commentCount } : {}),
+    ...(existing?.shareCount !== undefined ? { shareCount: existing.shareCount } : {}),
+    ...(next?.shareCount !== undefined ? { shareCount: next.shareCount } : {}),
+    ...(existing?.collectCount !== undefined ? { collectCount: existing.collectCount } : {}),
+    ...(next?.collectCount !== undefined ? { collectCount: next.collectCount } : {}),
+  };
 }
 
 function readDiscordServerId(item: Record<string, unknown>): string | null {

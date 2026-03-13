@@ -241,6 +241,104 @@ export interface RedditStoredFindingRawData extends Record<string, unknown> {
 }
 
 /**
+ * One TikTok video candidate returned by the dedicated TikTok actor.
+ */
+export interface TikTokVideoCandidate {
+  resultId: string;
+  videoId: string;
+  url: string;
+  caption?: string;
+  createdAt?: string;
+  region?: string;
+  author: {
+    id?: string;
+    uniqueId?: string;
+    nickname?: string;
+    signature?: string;
+    verified?: boolean;
+    url?: string;
+  };
+  hashtags: string[];
+  mentions: string[];
+  music?: {
+    id?: string;
+    title?: string | null;
+    author?: string;
+    ownerHandle?: string;
+    isOriginalSound?: boolean;
+  };
+  stats: {
+    playCount?: number;
+    diggCount?: number;
+    commentCount?: number;
+    shareCount?: number;
+    collectCount?: number;
+  };
+  matchedQueries: string[];
+}
+
+/**
+ * Run-level TikTok context shared across chunked analysis calls.
+ */
+export interface TikTokRunContext {
+  sourceQueries: string[];
+  observedAuthorHandles: string[];
+  observedHashtags: string[];
+  sampleCaptions: string[];
+  lookbackDate?: string;
+}
+
+/**
+ * One assessed TikTok post returned by chunked AI analysis.
+ */
+export interface TikTokChunkAnalysisItem {
+  resultId: string;
+  title: string;
+  severity: Severity;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+}
+
+/**
+ * The structured JSON output expected from chunked TikTok analysis.
+ */
+export interface TikTokChunkAnalysisOutput {
+  items: TikTokChunkAnalysisItem[];
+}
+
+/**
+ * Compact stored debug payload for TikTok findings.
+ */
+export interface TikTokStoredFindingRawData extends Record<string, unknown> {
+  kind: 'tiktok-normalized';
+  version: 1;
+  video: {
+    id: string;
+    url: string;
+    caption?: string;
+    createdAt?: string;
+    region?: string;
+    author: TikTokVideoCandidate['author'];
+    hashtags: string[];
+    mentions: string[];
+    music?: TikTokVideoCandidate['music'];
+    stats: TikTokVideoCandidate['stats'];
+    matchedQueries: string[];
+  };
+  context: TikTokRunContext;
+  analysis: {
+    source: 'llm' | 'fallback';
+    runId: string;
+    findingSource: FindingSource;
+    scannerId: ScannerId;
+    searchDepth: number;
+    searchQuery?: string;
+    displayQuery?: string;
+  };
+}
+
+/**
  * One joinable Discord server candidate returned by the public-server scraper.
  */
 export interface DiscordServerCandidate {
@@ -633,6 +731,17 @@ export function parseRedditChunkAnalysisOutput(
   raw: string,
   validResultIds: Set<string>,
 ): RedditChunkAnalysisOutput | null {
+  const items = parseChunkAnalysisItems(raw, validResultIds);
+  return items ? { items } : null;
+}
+
+/**
+ * Parse and validate the raw JSON string returned by chunked TikTok analysis.
+ */
+export function parseTikTokChunkAnalysisOutput(
+  raw: string,
+  validResultIds: Set<string>,
+): TikTokChunkAnalysisOutput | null {
   const items = parseChunkAnalysisItems(raw, validResultIds);
   return items ? { items } : null;
 }

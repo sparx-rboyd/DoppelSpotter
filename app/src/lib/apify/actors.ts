@@ -4,6 +4,7 @@ import {
   getScannerConfigById,
   GOOGLE_SEARCH_ACTOR_ID,
   REDDIT_POST_SCRAPER_ACTOR_ID,
+  TIKTOK_POST_SCRAPER_ACTOR_ID,
   X_TWEET_SCRAPER_ACTOR_ID,
   DISCORD_SERVER_SCRAPER_ACTOR_ID,
   GITHUB_REPO_SEARCH_ACTOR_ID,
@@ -16,7 +17,7 @@ export type ActorConfig = ScannerConfig;
 export const CORE_SCANNER_IDS: ScannerId[] = [
   'google-web',
   'reddit-posts',
-  'google-tiktok',
+  'tiktok-posts',
   'google-youtube',
   'google-facebook',
   'google-instagram',
@@ -43,5 +44,6 @@ export {
   GITHUB_REPO_SEARCH_ACTOR_ID,
   GOOGLE_SEARCH_ACTOR_ID,
   REDDIT_POST_SCRAPER_ACTOR_ID,
+  TIKTOK_POST_SCRAPER_ACTOR_ID,
   X_TWEET_SCRAPER_ACTOR_ID,
 };

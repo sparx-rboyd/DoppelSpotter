@@ -2,10 +2,12 @@ import { ApifyClient, ApifyApiError } from 'apify-client';
 import type { BrandProfile, EffectiveScanSettings } from '@/lib/types';
 import {
   getDeepSearchRedditMaxPosts,
+  getDeepSearchTikTokMaxItems,
   getInitialDomainRegistrationLimit,
   getInitialDiscordMaxTotalChargeUsd,
   getInitialRedditMaxTotalChargeUsd,
   getInitialRedditTotalPosts,
+  getInitialTikTokTotalPosts,
   getDeepSearchGooglePageCount,
   getInitialGitHubMaxResults,
   getInitialGooglePageCount,
@@ -53,6 +55,7 @@ type ActorRunBrandContext = Pick<BrandProfile, 'name' | 'keywords'>;
 
 const GITHUB_MIN_RESULTS_PER_KEYWORD = 10;
 const REDDIT_MIN_POSTS_PER_QUERY = 10;
+const TIKTOK_MIN_POSTS_PER_QUERY = 10;
 
 /** Memory cap for Google Search actor runs (MB). Keeps combined account RAM well within plan limits. */
 const GOOGLE_ACTOR_MEMORY_MB = 512;
@@ -151,6 +154,21 @@ function buildActorInputs(
       query,
       displayQuery: query,
     }];
+  }
+
+  if (actor.kind === 'tiktok') {
+    const maxItemsPerQuery = getInitialTikTokMaxItemsPerQuery(settings.searchResultPages, searchTerms.length);
+    return searchTerms.map((term) => ({
+      input: {
+        keywords: [term],
+        maxItems: maxItemsPerQuery,
+        dateRange: getTikTokDateRangeForLookbackDate(settings.lookbackDate),
+        sortType: 'RELEVANCE',
+        includeSearchKeywords: true,
+      },
+      query: term,
+      displayQuery: term,
+    }));
   }
 
   if (actor.kind === 'x') {
@@ -316,6 +334,16 @@ export async function startDeepSearchRun(
       strictTokenFilter: true,
     };
     displayQuery = trimmedQuery;
+  } else if (actor.kind === 'tiktok') {
+    executableQuery = trimmedQuery;
+    runInput = {
+      keywords: [trimmedQuery],
+      maxItems: getDeepSearchTikTokMaxItems(),
+      dateRange: getTikTokDateRangeForLookbackDate(lookbackDate),
+      sortType: 'RELEVANCE',
+      includeSearchKeywords: true,
+    };
+    displayQuery = trimmedQuery;
   } else {
     throw new Error(`Deep search is not implemented for ${actor.displayName}`);
   }
@@ -423,6 +451,11 @@ function getInitialRedditMaxPostsPerQuery(searchResultPages: unknown, queryCount
   return Math.max(REDDIT_MIN_POSTS_PER_QUERY, Math.ceil(totalPosts / Math.max(1, queryCount)));
 }
 
+function getInitialTikTokMaxItemsPerQuery(searchResultPages: unknown, queryCount: number): number {
+  const totalPosts = getInitialTikTokTotalPosts(searchResultPages);
+  return Math.max(TIKTOK_MIN_POSTS_PER_QUERY, Math.ceil(totalPosts / Math.max(1, queryCount)));
+}
+
 function getRedditTimeframeForLookbackDate(lookbackDate?: string): 'hour' | 'day' | 'week' | 'month' | 'year' | 'all' {
   if (!lookbackDate) {
     return 'all';
@@ -439,6 +472,27 @@ function getRedditTimeframeForLookbackDate(lookbackDate?: string): 'hour' | 'day
   if (ageDays <= 31) return 'month';
   if (ageDays <= 366) return 'year';
   return 'all';
+}
+
+function getTikTokDateRangeForLookbackDate(
+  lookbackDate?: string,
+): 'DEFAULT' | 'ALL_TIME' | 'YESTERDAY' | 'THIS_WEEK' | 'THIS_MONTH' | 'LAST_THREE_MONTHS' | 'LAST_SIX_MONTHS' {
+  if (!lookbackDate) {
+    return 'ALL_TIME';
+  }
+
+  const targetMs = Date.parse(`${lookbackDate}T00:00:00.000Z`);
+  if (!Number.isFinite(targetMs)) {
+    return 'ALL_TIME';
+  }
+
+  const ageDays = Math.max(0, (Date.now() - targetMs) / 86_400_000);
+  if (ageDays <= 1) return 'YESTERDAY';
+  if (ageDays <= 7) return 'THIS_WEEK';
+  if (ageDays <= 31) return 'THIS_MONTH';
+  if (ageDays <= 92) return 'LAST_THREE_MONTHS';
+  if (ageDays <= 184) return 'LAST_SIX_MONTHS';
+  return 'ALL_TIME';
 }
 
 function buildActorStartOptions(

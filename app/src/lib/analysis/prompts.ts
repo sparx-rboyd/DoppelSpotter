@@ -10,6 +10,7 @@ import {
   SCAN_SOURCE_ORDER,
   type GoogleScannerConfig,
   type RedditScannerConfig,
+  type TikTokScannerConfig,
 } from '@/lib/scan-sources';
 import {
   buildGoogleClassificationSurfaceLine,
@@ -27,6 +28,8 @@ import type {
   GoogleSearchCandidate,
   RedditRunContext,
   RedditPostCandidate,
+  TikTokRunContext,
+  TikTokVideoCandidate,
   XRunContext,
   XTweetCandidate,
 } from './types';
@@ -133,6 +136,56 @@ Treat Reddit posts with less caution when ...
 - The brand terms are used in an unrelated context that would not realistically infringe the brand
 
 Set isFalsePositive: true if the Reddit post is clearly legitimate use of the brand name, such as ordinary commentary, benign discussion, or a clearly unrelated post with no deceptive signal.`;
+
+/**
+ * System prompt for chunked TikTok classification.
+ */
+export const TIKTOK_CLASSIFICATION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive a compact list of public TikTok video candidates for a brand, plus supporting context such as the search terms used, observed authors, and observed hashtags.
+
+Your task is to assess ONLY the provided TikTok video candidates for potential brand infringement, cheating-tool promotion, scam activity, impersonation, suspicious support claims, or other harmful brand misuse.
+Do not invent extra TikTok posts. Assess only the metadata that is explicitly provided for each candidate.
+Do not infer anything from video visuals, spoken audio, on-screen text, comments, stitched content, or linked destinations unless that evidence is explicitly present in the provided metadata.
+Use British English spelling and phrasing in all human-readable output fields.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "items": [
+    {
+      "resultId": "the exact resultId from the input candidate",
+      "title": "Short, descriptive title of the finding (max 10 words)",
+      "severity": "high" | "medium" | "low",
+      "theme": "Short theme label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
+      "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
+      "isFalsePositive": boolean
+    }
+  ]
+}
+
+Rules for "items":
+- Include exactly one item for every input TikTok video candidate and reuse the exact same resultId.
+- Assess only the provided video candidates. Do not add extra items and do not omit any candidate.
+- Each item must have all six fields: resultId, title, severity, theme, analysis, isFalsePositive.
+- Each individual analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
+- This applies to both the title and the analysis text.
+- Always return a concise "theme" label. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case.
+- If the user prompt includes existing theme labels that fit, reuse one of them exactly.
+- If none fit well, create a new short label rather than forcing a poor match.
+- Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
+- Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
+- If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current TikTok metadata.
+
+Severity assignment:
+- The user prompt will include this brand's definitions for "high", "medium", and "low".
+- Apply those brand-specific definitions exactly when assigning severity.
+
+Counter signals:
+Treat TikTok videos with less caution when ...
+- The metadata clearly suggests ordinary discussion, education, parody, or unrelated content without deceptive intent
+- The brand terms are used in an unrelated context that would not realistically infringe the brand
+
+Set isFalsePositive: true if the TikTok video is clearly legitimate use of the brand name, such as ordinary commentary, benign discussion, or a clearly unrelated post with no deceptive signal.`;
 
 /**
  * System prompt for chunked Discord server classification.
@@ -690,6 +743,79 @@ Discord server candidates (${compactCandidates.length}):
 ${JSON.stringify(compactCandidates, null, 2)}`;
 }
 
+export function buildTikTokChunkAnalysisPrompt(params: {
+  brandName: string;
+  keywords: string[];
+  officialDomains: string[];
+  severityDefinitions: ResolvedBrandAnalysisSeverityDefinitions;
+  watchWords?: string[];
+  safeWords?: string[];
+  userPreferenceHints?: UserPreferenceHints;
+  existingThemes?: string[];
+  source: FindingSource;
+  candidates: TikTokVideoCandidate[];
+  runContext: TikTokRunContext;
+}): string {
+  const {
+    brandName,
+    keywords,
+    officialDomains,
+    severityDefinitions,
+    watchWords,
+    safeWords,
+    userPreferenceHints,
+    existingThemes,
+    source,
+    candidates,
+    runContext,
+  } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that TikTok video): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with — if present in TikTok metadata, treat it with reduced caution in the individual "analysis" field unless there are strong warning signs elsewhere): ${safeWords.join(', ')}`
+    : null;
+
+  const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
+  const existingThemesLine = `Existing theme labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingThemes && existingThemes.length > 0 ? existingThemes.join(', ') : 'none'}`;
+  const compactCandidates = candidates.map((candidate) => ({
+    resultId: candidate.resultId,
+    videoId: candidate.videoId,
+    url: candidate.url,
+    caption: candidate.caption,
+    createdAt: candidate.createdAt,
+    region: candidate.region,
+    author: candidate.author,
+    hashtags: candidate.hashtags,
+    mentions: candidate.mentions,
+    music: candidate.music,
+    stats: candidate.stats,
+    matchedQueries: candidate.matchedQueries,
+  }));
+
+  return `Brand being protected: "${brandName}"
+Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${buildSeverityDefinitionsSection(severityDefinitions)}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
+Monitoring surface: TikTok videos
+
+Supporting TikTok discovery context:
+- Search terms used: ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.join(' | ') : 'none'}
+- Observed author handles: ${runContext.observedAuthorHandles.length > 0 ? runContext.observedAuthorHandles.join(' | ') : 'none'}
+- Observed hashtags: ${runContext.observedHashtags.length > 0 ? runContext.observedHashtags.join(' | ') : 'none'}
+- Lookback date: ${runContext.lookbackDate ?? 'none'}
+
+Assess every TikTok video candidate below and return one item in the "items" array per resultId.
+Use British English in any human-readable text you generate.
+Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
+
+TikTok video candidates (${compactCandidates.length}):
+${JSON.stringify(compactCandidates, null, 2)}`;
+}
+
 export function buildDomainRegistrationChunkAnalysisPrompt(params: {
   brandName: string;
   keywords: string[];
@@ -1010,6 +1136,85 @@ Sample Reddit post titles from the results:
 ${runContext.sampleTitles.length > 0 ? runContext.sampleTitles.map((title) => `- ${title}`).join('\n') : '- none'}
 
 Maximum number of follow-up Reddit searches you may suggest:
+- ${maxSuggestedSearches}`;
+}
+
+export function buildTikTokFinalSelectionSystemPrompt(
+  maxSuggestedSearches: number,
+  scanner: TikTokScannerConfig,
+): string {
+  return `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive metadata about a brand, an existing ${scanner.displayName} search term about the brand that has been executed, and contextual signals observed from the resulting TikTok videos.
+
+Your task is to identify up to ${maxSuggestedSearches} follow-up TikTok searches that could be performed, that are likely to surface further evidence of potential brand misuse on TikTok.
+
+You will synthesise up to ${maxSuggestedSearches} entirely new queries based on the context that you're provided with, that you feel will help to surface the maximum number of potential threats to the brand.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "suggestedSearches": ["query 1", "query 2"]
+}
+
+Rules:
+- "suggestedSearches" is optional. Omit it entirely if no follow-up queries are warranted.
+- Suggest at most ${maxSuggestedSearches} follow-up TikTok queries.
+- Quality over quantity: return fewer than ${maxSuggestedSearches} queries when only a small number of genuinely useful follow-up searches are warranted.
+- Prefer coverage across distinct brand misuse themes. Avoid spending multiple searches on near-duplicate variants of the same theme when one broader query would cover them.
+- Any newly synthesised query must stay grounded in the context that you're provided with.
+- Do NOT suggest the original source query again or obvious paraphrases of it.
+- Do NOT suggest clearly legitimate or generic navigational queries.
+- Prefer concise TikTok-ready search terms, not full sentences.
+- Avoid overfitting to a single caption or username unless that is clearly the most important abuse signal.`;
+}
+
+export function buildTikTokFinalSelectionPrompt(params: {
+  scanner: TikTokScannerConfig;
+  brandName: string;
+  keywords: string[];
+  watchWords?: string[];
+  safeWords?: string[];
+  runContext: TikTokRunContext;
+  maxSuggestedSearches: number;
+}): string {
+  const {
+    scanner,
+    brandName,
+    keywords,
+    watchWords,
+    safeWords,
+    runContext,
+    maxSuggestedSearches,
+  } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand; you can use slices or combinations of these in your suggested queries as you see appropriate): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with; you can use these as negative context when deciding whether a follow-up TikTok query is worthwhile): ${safeWords.join(', ')}`
+    : null;
+
+  return `Brand being protected: "${brandName}"
+
+Brand keywords (keywords that the brand owner wants to monitor and protect; you can use slices or combinations of these in your suggested queries as you see appropriate): ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+
+${watchWordsLine ? `${watchWordsLine}\n\n` : ''}${safeWordsLine ? `${safeWordsLine}\n\n` : ''}Original TikTok search query:
+${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.map((query) => `- ${query}`).join('\n') : '- none'}
+
+Surface being explored:
+- ${scanner.displayName}
+
+Observed author handles from the TikTok results:
+${runContext.observedAuthorHandles.length > 0 ? runContext.observedAuthorHandles.map((author) => `- ${author}`).join('\n') : '- none'}
+
+Observed hashtags from the TikTok results:
+${runContext.observedHashtags.length > 0 ? runContext.observedHashtags.map((hashtag) => `- ${hashtag}`).join('\n') : '- none'}
+
+Sample TikTok captions from the results:
+${runContext.sampleCaptions.length > 0 ? runContext.sampleCaptions.map((caption) => `- ${caption}`).join('\n') : '- none'}
+
+Maximum number of follow-up TikTok searches you may suggest:
 - ${maxSuggestedSearches}`;
 }
 

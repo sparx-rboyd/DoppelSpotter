@@ -6,7 +6,6 @@ export type GoogleFindingSource = Extract<
   ScanFindingSource,
   | 'google'
   | 'reddit'
-  | 'tiktok'
   | 'youtube'
   | 'facebook'
   | 'instagram'
@@ -45,6 +44,12 @@ export interface RedditScannerConfig extends BaseScannerConfig {
   kind: 'reddit';
 }
 
+export interface TikTokScannerConfig extends BaseScannerConfig {
+  id: 'tiktok-posts';
+  source: 'tiktok';
+  kind: 'tiktok';
+}
+
 export interface DomainRegistrationsScannerConfig extends BaseScannerConfig {
   id: 'domain-registrations';
   source: 'domains';
@@ -66,6 +71,7 @@ export interface XScannerConfig extends BaseScannerConfig {
 export type ScannerConfig =
   | GoogleScannerConfig
   | RedditScannerConfig
+  | TikTokScannerConfig
   | DomainRegistrationsScannerConfig
   | DiscordScannerConfig
   | GitHubScannerConfig
@@ -73,6 +79,7 @@ export type ScannerConfig =
 
 export const GOOGLE_SEARCH_ACTOR_ID = 'apify/google-search-scraper';
 export const REDDIT_POST_SCRAPER_ACTOR_ID = 'fatihtahta/reddit-scraper-search-fast';
+export const TIKTOK_POST_SCRAPER_ACTOR_ID = 'apidojo/tiktok-scraper';
 export const DOMAIN_REGISTRATIONS_ACTOR_ID = 'doppelspotter/recent-domain-registrations';
 export const DISCORD_SERVER_SCRAPER_ACTOR_ID = 'louisdeconinck/discord-server-scraper';
 export const GITHUB_REPO_SEARCH_ACTOR_ID = 'ryanclinton/github-repo-search';
@@ -97,7 +104,6 @@ export const SCAN_SOURCE_ORDER: ScanFindingSource[] = [
 export const GOOGLE_SCAN_SOURCE_ORDER: GoogleFindingSource[] = [
   'google',
   'reddit',
-  'tiktok',
   'youtube',
   'facebook',
   'instagram',
@@ -135,15 +141,13 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     shortLabel: 'Reddit',
     supportsDeepSearch: true,
   },
-  'google-tiktok': {
-    id: 'google-tiktok',
+  'tiktok-posts': {
+    id: 'tiktok-posts',
     source: 'tiktok',
-    actorId: GOOGLE_SEARCH_ACTOR_ID,
-    kind: 'google',
+    actorId: TIKTOK_POST_SCRAPER_ACTOR_ID,
+    kind: 'tiktok',
     displayName: 'TikTok',
     shortLabel: 'TikTok',
-    siteHost: 'tiktok.com',
-    additionalOperators: ['-inurl:/discover'],
     supportsDeepSearch: true,
   },
   'google-youtube': {
@@ -247,7 +251,7 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
 const SCANNER_ID_BY_SOURCE: Record<ScanFindingSource, ScannerId> = {
   google: 'google-web',
   reddit: 'reddit-posts',
-  tiktok: 'google-tiktok',
+  tiktok: 'tiktok-posts',
   youtube: 'google-youtube',
   facebook: 'google-facebook',
   instagram: 'google-instagram',
@@ -335,12 +339,16 @@ export function buildGoogleScannerQuery(
     return parts.join(' ').trim();
   }
 
-  const specialistExclusions = Object.values(SCANNER_CONFIGS)
-    .filter(isGoogleScannerConfig)
-    .filter((config) => config.source !== 'google')
-    .map((config) => config.siteHost)
-    .filter((siteHost): siteHost is string => typeof siteHost === 'string' && siteHost.length > 0)
-    .map((siteHost) => `-site:${siteHost}`);
+  const specialistExclusions = [
+    'reddit.com',
+    'tiktok.com',
+    'youtube.com',
+    'facebook.com',
+    'instagram.com',
+    't.me',
+    'apps.apple.com',
+    'play.google.com',
+  ].map((siteHost) => `-site:${siteHost}`);
 
   return [trimmedBaseQuery, ...specialistExclusions].join(' ').trim();
 }
