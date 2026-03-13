@@ -726,6 +726,19 @@ npm run backfill-scan-counts -- --force  # recomputes all scans from findings
 
 Script: `app/scripts/backfill-scan-counts.ts`.
 
+To audit or repair orphaned Firestore scan/finding documents after manual data edits, partial deletions, or incident recovery work:
+
+```bash
+# Run from the app/ directory
+npm run audit-orphaned-firestore-docs
+npm run repair-orphaned-firestore-docs            # dry run only
+npm run repair-orphaned-firestore-docs -- --apply # deletes repairable orphaned docs
+```
+
+Scripts:
+- `app/scripts/audit-orphaned-firestore-docs.ts` — read-only integrity check for orphaned scans/findings and metadata mismatches
+- `app/scripts/repair-orphaned-firestore-docs.ts` — dry-run-by-default cleanup tool that deletes true orphaned scans/findings but only reports non-orphan mismatches for manual review
+
 ---
 
 ## Findings API — Performance Design

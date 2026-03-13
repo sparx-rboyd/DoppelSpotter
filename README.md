@@ -297,6 +297,8 @@ npm run type-check
 npm run add-user -- --email user@example.com --password secret123
 npm run add-invite-code
 npm run backfill-scan-counts
+npm run audit-orphaned-firestore-docs
+npm run repair-orphaned-firestore-docs
 ```
 
 ### Work On The Pitch Page
