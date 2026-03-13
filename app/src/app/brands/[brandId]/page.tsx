@@ -2628,7 +2628,34 @@ export default function BrandDetailPage() {
   // Progress bar helpers
   // ---------------------------------------------------------------------------
 
-  const allRuns = activeScan?.actorRuns ? Object.values(activeScan.actorRuns) : [];
+  const startedRuns = useMemo(
+    () => (activeScan?.actorRuns ? Object.values(activeScan.actorRuns) : []),
+    [activeScan?.actorRuns],
+  );
+  const launchingGithubRuns = useMemo(
+    () => (activeScan?.launchingGithubRuns
+      ? Object.values(activeScan.launchingGithubRuns).map((run) => ({
+        ...run,
+        status: 'pending' as const,
+        skippedDuplicateCount: 0,
+      } satisfies ActorRunInfo))
+      : []),
+    [activeScan?.launchingGithubRuns],
+  );
+  const queuedGithubRuns = useMemo(
+    () => (activeScan?.queuedGithubRuns
+      ? activeScan.queuedGithubRuns.map((run) => ({
+        ...run,
+        status: 'pending' as const,
+        skippedDuplicateCount: 0,
+      } satisfies ActorRunInfo))
+      : []),
+    [activeScan?.queuedGithubRuns],
+  );
+  const allRuns = useMemo(
+    () => [...startedRuns, ...launchingGithubRuns, ...queuedGithubRuns],
+    [launchingGithubRuns, queuedGithubRuns, startedRuns],
+  );
   const defaultScanSettings = getEffectiveScanSettings(brand);
   const activeScanSettings = activeScan
     ? getEffectiveScanSettings(brand, activeScan.effectiveSettings)
@@ -2641,12 +2668,18 @@ export default function BrandDetailPage() {
       (source) => normalizedScanSources[source] || allRuns.some((run) => run.source === source),
     ),
   );
-  const progressSourcesWithFallback: FindingSource[] = progressSources.length > 0 ? progressSources : ['google'];
-  const runsBySource = new Map(
-    progressSourcesWithFallback.map((source) => [
-      source,
-      allRuns.filter((run) => run.source === source),
-    ]),
+  const progressSourcesWithFallback: FindingSource[] = useMemo(
+    () => (progressSources.length > 0 ? progressSources : ['google']),
+    [progressSources],
+  );
+  const runsBySource = useMemo(
+    () => new Map(
+      progressSourcesWithFallback.map((source) => [
+        source,
+        allRuns.filter((run) => run.source === source),
+      ]),
+    ),
+    [allRuns, progressSourcesWithFallback],
   );
 
   function getRunsForSource(source: FindingSource): ActorRunInfo[] {
@@ -2655,11 +2688,23 @@ export default function BrandDetailPage() {
 
   function getInFlightRunsForSource(source: FindingSource): ActorRunInfo[] {
     return getRunsForSource(source).filter(
-      (run) => run.status === 'running'
+      (run) => run.status === 'pending'
+        || run.status === 'running'
         || run.status === 'waiting_for_preference_hints'
         || run.status === 'fetching_dataset'
         || run.status === 'analysing',
     );
+  }
+
+  function getRunQueryCount(run?: ActorRunInfo): number {
+    if (!run) return 0;
+    if (Array.isArray(run.displayQueries) && run.displayQueries.length > 0) {
+      return run.displayQueries.length;
+    }
+    if (Array.isArray(run.searchQueries) && run.searchQueries.length > 0) {
+      return run.searchQueries.length;
+    }
+    return run.searchQuery ? 1 : 0;
   }
 
   function getActiveRunForSource(source: FindingSource): ActorRunInfo | undefined {
@@ -2689,7 +2734,7 @@ export default function BrandDetailPage() {
     const runs = getRunsForSource(source);
     const deepSearchRuns = runs.filter((run) => (run.searchDepth ?? 0) > 0);
     return Math.max(
-      deepSearchRuns.length,
+      deepSearchRuns.reduce((sum, run) => sum + Math.max(1, getRunQueryCount(run)), 0),
       runs.reduce((max, run) => Math.max(max, (run.searchDepth ?? 0) === 0 ? run.suggestedSearches?.length ?? 0 : 0), 0),
     );
   }
@@ -2824,15 +2869,6 @@ export default function BrandDetailPage() {
     .map((source) => `${source}:${rawScanProgressPctBySource[source] ?? 0}`)
     .join('|');
   const progressSourcesSignature = progressSourcesWithFallback.join('|');
-  const progressStatusSignature = progressSourcesWithFallback
-    .map((source) => {
-      const runs = getRunsForSource(source);
-      const hasStarted = runs.length > 0;
-      const isInProgress = getInFlightRunsForSource(source).length > 0;
-      const status = !hasStarted ? 'not_started' : (isInProgress ? 'in_progress' : 'complete');
-      return `${source}:${status}`;
-    })
-    .join('|');
 
   useEffect(() => {
     const progressSourceEntries = progressSourceSignature
@@ -2883,7 +2919,7 @@ export default function BrandDetailPage() {
         ? firstProgressSource
         : current
     ));
-  }, [progressScanKey, progressSourcesSignature]);
+  }, [progressScanKey, progressSourcesSignature, progressSourcesWithFallback]);
 
   const activeProgressSource = progressSourcesWithFallback.includes(selectedScanProgressSource)
     ? selectedScanProgressSource

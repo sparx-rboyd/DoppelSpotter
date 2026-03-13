@@ -406,12 +406,26 @@ export interface ActorRunInfo {
   searchDepth?: number;
   /** The literal executable query string used for this run. */
   searchQuery?: string;
+  /** Explicit executable queries for batched runs, when a single actor run covers multiple terms. */
+  searchQueries?: string[];
   /** The user-visible query text with internal site operators removed. */
   displayQuery?: string;
+  /** Explicit user-visible queries for batched runs, when a single actor run covers multiple terms. */
+  displayQueries?: string[];
   /** Set once a depth-0 deep-search-capable run has reserved its follow-up suggestions. */
   deepSearchSuggestionsProcessed?: boolean;
   /** The follow-up queries reserved for this run, if any. */
   suggestedSearches?: string[];
+}
+
+export interface QueuedGitHubRunInfo {
+  scannerId: 'github-repos';
+  actorId: string;
+  source: 'github';
+  searchDepth: 0;
+  searchQuery: string;
+  displayQuery: string;
+  maxResults: number;
 }
 
 export interface Scan {
@@ -431,6 +445,10 @@ export interface Scan {
   actorRunIds?: string[];
   /** Per-actor run details, keyed by Apify run ID */
   actorRuns?: Record<string, ActorRunInfo>;
+  /** GitHub runs that are queued behind the active-run cap and have not been started yet. */
+  queuedGithubRuns?: QueuedGitHubRunInfo[];
+  /** GitHub runs that have been claimed for launch but do not yet have a real Apify run ID. */
+  launchingGithubRuns?: Record<string, QueuedGitHubRunInfo>;
   /** How many actor runs have completed (succeeded or failed) — used to detect scan completion */
   completedRunCount?: number;
   /** Total persisted non-false-positive findings, including ignored and addressed items. */

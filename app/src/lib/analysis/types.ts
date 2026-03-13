@@ -236,7 +236,9 @@ export interface RedditStoredFindingRawData extends Record<string, unknown> {
     scannerId: ScannerId;
     searchDepth: number;
     searchQuery?: string;
+    searchQueries?: string[];
     displayQuery?: string;
+    displayQueries?: string[];
   };
 }
 
@@ -334,7 +336,9 @@ export interface TikTokStoredFindingRawData extends Record<string, unknown> {
     scannerId: ScannerId;
     searchDepth: number;
     searchQuery?: string;
+    searchQueries?: string[];
     displayQuery?: string;
+    displayQueries?: string[];
   };
 }
 

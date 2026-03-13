@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
-import { fetchDatasetItems, startDeepSearchRun } from '@/lib/apify/client';
+import { fetchDatasetItems, startDeepSearchRun, startPreparedActorRun, type PreparedActorInput } from '@/lib/apify/client';
 import { chatCompletion } from '@/lib/analysis/openrouter';
 import { resolveBrandAnalysisSeverityDefinitions } from '@/lib/analysis-severity';
 import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-hints';
@@ -75,7 +75,15 @@ import {
   type XStoredFindingRawData,
   type XTweetCandidate,
 } from '@/lib/analysis/types';
-import type { BrandProfile, Finding, Scan, ActorRunInfo, GoogleScannerId, XFindingMatchBasis } from '@/lib/types';
+import type {
+  ActorRunInfo,
+  BrandProfile,
+  Finding,
+  GoogleScannerId,
+  QueuedGitHubRunInfo,
+  Scan,
+  XFindingMatchBasis,
+} from '@/lib/types';
 import {
   getEffectiveScanSettings,
 } from '@/lib/brands';
@@ -133,6 +141,7 @@ const GITHUB_FINDING_ID_PREFIX = 'github';
 const GITHUB_RAW_DATA_VERSION = 1;
 const X_FINDING_ID_PREFIX = 'x';
 const X_RAW_DATA_VERSION = 1;
+const GITHUB_ACTIVE_RUN_CAP = 2;
 type ScanDocHandle = {
   id: string;
   ref: DocumentReference;
@@ -353,6 +362,54 @@ async function claimSucceededRunForProcessing(
   });
 }
 
+function readActorRunSearchQueries(actorRunInfo?: Partial<ActorRunInfo>): string[] {
+  const explicit = Array.isArray(actorRunInfo?.searchQueries)
+    ? actorRunInfo.searchQueries.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  if (explicit.length > 0) {
+    return uniqueStrings(explicit);
+  }
+  return typeof actorRunInfo?.searchQuery === 'string' && actorRunInfo.searchQuery.trim().length > 0
+    ? [actorRunInfo.searchQuery.trim()]
+    : [];
+}
+
+function readActorRunDisplayQueries(actorRunInfo?: Partial<ActorRunInfo>): string[] {
+  const explicit = Array.isArray(actorRunInfo?.displayQueries)
+    ? actorRunInfo.displayQueries.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  if (explicit.length > 0) {
+    return uniqueStrings(explicit);
+  }
+  return typeof actorRunInfo?.displayQuery === 'string' && actorRunInfo.displayQuery.trim().length > 0
+    ? [actorRunInfo.displayQuery.trim()]
+    : [];
+}
+
+function joinRunQueriesForStorage(values: string[]): string | undefined {
+  return values.length > 0 ? values.join(' | ') : undefined;
+}
+
+function isActorRunInFlight(run?: Pick<ActorRunInfo, 'status'>): boolean {
+  return run?.status === 'pending'
+    || run?.status === 'running'
+    || run?.status === 'waiting_for_preference_hints'
+    || run?.status === 'fetching_dataset'
+    || run?.status === 'analysing';
+}
+
+function buildQueuedGitHubPreparedInput(queuedRun: QueuedGitHubRunInfo): PreparedActorInput {
+  return {
+    input: {
+      query: queuedRun.searchQuery,
+      sortBy: 'best-match',
+      maxResults: queuedRun.maxResults,
+    },
+    query: queuedRun.searchQuery,
+    displayQuery: queuedRun.displayQuery,
+  };
+}
+
 /**
  * Handle a succeeded actor run: fetch dataset items, run AI analysis on each,
  * write findings to Firestore, then mark the actor run as complete.
@@ -386,12 +443,17 @@ async function handleSucceededRun({
   const source = actorRunInfo?.source ?? scannerConfig.source;
   const actorId = actorRunInfo?.actorId ?? scannerConfig.actorId;
   const searchDepth = actorRunInfo?.searchDepth ?? 0;
-  const searchQuery = actorRunInfo?.searchQuery;
-  const displayQuery = actorRunInfo?.displayQuery ?? (
-    searchQuery
-      ? (scannerConfig.kind === 'google' ? sanitizeGoogleQueryForDisplay(searchQuery) : searchQuery)
-      : undefined
-  );
+  const searchQueries = readActorRunSearchQueries(actorRunInfo);
+  const displayQueries = readActorRunDisplayQueries(actorRunInfo);
+  const searchQuery = actorRunInfo?.searchQuery
+    ?? joinRunQueriesForStorage(searchQueries);
+  const displayQuery = actorRunInfo?.displayQuery
+    ?? joinRunQueriesForStorage(displayQueries)
+    ?? (
+      searchQuery
+        ? (scannerConfig.kind === 'google' ? sanitizeGoogleQueryForDisplay(searchQuery) : searchQuery)
+        : undefined
+    );
   const maxSuggestedSearches = effectiveSettings.maxAiDeepSearches;
   const userPreferenceHints = scan.userPreferenceHints;
   const previousFindingUrls = scannerConfig.kind === 'google'
@@ -536,7 +598,9 @@ async function handleSucceededRun({
         items,
         searchDepth,
         searchQuery,
+        searchQueries,
         displayQuery,
+        displayQueries,
         userPreferenceHints,
         previousVideoIds: previousTikTokVideoIds,
         existingTaxonomy,
@@ -1280,7 +1344,9 @@ async function analyseAndWriteTikTokBatch({
   items,
   searchDepth,
   searchQuery,
+  searchQueries,
   displayQuery,
+  displayQueries,
   userPreferenceHints,
   previousVideoIds,
   existingTaxonomy,
@@ -1297,7 +1363,9 @@ async function analyseAndWriteTikTokBatch({
   items: Record<string, unknown>[];
   searchDepth: number;
   searchQuery?: string;
+  searchQueries?: string[];
   displayQuery?: string;
+  displayQueries?: string[];
   userPreferenceHints?: Scan['userPreferenceHints'];
   previousVideoIds?: ReadonlySet<string>;
   existingTaxonomy: { themes: string[] };
@@ -1318,7 +1386,9 @@ async function analyseAndWriteTikTokBatch({
 
   const normalizedRun = normalizeTikTokRun({
     searchQuery,
+    searchQueries,
     displayQuery,
+    displayQueries,
     lookbackDate: effectiveSettings.lookbackDate,
     items,
   });
@@ -1403,7 +1473,9 @@ async function analyseAndWriteTikTokBatch({
       runId,
       searchDepth,
       searchQuery,
+      searchQueries,
       displayQuery,
+      displayQueries,
       candidate,
       runContext: normalizedRun.runContext,
       outcome,
@@ -2116,6 +2188,182 @@ type ScanFindingTotals = {
   skippedCount: number;
 };
 
+function hasQueuedGithubWork(scan: Pick<Scan, 'queuedGithubRuns' | 'launchingGithubRuns'>): boolean {
+  return (scan.queuedGithubRuns?.length ?? 0) > 0 || Object.keys(scan.launchingGithubRuns ?? {}).length > 0;
+}
+
+function getInFlightGithubWorkCount(scan: Pick<Scan, 'actorRuns' | 'launchingGithubRuns'>): number {
+  const activeRuns = Object.values(scan.actorRuns ?? {}).filter(
+    (run) => run.scannerId === 'github-repos' && isActorRunInFlight(run),
+  ).length;
+  const launchingRuns = Object.keys(scan.launchingGithubRuns ?? {}).length;
+  return activeRuns + launchingRuns;
+}
+
+async function reserveQueuedGithubRunsForLaunch(
+  scanRef: DocumentReference,
+): Promise<Array<{ reservationId: string; queuedRun: QueuedGitHubRunInfo }>> {
+  return db.runTransaction(async (tx) => {
+    const freshSnap = await tx.get(scanRef);
+    if (!freshSnap.exists) return [];
+
+    const fresh = freshSnap.data() as Scan;
+    if (fresh.status === 'cancelled' || fresh.status === 'failed' || fresh.status === 'completed') {
+      return [];
+    }
+
+    const queuedRuns = fresh.queuedGithubRuns ?? [];
+    if (queuedRuns.length === 0) {
+      return [];
+    }
+
+    const availableSlots = GITHUB_ACTIVE_RUN_CAP - getInFlightGithubWorkCount(fresh);
+    if (availableSlots <= 0) {
+      return [];
+    }
+
+    const selectedRuns = queuedRuns.slice(0, availableSlots);
+    if (selectedRuns.length === 0) {
+      return [];
+    }
+
+    const reservations = selectedRuns.map((queuedRun) => ({
+      reservationId: randomUUID(),
+      queuedRun,
+    }));
+    const updates: Record<string, unknown> = {
+      queuedGithubRuns: queuedRuns.slice(selectedRuns.length),
+    };
+    for (const reservation of reservations) {
+      updates[`launchingGithubRuns.${reservation.reservationId}`] = reservation.queuedRun;
+    }
+
+    tx.update(scanRef, updates);
+    return reservations;
+  });
+}
+
+async function settleQueuedGithubLaunchReservation(
+  scanRef: DocumentReference,
+  reservationId: string,
+  result?: {
+    runId: string;
+    info: ActorRunInfo;
+  },
+) {
+  const updates: Record<string, unknown> = {
+    [`launchingGithubRuns.${reservationId}`]: FieldValue.delete(),
+  };
+
+  if (result) {
+    updates.actorRunIds = FieldValue.arrayUnion(result.runId);
+    updates[`actorRuns.${result.runId}`] = result.info;
+  }
+
+  await scanRef.update(updates);
+}
+
+async function launchQueuedGithubRunsIfCapacity(params: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  effectiveSettings: NonNullable<Scan['effectiveSettings']>;
+  webhookUrl: string;
+}): Promise<number> {
+  const { scanDoc, effectiveSettings, webhookUrl } = params;
+  let launchedCount = 0;
+
+  while (true) {
+    const reservations = await reserveQueuedGithubRunsForLaunch(scanDoc.ref);
+    if (reservations.length === 0) {
+      return launchedCount;
+    }
+
+    for (const reservation of reservations) {
+      try {
+        const startedRun = await startPreparedActorRun(
+          getScannerConfigById('github-repos'),
+          buildQueuedGitHubPreparedInput(reservation.queuedRun),
+          effectiveSettings,
+          webhookUrl,
+        );
+        await settleQueuedGithubLaunchReservation(scanDoc.ref, reservation.reservationId, {
+          runId: startedRun.runId,
+          info: {
+            scannerId: 'github-repos',
+            actorId: reservation.queuedRun.actorId,
+            source: 'github',
+            status: 'running',
+            skippedDuplicateCount: 0,
+            searchDepth: 0,
+            searchQuery: startedRun.query,
+            ...(startedRun.queries && startedRun.queries.length > 0 ? { searchQueries: startedRun.queries } : {}),
+            displayQuery: startedRun.displayQuery,
+            ...(startedRun.displayQueries && startedRun.displayQueries.length > 0 ? { displayQueries: startedRun.displayQueries } : {}),
+          },
+        });
+        launchedCount += 1;
+      } catch (error) {
+        console.error(`[webhook] Failed to start queued GitHub run "${reservation.queuedRun.displayQuery}":`, error);
+        await settleQueuedGithubLaunchReservation(scanDoc.ref, reservation.reservationId);
+      }
+    }
+  }
+}
+
+async function finalizeIdleScanIfNoRemainingWork(scanDoc: ScanDocHandle): Promise<void> {
+  const result = await db.runTransaction<MarkActorRunCompleteResult>(async (tx) => {
+    const freshSnap = await tx.get(scanDoc.ref);
+    if (!freshSnap.exists) return { needsSummary: false, shouldDrainGithubQueue: false };
+
+    const fresh = freshSnap.data() as Scan;
+    if (fresh.status === 'cancelled' || fresh.status === 'failed' || fresh.status === 'completed' || fresh.status === 'summarising') {
+      return { needsSummary: false, shouldDrainGithubQueue: false };
+    }
+    if (hasQueuedGithubWork(fresh)) {
+      return { needsSummary: false, shouldDrainGithubQueue: false };
+    }
+    if (Object.values(fresh.actorRuns ?? {}).some((run) => isActorRunInFlight(run))) {
+      return { needsSummary: false, shouldDrainGithubQueue: false };
+    }
+
+    const totalRunCount = fresh.actorRunIds?.length ?? 0;
+    const completedRunCount = fresh.completedRunCount ?? 0;
+    if (totalRunCount > 0 && completedRunCount < totalRunCount) {
+      return { needsSummary: false, shouldDrainGithubQueue: false };
+    }
+
+    const hasResults = hasPersistedScanResults({
+      findingCount: fresh.findingCount ?? 0,
+      highCount: fresh.highCount ?? 0,
+      mediumCount: fresh.mediumCount ?? 0,
+      lowCount: fresh.lowCount ?? 0,
+      nonHitCount: fresh.nonHitCount ?? 0,
+      ignoredCount: fresh.ignoredCount ?? 0,
+      addressedCount: fresh.addressedCount ?? 0,
+      skippedCount: fresh.skippedCount ?? 0,
+    });
+    const anySucceeded = Object.values(fresh.actorRuns ?? {}).some((run) => run.status === 'succeeded');
+    const updates: Record<string, unknown> = {};
+
+    if (anySucceeded || hasResults) {
+      updates.status = 'summarising';
+      updates.summaryStartedAt = FieldValue.serverTimestamp();
+    } else {
+      updates.status = 'failed';
+      updates.completedAt = FieldValue.serverTimestamp();
+      updates.errorMessage = 'All actor runs failed or were aborted';
+      await clearBrandActiveScanIfMatches(db.collection('brands').doc(fresh.brandId), scanDoc.id, tx);
+    }
+
+    tx.update(scanDoc.ref, updates);
+    return { needsSummary: updates.status === 'summarising', shouldDrainGithubQueue: false };
+  });
+
+  if (result.needsSummary) {
+    await generateAndPersistScanSummary(scanDoc.ref);
+  }
+}
+
 type MarkActorRunCompleteOptions = {
   reconcilePersistedCounts?: boolean;
 };
@@ -2124,6 +2372,7 @@ type ScanSummaryFindingInput = Pick<Finding, 'severity' | 'title' | 'llmAnalysis
 
 type MarkActorRunCompleteResult = {
   needsSummary: boolean;
+  shouldDrainGithubQueue: boolean;
 };
 
 async function retryChunkAnalysisOnce<Result>({
@@ -2638,12 +2887,16 @@ function isRedditPostWithinLookback(createdAt?: string, lookbackDate?: string): 
 
 function normalizeTikTokRun({
   searchQuery,
+  searchQueries,
   displayQuery,
+  displayQueries,
   lookbackDate,
   items,
 }: {
   searchQuery?: string;
+  searchQueries?: string[];
   displayQuery?: string;
+  displayQueries?: string[];
   lookbackDate?: string;
   items: Record<string, unknown>[];
 }): { candidates: TikTokVideoCandidate[]; runContext: TikTokRunContext } {
@@ -2654,7 +2907,11 @@ function normalizeTikTokRun({
   const sampleCaptions = new Set<string>();
   let nextResultId = 1;
 
-  for (const sourceQuery of readDelimitedQueries(displayQuery ?? searchQuery)) {
+  for (const sourceQuery of uniqueStrings([
+    ...(Array.isArray(displayQueries) ? displayQueries : []),
+    ...(Array.isArray(searchQueries) ? searchQueries : []),
+    ...readDelimitedQueries(displayQuery ?? searchQuery),
+  ])) {
     sourceQueries.add(sourceQuery);
   }
 
@@ -3893,7 +4150,9 @@ async function upsertTikTokFinding({
   runId,
   searchDepth,
   searchQuery,
+  searchQueries,
   displayQuery,
+  displayQueries,
   candidate,
   runContext,
   outcome,
@@ -3906,7 +4165,9 @@ async function upsertTikTokFinding({
   runId: string;
   searchDepth: number;
   searchQuery?: string;
+  searchQueries?: string[];
   displayQuery?: string;
+  displayQueries?: string[];
   candidate: TikTokVideoCandidate;
   runContext: TikTokRunContext;
   outcome: TikTokFindingOutcome;
@@ -3927,7 +4188,9 @@ async function upsertTikTokFinding({
       runId,
       searchDepth,
       searchQuery,
+      searchQueries,
       displayQuery,
+      displayQueries,
       classificationSource: preferredOutcome.classificationSource,
     });
     const preferredSource = choosePreferredFindingSource(existing?.source, source);
@@ -4548,6 +4811,9 @@ async function reserveSuggestedSearches({
       Object.values(fresh.actorRuns ?? {})
         .flatMap((value) => {
           const existing: string[] = [];
+          for (const query of readActorRunSearchQueries(value)) {
+            existing.push(normalizeSuggestedSearchKey(query));
+          }
           if (typeof value.searchQuery === 'string' && value.searchQuery.trim().length > 0) {
             existing.push(normalizeSuggestedSearchKey(value.searchQuery));
           }
@@ -4608,12 +4874,19 @@ async function triggerDeepSearches({
 }) {
   const queries = suggestedSearches.slice(0, maxSuggestedSearches);
   const effectiveSettings = getEffectiveScanSettings(brand, scan.effectiveSettings);
+  const queryGroups = queries.map((query) => [query]);
 
-  const startResults = await Promise.all(queries.map(async (query) => {
+  const startResults = await Promise.all(queryGroups.map(async (queryGroup) => {
     try {
-      const { runId, query: executableQuery, displayQuery } = await startDeepSearchRun({
+      const {
+        runId,
+        query: executableQuery,
+        queries: executableQueries,
+        displayQuery,
+        displayQueries,
+      } = await startDeepSearchRun({
         actor: scannerConfig,
-        query,
+        queries: queryGroup,
         searchResultPages: effectiveSettings.searchResultPages,
         lookbackDate: scan.effectiveSettings?.lookbackDate ?? effectiveSettings.lookbackDate,
         webhookUrl,
@@ -4629,11 +4902,13 @@ async function triggerDeepSearches({
           skippedDuplicateCount: 0,
           searchDepth: 1,
           searchQuery: executableQuery,
+          ...(executableQueries.length > 0 ? { searchQueries: executableQueries } : {}),
           displayQuery,
+          ...(displayQueries.length > 0 ? { displayQueries } : {}),
         } satisfies ActorRunInfo,
       };
     } catch (err) {
-      console.error(`[webhook] Failed to start deep search for "${query}":`, err);
+      console.error(`[webhook] Failed to start deep search for "${queryGroup.join(' | ')}":`, err);
       return null;
     }
   }));
@@ -5050,7 +5325,9 @@ function buildTikTokStoredFindingRawData({
   runId,
   searchDepth,
   searchQuery,
+  searchQueries,
   displayQuery,
+  displayQueries,
   classificationSource,
 }: {
   existingRawData?: Record<string, unknown>;
@@ -5061,7 +5338,9 @@ function buildTikTokStoredFindingRawData({
   runId: string;
   searchDepth: number;
   searchQuery?: string;
+  searchQueries?: string[];
   displayQuery?: string;
+  displayQueries?: string[];
   classificationSource: 'llm' | 'fallback';
 }): TikTokStoredFindingRawData {
   const existing = readTikTokStoredFindingRawData(existingRawData);
@@ -5097,7 +5376,9 @@ function buildTikTokStoredFindingRawData({
       scannerId: scannerConfig.id,
       searchDepth,
       ...(searchQuery ? { searchQuery } : {}),
+      ...(searchQueries && searchQueries.length > 0 ? { searchQueries } : {}),
       ...(displayQuery ? { displayQuery } : {}),
+      ...(displayQueries && displayQueries.length > 0 ? { displayQueries } : {}),
     },
   }) as TikTokStoredFindingRawData;
 }
@@ -5179,7 +5460,13 @@ function readTikTokStoredFindingRawData(rawData?: Record<string, unknown>): TikT
       scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'tiktok-posts',
       searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
       searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
+      searchQueries: Array.isArray(analysis.searchQueries)
+        ? analysis.searchQueries.filter((value): value is string => typeof value === 'string')
+        : undefined,
       displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
+      displayQueries: Array.isArray(analysis.displayQueries)
+        ? analysis.displayQueries.filter((value): value is string => typeof value === 'string')
+        : undefined,
     },
   };
 }
@@ -6576,18 +6863,45 @@ function readTikTokAuthor(item: Record<string, unknown>): TikTokVideoCandidate['
   const uniqueId = readOptionalTrimmedString(author.unique_id)
     ?? readOptionalTrimmedString(author.uniqueId)
     ?? readOptionalTrimmedString(author.username)
-    ?? readOptionalTrimmedString(author.name);
+    ?? readOptionalTrimmedString(author.name)
+    ?? readOptionalTrimmedString(item['author.unique_id'])
+    ?? readOptionalTrimmedString(item['author.uniqueId'])
+    ?? readOptionalTrimmedString(item['author.username'])
+    ?? readOptionalTrimmedString(item['author.name'])
+    ?? readOptionalTrimmedString(item['channel.unique_id'])
+    ?? readOptionalTrimmedString(item['channel.uniqueId'])
+    ?? readOptionalTrimmedString(item['channel.username'])
+    ?? readOptionalTrimmedString(item['channel.name']);
   const url = readOptionalTrimmedString(author.url)
+    ?? readOptionalTrimmedString(item['author.url'])
+    ?? readOptionalTrimmedString(item['channel.url'])
     ?? (uniqueId ? `https://www.tiktok.com/@${uniqueId}` : undefined);
+  const id = readOptionalTrimmedString(author.user_id)
+    ?? readOptionalTrimmedString(author.id)
+    ?? readOptionalTrimmedString(item['author.user_id'])
+    ?? readOptionalTrimmedString(item['author.id'])
+    ?? readOptionalTrimmedString(item['channel.id']);
+  const nickname = readOptionalTrimmedString(author.nickname)
+    ?? readOptionalTrimmedString(item['author.nickname'])
+    ?? readOptionalTrimmedString(item['channel.name']);
+  const signature = readOptionalTrimmedString(author.signature)
+    ?? readOptionalTrimmedString(author.bio)
+    ?? readOptionalTrimmedString(item['author.signature'])
+    ?? readOptionalTrimmedString(item['author.bio'])
+    ?? readOptionalTrimmedString(item['channel.signature'])
+    ?? readOptionalTrimmedString(item['channel.bio']);
+  const verified = typeof author.verified === 'boolean'
+    ? author.verified
+    : (typeof item['author.verified'] === 'boolean'
+      ? item['author.verified']
+      : (typeof item['channel.verified'] === 'boolean' ? item['channel.verified'] : undefined));
 
   return {
-    ...(typeof author.user_id === 'string' && author.user_id.trim().length > 0 ? { id: author.user_id.trim() } : {}),
-    ...(typeof author.id === 'string' && author.id.trim().length > 0 ? { id: author.id.trim() } : {}),
+    ...(id ? { id } : {}),
     ...(uniqueId ? { uniqueId } : {}),
-    ...(readOptionalTrimmedString(author.nickname) ? { nickname: readOptionalTrimmedString(author.nickname) } : {}),
-    ...(readOptionalTrimmedString(author.signature) ? { signature: readOptionalTrimmedString(author.signature) } : {}),
-    ...(readOptionalTrimmedString(author.bio) ? { signature: readOptionalTrimmedString(author.bio) } : {}),
-    ...(typeof author.verified === 'boolean' ? { verified: author.verified } : {}),
+    ...(nickname ? { nickname } : {}),
+    ...(signature ? { signature } : {}),
+    ...(verified !== undefined ? { verified } : {}),
     ...(url ? { url } : {}),
   };
 }
@@ -6648,13 +6962,28 @@ function readTikTokMusic(item: Record<string, unknown>): TikTokVideoCandidate['m
   const idValue = music.id;
   const id = typeof idValue === 'string'
     ? idValue.trim()
-    : (typeof idValue === 'number' && Number.isFinite(idValue) ? String(idValue) : undefined);
-  const title = readOptionalTrimmedString(music.title);
-  const author = readOptionalTrimmedString(music.author) ?? readOptionalTrimmedString(music.artist);
-  const ownerHandle = readOptionalTrimmedString(music.owner_handle);
+    : (typeof idValue === 'number' && Number.isFinite(idValue) ? String(idValue) : undefined)
+    ?? readOptionalTrimmedString(item['music.id'])
+    ?? readOptionalTrimmedString(item['song.id']);
+  const title = readOptionalTrimmedString(music.title)
+    ?? readOptionalTrimmedString(item['music.title'])
+    ?? readOptionalTrimmedString(item['song.title']);
+  const author = readOptionalTrimmedString(music.author)
+    ?? readOptionalTrimmedString(music.artist)
+    ?? readOptionalTrimmedString(item['music.author'])
+    ?? readOptionalTrimmedString(item['music.artist'])
+    ?? readOptionalTrimmedString(item['song.author'])
+    ?? readOptionalTrimmedString(item['song.artist']);
+  const ownerHandle = readOptionalTrimmedString(music.owner_handle)
+    ?? readOptionalTrimmedString(item['music.owner_handle'])
+    ?? readOptionalTrimmedString(item['song.owner_handle']);
   const isOriginalSound = typeof music.is_original_sound === 'boolean'
     ? music.is_original_sound
-    : (typeof music.isOriginalSound === 'boolean' ? music.isOriginalSound : undefined);
+    : (typeof music.isOriginalSound === 'boolean'
+      ? music.isOriginalSound
+      : (typeof item['music.is_original_sound'] === 'boolean'
+        ? item['music.is_original_sound']
+        : (typeof item['song.is_original_sound'] === 'boolean' ? item['song.is_original_sound'] : undefined)));
 
   if (!id && !title && !author && !ownerHandle && isOriginalSound === undefined) {
     return undefined;
@@ -7189,20 +7518,22 @@ async function markActorRunComplete(
     // do not overwrite the cancelled status or increment completion counters.
     if (fresh.status === 'cancelled') {
       console.log(`[webhook] markActorRunComplete: scan ${scanDoc.id} is cancelled — skipping`);
-      return { needsSummary: false };
+      return { needsSummary: false, shouldDrainGithubQueue: false };
     }
 
     const existingRunStatus = fresh.actorRuns?.[runId]?.status;
     if (existingRunStatus === 'succeeded' || existingRunStatus === 'failed') {
       console.log(`[webhook] markActorRunComplete: run ${runId} already ${existingRunStatus} — skipping duplicate completion`);
-      return { needsSummary: false };
+      return { needsSummary: false, shouldDrainGithubQueue: false };
     }
 
     // Read the current total from the fresh snapshot so any deep-search runs
     // added after the scan started are included in the completion check.
     const totalRunCount = fresh.actorRunIds?.length ?? 1;
     const updatedCompletedCount = (fresh.completedRunCount ?? 0) + 1;
-    const allDone = updatedCompletedCount >= totalRunCount;
+    const allDone = updatedCompletedCount >= totalRunCount && !hasQueuedGithubWork(fresh);
+    const shouldDrainGithubQueue = fresh.actorRuns?.[runId]?.scannerId === 'github-repos'
+      && (fresh.queuedGithubRuns?.length ?? 0) > 0;
     const reconciledTotals = options.reconcilePersistedCounts
       ? {
         ...buildScanFindingTotals(
@@ -7276,10 +7607,34 @@ async function markActorRunComplete(
     }
 
     tx.update(scanDoc.ref, updates);
-    return { needsSummary: allDone && updates.status === 'summarising' };
+    return {
+      needsSummary: allDone && updates.status === 'summarising',
+      shouldDrainGithubQueue,
+    };
   });
 
   if (result.needsSummary) {
     await generateAndPersistScanSummary(scanDoc.ref);
+  }
+  if (result.shouldDrainGithubQueue) {
+    const freshScanSnap = await scanDoc.ref.get();
+    if (!freshScanSnap.exists) {
+      return;
+    }
+    const freshScan = scanFromSnapshot(freshScanSnap);
+    if (!freshScan.effectiveSettings) {
+      console.warn(`[webhook] Cannot launch queued GitHub runs for scan ${scanDoc.id} because effectiveSettings are missing`);
+      await finalizeIdleScanIfNoRemainingWork(scanDoc);
+      return;
+    }
+    const launchedCount = await launchQueuedGithubRunsIfCapacity({
+      scanDoc,
+      scan: freshScan,
+      effectiveSettings: freshScan.effectiveSettings,
+      webhookUrl: `${(process.env.APP_URL ?? 'http://localhost:3000').replace(/\/$/, '')}/api/webhooks/apify`,
+    });
+    if (launchedCount === 0) {
+      await finalizeIdleScanIfNoRemainingWork(scanDoc);
+    }
   }
 }

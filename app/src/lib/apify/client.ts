@@ -38,7 +38,9 @@ export interface ActorRunResult {
 export interface ActorRunStart {
   runId: string;
   query: string;
+  queries?: string[];
   displayQuery: string;
+  displayQueries?: string[];
 }
 
 export interface StartActorRunsResult {
@@ -46,10 +48,12 @@ export interface StartActorRunsResult {
   failedCount: number;
 }
 
-type PreparedActorInput = {
+export type PreparedActorInput = {
   input: Record<string, unknown>;
   query: string;
+  queries?: string[];
   displayQuery: string;
+  displayQueries?: string[];
 };
 
 type ActorRunBrandContext = Pick<BrandProfile, 'name' | 'keywords'>;
@@ -57,7 +61,6 @@ type ActorRunBrandContext = Pick<BrandProfile, 'name' | 'keywords'>;
 const GITHUB_MIN_RESULTS_PER_KEYWORD = 10;
 const REDDIT_MIN_POSTS_PER_QUERY = 10;
 const TIKTOK_MIN_POSTS_PER_QUERY = 10;
-
 /** Memory cap for Google Search actor runs (MB). Keeps combined account RAM well within plan limits. */
 const GOOGLE_ACTOR_MEMORY_MB = 512;
 /** Memory cap for Reddit actor runs (MB). Empirically sufficient and avoids unnecessary account RAM pressure. */
@@ -109,7 +112,7 @@ export function buildActorInput(
   actor: ActorConfig,
   brand: ActorRunBrandContext,
   settings: EffectiveScanSettings,
-): { input: Record<string, unknown>; query: string; displayQuery: string } {
+): { input: Record<string, unknown>; query: string; queries?: string[]; displayQuery: string; displayQueries?: string[] } {
   const actorInputs = buildActorInputs(actor, brand, settings);
   if (actorInputs.length !== 1) {
     throw new Error(`buildActorInput does not support batched inputs for ${actor.id}; use buildActorInputs instead`);
@@ -117,7 +120,7 @@ export function buildActorInput(
   return actorInputs[0];
 }
 
-function buildActorInputs(
+export function buildActorInputs(
   actor: ActorConfig,
   brand: ActorRunBrandContext,
   settings: EffectiveScanSettings,
@@ -239,20 +242,35 @@ export async function startActorRun(
   brand: ActorRunBrandContext,
   settings: EffectiveScanSettings,
   webhookUrl: string,
-): Promise<{ runId: string; query: string; displayQuery: string }> {
+): Promise<{ runId: string; query: string; queries?: string[]; displayQuery: string; displayQueries?: string[] }> {
   const actorInputs = buildActorInputs(actor, brand, settings);
   if (actorInputs.length !== 1) {
     throw new Error(`startActorRun does not support batched inputs for ${actor.id}; use startActorRuns instead`);
   }
 
+  return startPreparedActorRun(actor, actorInputs[0], settings, webhookUrl);
+}
+
+export async function startPreparedActorRun(
+  actor: ActorConfig,
+  preparedInput: PreparedActorInput,
+  settings: EffectiveScanSettings,
+  webhookUrl: string,
+): Promise<{ runId: string; query: string; queries?: string[]; displayQuery: string; displayQueries?: string[] }> {
   const client = getClient();
-  const { input, query, displayQuery } = actorInputs[0];
+  const {
+    input,
+    query,
+    queries,
+    displayQuery,
+    displayQueries,
+  } = preparedInput;
   const startOptions = buildActorStartOptions(actor, settings, webhookUrl);
   const run = await withActorStartRetry(
     () => client.actor(actor.actorId).start(input, startOptions),
-    `${actor.id}`,
+    `${actor.id} query "${displayQuery}"`,
   );
-  return { runId: run.id, query, displayQuery };
+  return { runId: run.id, query, queries, displayQuery, displayQueries };
 }
 
 export async function startActorRuns(
@@ -261,19 +279,28 @@ export async function startActorRuns(
   settings: EffectiveScanSettings,
   webhookUrl: string,
 ): Promise<StartActorRunsResult> {
-  const client = getClient();
   const actorInputs = buildActorInputs(actor, brand, settings);
+  return startPreparedActorRuns(actor, actorInputs, settings, webhookUrl);
+}
+
+export async function startPreparedActorRuns(
+  actor: ActorConfig,
+  actorInputs: PreparedActorInput[],
+  settings: EffectiveScanSettings,
+  webhookUrl: string,
+): Promise<StartActorRunsResult> {
+  const client = getClient();
   let failedCount = 0;
   const runs: ActorRunStart[] = [];
 
   const startOptions = buildActorStartOptions(actor, settings, webhookUrl);
-  for (const { input, query, displayQuery } of actorInputs) {
+  for (const { input, query, queries, displayQuery, displayQueries } of actorInputs) {
     try {
       const run = await withActorStartRetry(
         () => client.actor(actor.actorId).start(input, startOptions),
         `${actor.id} query "${displayQuery}"`,
       );
-      runs.push({ runId: run.id, query, displayQuery });
+      runs.push({ runId: run.id, query, queries, displayQuery, displayQueries });
     } catch (error) {
       failedCount += 1;
       console.error(`[apify] Failed to start ${actor.id} run for query "${displayQuery}":`, error);
@@ -293,17 +320,17 @@ export async function startActorRuns(
 export async function startDeepSearchRun(
   params: {
     actor: ActorConfig;
-    query: string;
+    queries: string[];
     searchResultPages: number | undefined;
     lookbackDate: string | undefined;
     webhookUrl: string;
   },
-): Promise<{ runId: string; query: string; displayQuery: string }> {
-  const { actor, query, searchResultPages, lookbackDate, webhookUrl } = params;
+): Promise<{ runId: string; query: string; queries: string[]; displayQuery: string; displayQueries: string[] }> {
+  const { actor, queries, searchResultPages, lookbackDate, webhookUrl } = params;
   const client = getClient();
 
-  const trimmedQuery = query.trim();
-  if (!trimmedQuery) {
+  const trimmedQueries = normalizeSearchTerms(queries);
+  if (trimmedQueries.length === 0) {
     throw new Error('Deep-search query must not be empty');
   }
 
@@ -312,8 +339,8 @@ export async function startDeepSearchRun(
   }
 
   let runInput: Record<string, unknown>;
-  let executableQuery: string;
-  let displayQuery: string;
+  let executableQueries: string[];
+  let displayQueries: string[];
   const startOptions: Record<string, unknown> = {
     webhooks: [
       {
@@ -325,18 +352,20 @@ export async function startDeepSearchRun(
   };
 
   if (actor.kind === 'google') {
-    const baseQuery = buildGoogleScannerQuery(actor.source, trimmedQuery);
-    executableQuery = lookbackDate ? `${baseQuery} after:${lookbackDate}` : baseQuery;
+    const baseQuery = buildGoogleScannerQuery(actor.source, trimmedQueries[0]);
+    const executableQuery = lookbackDate ? `${baseQuery} after:${lookbackDate}` : baseQuery;
+    executableQueries = [executableQuery];
+    displayQueries = [sanitizeGoogleQueryForDisplay(executableQuery)];
     runInput = {
       queries: executableQuery,
       maxPagesPerQuery: getDeepSearchGooglePageCount(searchResultPages),
     };
-    displayQuery = sanitizeGoogleQueryForDisplay(executableQuery);
     startOptions.memory = GOOGLE_ACTOR_MEMORY_MB;
   } else if (actor.kind === 'reddit') {
-    executableQuery = trimmedQuery;
+    executableQueries = [trimmedQueries[0]];
+    displayQueries = [...executableQueries];
     runInput = {
-      queries: [trimmedQuery],
+      queries: executableQueries,
       sort: 'relevance',
       timeframe: getRedditTimeframeForLookbackDate(lookbackDate),
       maxPosts: getDeepSearchRedditMaxPosts(),
@@ -344,31 +373,33 @@ export async function startDeepSearchRun(
       includeNsfw: false,
       strictTokenFilter: true,
     };
-    displayQuery = trimmedQuery;
     startOptions.memory = REDDIT_ACTOR_MEMORY_MB;
   } else if (actor.kind === 'tiktok') {
-    executableQuery = trimmedQuery;
+    executableQueries = [trimmedQueries[0]];
+    displayQueries = [...executableQueries];
     runInput = {
-      keywords: [trimmedQuery],
+      keywords: executableQueries,
       maxItems: getDeepSearchTikTokMaxItems(),
       dateRange: getTikTokDateRangeForLookbackDate(lookbackDate),
       sortType: 'RELEVANCE',
       includeSearchKeywords: true,
     };
-    displayQuery = trimmedQuery;
   } else if (actor.kind === 'x') {
-    executableQuery = trimmedQuery;
+    executableQueries = [trimmedQueries[0]];
+    displayQueries = [...executableQueries];
     runInput = {
-      searchTerms: [trimmedQuery],
+      searchTerms: executableQueries,
       maxItems: getDeepSearchXMaxItems(),
       sort: 'Latest',
       includeSearchTerms: true,
       ...(lookbackDate ? { start: lookbackDate } : {}),
     };
-    displayQuery = trimmedQuery;
   } else {
     throw new Error(`Deep search is not implemented for ${actor.displayName}`);
   }
+
+  const query = joinSearchTermsForDisplay(executableQueries);
+  const displayQuery = joinSearchTermsForDisplay(displayQueries);
 
   const run = await withActorStartRetry(
     () => client.actor(actor.actorId).start(runInput, startOptions),
@@ -377,8 +408,10 @@ export async function startDeepSearchRun(
 
   return {
     runId: run.id,
-    query: executableQuery,
+    query,
+    queries: executableQueries,
     displayQuery,
+    displayQueries,
   };
 }
 

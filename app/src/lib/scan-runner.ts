@@ -1,7 +1,15 @@
 import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
 import { db } from './firestore';
-import type { ActorRunInfo, BrandProfile, EffectiveScanSettings, Scan, ScanSettingsInput } from './types';
+import type {
+  ActorRunInfo,
+  BrandProfile,
+  EffectiveScanSettings,
+  QueuedGitHubRunInfo,
+  Scan,
+  ScanSettingsInput,
+} from './types';
 import type { ActorConfig } from './apify/actors';
+import type { PreparedActorInput } from './apify/client';
 import { resolveBrandAnalysisSeverityDefinitions } from './analysis-severity';
 import { isBrandDeletionActive, isBrandHistoryDeletionActive } from './async-deletions';
 import { getEffectiveScanSettings } from './brands';
@@ -64,9 +72,53 @@ type PreparedScanStart = {
   targetActors: ActorConfig[];
 };
 
+const GITHUB_ACTIVE_RUN_CAP = 2;
+
+function buildActorRunInfo(
+  actorConfig: ActorConfig,
+  params: {
+    query: string;
+    queries?: string[];
+    displayQuery: string;
+    displayQueries?: string[];
+    searchDepth: 0 | 1;
+  },
+): ActorRunInfo {
+  return {
+    scannerId: actorConfig.id,
+    actorId: actorConfig.actorId,
+    source: actorConfig.source,
+    status: 'running',
+    skippedDuplicateCount: 0,
+    searchDepth: params.searchDepth,
+    searchQuery: params.query,
+    ...(params.queries && params.queries.length > 0 ? { searchQueries: params.queries } : {}),
+    displayQuery: params.displayQuery,
+    ...(params.displayQueries && params.displayQueries.length > 0 ? { displayQueries: params.displayQueries } : {}),
+  };
+}
+
+function buildQueuedGitHubRunInfo(
+  actorConfig: ActorConfig,
+  preparedInput: PreparedActorInput,
+): QueuedGitHubRunInfo {
+  const maxResults = typeof preparedInput.input.maxResults === 'number' && Number.isFinite(preparedInput.input.maxResults)
+    ? preparedInput.input.maxResults
+    : 0;
+  return {
+    scannerId: 'github-repos',
+    actorId: actorConfig.actorId,
+    source: 'github',
+    searchDepth: 0,
+    searchQuery: preparedInput.query,
+    displayQuery: preparedInput.displayQuery,
+    maxResults,
+  };
+}
+
 export async function startScanForBrand(params: StartScanForBrandParams): Promise<StartScanForBrandResult> {
   const { getTargetActorConfigs } = await import('@/lib/apify/actors');
-  const { startActorRuns } = await import('@/lib/apify/client');
+  const { buildActorInputs, startActorRuns, startPreparedActorRun } = await import('@/lib/apify/client');
   const { prepareUserPreferenceHintsForScan } = await import('@/lib/analysis/user-preference-hints');
   const brandRef = db.collection('brands').doc(params.brandId);
   const scanRef = db.collection('scans').doc();
@@ -102,6 +154,8 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
     actorIds: [],
     actorRunIds: [],
     actorRuns: {},
+    queuedGithubRuns: [],
+    launchingGithubRuns: {},
     completedRunCount: 0,
     findingCount: 0,
     addressedCount: 0,
@@ -235,34 +289,74 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
   const actorStartPromise = (async () => {
     const results = await Promise.all(readyScan.targetActors.map(async (actorConfig) => {
       try {
-        const { runs, failedCount } = await startActorRuns(
-          actorConfig,
-          readyScan.brand,
-          readyScan.effectiveSettings,
-          webhookUrl,
-        );
+        let failedCount = 0;
+        let runs: Awaited<ReturnType<typeof startActorRuns>>['runs'] = [];
+        const queuedGithubRuns: QueuedGitHubRunInfo[] = [];
+
+        if (actorConfig.kind === 'github') {
+          const preparedInputs = buildActorInputs(
+            actorConfig,
+            readyScan.brand,
+            readyScan.effectiveSettings,
+          );
+
+          for (const preparedInput of preparedInputs) {
+            if (runs.length >= GITHUB_ACTIVE_RUN_CAP) {
+              queuedGithubRuns.push(buildQueuedGitHubRunInfo(actorConfig, preparedInput));
+              continue;
+            }
+
+            try {
+              runs.push(await startPreparedActorRun(
+                actorConfig,
+                preparedInput,
+                readyScan.effectiveSettings,
+                webhookUrl,
+              ));
+            } catch (error) {
+              failedCount += 1;
+              console.error(`[apify] Failed to start ${actorConfig.id} run for query "${preparedInput.displayQuery}":`, error);
+            }
+          }
+        } else {
+          ({ runs, failedCount } = await startActorRuns(
+            actorConfig,
+            readyScan.brand,
+            readyScan.effectiveSettings,
+            webhookUrl,
+          ));
+        }
+
+        if (runs.length === 0) {
+          if (failedCount > 0) {
+            console.error(`[scan] Failed to start scanner ${actorConfig.id}: all run starts failed`);
+          }
+          return 0;
+        }
+
         const updates: Record<string, unknown> = {
           actorRunIds: FieldValue.arrayUnion(...runs.map((run) => run.runId)),
         };
 
-        for (const { runId, query, displayQuery } of runs) {
-          updates[`actorRuns.${runId}`] = {
-            scannerId: actorConfig.id,
-            actorId: actorConfig.actorId,
-            source: actorConfig.source,
-            status: 'running',
-            skippedDuplicateCount: 0,
-            searchDepth: 0,
-            searchQuery: query,
+        for (const { runId, query, queries, displayQuery, displayQueries } of runs) {
+          updates[`actorRuns.${runId}`] = buildActorRunInfo(actorConfig, {
+            query,
+            queries,
             displayQuery,
-          } satisfies ActorRunInfo;
+            displayQueries,
+            searchDepth: 0,
+          });
+        }
+
+        if (queuedGithubRuns.length > 0) {
+          updates.queuedGithubRuns = FieldValue.arrayUnion(...queuedGithubRuns);
         }
 
         await readyScan.scanRef.update(updates);
 
         if (failedCount > 0) {
           console.error(
-            `[scan] Started scanner ${actorConfig.id} (${actorConfig.actorId}) with ${runs.length} run(s); ${failedCount} batched run(s) failed to start`,
+            `[scan] Started scanner ${actorConfig.id} (${actorConfig.actorId}) with ${runs.length} run(s); ${failedCount} run(s) failed to start`,
           );
         } else {
           console.log(

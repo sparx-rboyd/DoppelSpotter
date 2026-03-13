@@ -124,11 +124,12 @@ the dedicated TikTok search actor with one actor run per brand search term, mapp
 `Search depth` setting (`1..5`) to a total post budget of `100..500` distributed across keyword
 runs (`maxItems`, minimum 10 posts per query). The scan's exact `lookbackDate` is approximated to
 the actor's `dateRange` bucket and then applied again as an exact created-at filter inside the
-webhook before analysis. Stores one finding per TikTok video, derives the canonical TikTok post
-URL as the user-visible URL, uses TikTok video `id` as the canonical identity for per-scan
-upserts and historical repeat suppression, and supports AI-requested deep-search follow-up runs:
-each follow-up query starts a new TikTok actor run capped at `maxItems = 50` and never recurses
-beyond depth 1.
+webhook before analysis. The webhook accepts both nested TikTok author/song objects and flat raw
+keys such as `channel.username` and `song.title`. Stores one finding per TikTok video, derives the
+canonical TikTok post URL as the user-visible URL, uses TikTok video `id` as the canonical
+identity for per-scan upserts and historical repeat suppression, and supports AI-requested
+deep-search follow-up runs: each follow-up query starts a new TikTok actor run capped at
+`maxItems = 50` and never recurses beyond depth 1.
 
 `discord-servers` is a non-Google source. It does not use `site:` operators or SERP
 pages. Instead it queries Discord's public server-discovery index through the Apify actor,
@@ -141,10 +142,12 @@ Apify `maxTotalChargeUsd` cap from `$0.20` to `$0.60` per run.
 the Apify actor with one actor run per search term using the format
 `<keyword> in:name,description pushed:>YYYY-MM-DD`. The brand-page `Search depth` setting
 (`1..5`) maps to a total `maxResults` budget of `50..250` divided evenly across keyword runs
-(minimum 10 results per keyword). Stores one finding per repository, derives
-`https://github.com/<fullName>` as the user-visible URL, uses repo `fullName` (`owner/repo`) as
-the canonical identity for per-scan upserts and historical repeat suppression, and does **not**
-support deep-search follow-up runs.
+(minimum 10 results per keyword). Initial scan startup now launches at most two GitHub runs at a
+time; any remaining GitHub terms are persisted on the scan document as queued work, and each
+completed GitHub run drains the next queued term until the queue is empty. Stores one finding per
+repository, derives `https://github.com/<fullName>` as the user-visible URL, uses repo `fullName`
+(`owner/repo`) as the canonical identity for per-scan upserts and historical repeat suppression,
+and does **not** support deep-search follow-up runs.
 
 `x-search` is a tweet-level source. It uses `searchTerms` only, maps the brand-page `Search depth`
 setting from `1..5` to `maxItems = 50..250`, stores one finding per tweet, uses tweet `id` as
@@ -194,10 +197,11 @@ POST /api/scan
  └─ also snapshots the resolved `scans.analysisSeverityDefinitions` so classification thresholds stay deterministic if the brand settings are edited mid-scan
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
  └─ resolves the scan's enabled logical scanners (`google-web`, `reddit-posts`, `tiktok-posts`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `google-apple-app-store`, `google-play`, `domain-registrations`, `discord-servers`, `github-repos`, `x-search`) from `scans.effectiveSettings.scanSources`
- └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Reddit maps the same setting to a `60..300` total post budget distributed across `queries[]` via `maxPosts` (minimum 10 per query) plus `maxTotalChargeUsd = $0.10..$0.50` per run; TikTok maps it to a `100..500` total video budget distributed across keyword runs via `maxItems` (minimum 10 per query); Domain registrations map it to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to a per-keyword `maxResults` from a `50..250` total budget (minimum 10 per keyword); X maps it to `maxItems = 50..250`
+ └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Reddit maps the same setting to a `60..300` total post budget distributed across `queries[]` via `maxPosts` (minimum 10 per query) plus `maxTotalChargeUsd = $0.10..$0.50` per run; TikTok maps it to a `100..500` total video budget distributed across keyword runs via `maxItems` (minimum 10 per query); Domain registrations map it to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to a per-keyword `maxResults` from a `50..250` total budget (minimum 10 per keyword) but only launches two GitHub runs concurrently per scan; X maps it to `maxItems = 50..250`
  └─ applies `scans.effectiveSettings.lookbackDate` (pre-resolved YYYY-MM-DD with 1-day buffer) to time-constrain actor queries: Google appends `after:YYYY-MM-DD`, Reddit maps it to the closest actor `timeframe` bucket and then exact-filters posts in the webhook by `created_utc`, TikTok maps it to the closest actor `dateRange` bucket and then exact-filters videos in the webhook by created-at time, Domain registrations pass it as the `date` + `gte` filter, GitHub appends `created:>` + `pushed:>` qualifiers, X passes `tweetDateSince`; Discord is unaffected
  └─ starts every enabled initial scanner concurrently, alongside scan-level user-preference-hint generation
- └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, and operator-free `displayQuery`
+ └─ stores runId → scan document incrementally as each scanner starts, including `actorRuns.*.scannerId`, raw `searchQuery`, operator-free `displayQuery`, and optional explicit `searchQueries[]` / `displayQueries[]` arrays for batched runs
+ └─ GitHub startup persists any overflow terms beyond the two-run cap as `queuedGithubRuns` / `launchingGithubRuns`, and the webhook completion path drains that queue before scan completion
  └─ once the scan-level preference hints are ready (or deliberately fail open), replays any deferred succeeded webhooks and then flips the scan to `running`
 
 DELETE /api/scan?scanId=xxx
@@ -466,8 +470,8 @@ enabled, GitHub runs stay initial-scan-only and never reserve or execute follow-
 Deep search is only enabled for supported Google-backed, Reddit, TikTok, and X scan types when the
 brand's `allowAiDeepSearches` setting is true.
 
-The webhook handler calls `startDeepSearchRun()` for each supported suggested query, registers the
-new Apify run IDs on the scan document, and processes results via the same webhook pipeline at
+The webhook handler calls `startDeepSearchRun()` for each supported suggested query, registers
+the new Apify run IDs on the scan document, and processes results via the same webhook pipeline at
 depth 1. Deep-search runs never produce further follow-ups (hard loop guard:
 `searchDepth === 0` check before triggering). Suggested queries are reserved on the originating
 run before any new Apify runs are started, so duplicate webhook callbacks do not fan out
@@ -480,8 +484,9 @@ setting, while TikTok initial runs map the same depth to a `100..500` total vide
 deep-search TikTok run stays fixed at `maxItems = 50`, and X initial runs map the same depth to a
 `50..250` total tweet budget while each deep-search X run stays fixed at `maxItems = 30`.
 
-`ActorRunInfo` now carries `scannerId`, `searchDepth`, raw `searchQuery`, and operator-free
-`displayQuery`. The brand page progress indicator groups active work by source (`Web search`,
+`ActorRunInfo` now carries `scannerId`, `searchDepth`, raw `searchQuery`, operator-free
+`displayQuery`, and optional explicit `searchQueries[]` / `displayQueries[]` arrays for batched
+runs. The brand page progress indicator groups active work by source (`Web search`,
 `Reddit`, `TikTok`, `YouTube`, `Facebook`, `Instagram`, `Telegram channels`, `Apple App Store`,
 `Google Play`, `Discord servers`, `GitHub repos`, `X`),
 lets the user switch between those source-specific progress bars, and only ever surfaces
