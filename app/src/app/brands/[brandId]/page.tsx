@@ -8,7 +8,7 @@ import { createPortal } from 'react-dom';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
   ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check, FileSpreadsheet, FileText, RotateCcw,
-  Sparkles, Crosshair,
+  Sparkles, Crosshair, MessageSquare,
 } from 'lucide-react';
 import Link from 'next/link';
 import { AuthGuard } from '@/components/auth-guard';
@@ -80,6 +80,8 @@ type FindingSearchResult = FindingSummary & {
   scanStartedAt?: FindingSummary['createdAt'];
   scanStatus?: Scan['status'];
 };
+
+type ScanDebugData = Pick<Scan, 'id' | 'aiSummary' | 'scanSummaryRawLlmResponse'>;
 
 // ---------------------------------------------------------------------------
 // localStorage helpers — persist active scan ID across page reloads
@@ -287,6 +289,66 @@ function ScanSummaryPanel({ summary }: { summary: string }) {
   );
 }
 
+function ScanDebugExpandableSection({
+  icon: Icon,
+  label,
+  onOpen,
+  loading = false,
+  error,
+  children,
+}: {
+  icon: React.ElementType;
+  label: string;
+  onOpen?: () => void;
+  loading?: boolean;
+  error?: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+
+  function handleToggle() {
+    const next = !open;
+    setOpen(next);
+    if (next) {
+      onOpen?.();
+    }
+  }
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-gray-200">
+      <button
+        type="button"
+        onClick={handleToggle}
+        className="flex w-full items-center gap-2 bg-gray-50 px-3 py-2 text-left transition hover:bg-gray-100"
+      >
+        {open ? (
+          <ChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
+        ) : (
+          <ChevronRight className="h-3.5 w-3.5 flex-shrink-0 text-gray-400" />
+        )}
+        <Icon className="h-3.5 w-3.5 flex-shrink-0 text-gray-500" />
+        <span className="text-xs font-medium text-gray-600">{label}</span>
+      </button>
+      {open && loading && (
+        <div className="flex items-center gap-2 border-t border-gray-200 bg-white p-3 text-xs text-gray-500">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading debug data...
+        </div>
+      )}
+      {open && !loading && error && (
+        <div className="border-t border-gray-200 bg-white p-3 text-xs text-red-600">
+          {error}
+        </div>
+      )}
+      {open && !loading && !error && (
+        <pre className="max-h-80 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words border-t border-gray-200 bg-white p-3 font-mono text-xs leading-relaxed text-gray-700">
+          {children}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function normalizeFindingsSearchText(value: string) {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
@@ -484,6 +546,9 @@ export default function BrandDetailPage() {
   const [brand, setBrand] = useState<BrandProfile | null>(null);
   usePageTitle(brand?.name ?? '');
   const [scans, setScans] = useState<ScanSummary[]>([]);
+  const [scanDebugById, setScanDebugById] = useState<Record<string, ScanDebugData | null>>({});
+  const [scanDebugLoadingIds, setScanDebugLoadingIds] = useState<string[]>([]);
+  const [scanDebugErrors, setScanDebugErrors] = useState<Record<string, string>>({});
   const [expandedScanIds, setExpandedScanIds] = useState<string[]>([]);
   const [anchorTargetScanId, setAnchorTargetScanId] = useState<string | null>(() => (
     typeof window === 'undefined' ? null : getScanResultSetIdFromUrl(window.location.href)
@@ -814,6 +879,28 @@ export default function BrandDetailPage() {
     } catch {
       // Non-critical
       return [];
+    }
+  }
+
+  async function ensureScanDebugData(scanId: string) {
+    if (Object.prototype.hasOwnProperty.call(scanDebugById, scanId) || scanDebugLoadingIds.includes(scanId)) return;
+
+    setScanDebugLoadingIds((prev) => [...prev, scanId]);
+    setScanDebugErrors((prev) => ({ ...prev, [scanId]: '' }));
+    try {
+      const res = await fetch(`/api/brands/${brandId}/scans/${scanId}`, {
+        credentials: 'same-origin',
+      });
+      if (!res.ok) throw new Error('Failed to load debug data');
+      const json = await res.json();
+      setScanDebugById((prev) => ({ ...prev, [scanId]: (json.data as ScanDebugData | null) ?? null }));
+    } catch (err) {
+      setScanDebugErrors((prev) => ({
+        ...prev,
+        [scanId]: err instanceof Error ? err.message : 'Failed to load debug data',
+      }));
+    } finally {
+      setScanDebugLoadingIds((prev) => prev.filter((id) => id !== scanId));
     }
   }
 
@@ -4134,8 +4221,31 @@ export default function BrandDetailPage() {
                                     ) : (
                                       <>
                                         {scan.aiSummary && !isAnyFindingFilterActive && (
-                                          <div className="mb-4">
+                                          <div className="mb-4 space-y-1.5">
                                             <ScanSummaryPanel summary={scan.aiSummary} />
+                                            {showDebug && (
+                                              <ScanDebugExpandableSection
+                                                icon={MessageSquare}
+                                                label="Raw AI response"
+                                                onOpen={() => void ensureScanDebugData(scan.id)}
+                                                loading={scanDebugLoadingIds.includes(scan.id)}
+                                                error={scanDebugErrors[scan.id]}
+                                              >
+                                                {scanDebugById[scan.id]?.scanSummaryRawLlmResponse
+                                                  ? (() => {
+                                                      try {
+                                                        return JSON.stringify(
+                                                          JSON.parse(scanDebugById[scan.id]?.scanSummaryRawLlmResponse ?? ''),
+                                                          null,
+                                                          2,
+                                                        );
+                                                      } catch {
+                                                        return scanDebugById[scan.id]?.scanSummaryRawLlmResponse;
+                                                      }
+                                                    })()
+                                                  : '(not available — this scan may have used a non-LLM fallback, predate raw-response capture, or have failed before the response was stored)'}
+                                              </ScanDebugExpandableSection>
+                                            )}
                                           </div>
                                         )}
 

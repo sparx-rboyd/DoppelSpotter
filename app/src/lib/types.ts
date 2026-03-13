@@ -470,6 +470,8 @@ export interface Scan {
   scanSummaryEmailError?: string;
   /** When the final scan-level summary step began. */
   summaryStartedAt?: Timestamp;
+  /** Raw LLM output returned by the final scan-summary request, stored for debug inspection. */
+  scanSummaryRawLlmResponse?: string;
   errorMessage?: string;
   startedAt: Timestamp;
   completedAt?: Timestamp;

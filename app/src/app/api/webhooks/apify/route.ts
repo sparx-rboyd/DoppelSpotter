@@ -6241,7 +6241,12 @@ function sortFindingsForSummary(findings: ScanSummaryFindingInput[]): ScanSummar
   });
 }
 
-async function buildScanAiSummary(scan: Scan): Promise<string> {
+type BuiltScanAiSummaryResult = {
+  summary: string;
+  rawLlmResponse?: string;
+};
+
+async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummaryResult> {
   const findingsSnap = await db
     .collection('findings')
     .where('scanId', '==', scan.id)
@@ -6264,7 +6269,7 @@ async function buildScanAiSummary(scan: Scan): Promise<string> {
   );
 
   if (findings.length === 0) {
-    return buildCountOnlyScanAiSummary(scan);
+    return { summary: buildCountOnlyScanAiSummary(scan) };
   }
 
   const brandDoc = await db.collection('brands').doc(scan.brandId).get();
@@ -6291,25 +6296,32 @@ async function buildScanAiSummary(scan: Scan): Promise<string> {
     })),
   });
 
+  let rawLlmResponse: string | undefined;
   try {
-    const raw = await chatCompletion([
+    rawLlmResponse = await chatCompletion([
       { role: 'system', content: SCAN_SUMMARY_SYSTEM_PROMPT },
       { role: 'user', content: prompt },
     ], { temperature: 1.5 });
 
-    const parsed = parseScanSummaryOutput(raw);
+    const parsed = parseScanSummaryOutput(rawLlmResponse);
     if (!parsed) {
-      throw new Error(`Failed to parse scan summary output: ${raw.slice(0, 200)}`);
+      throw new Error(`Failed to parse scan summary output: ${rawLlmResponse.slice(0, 200)}`);
     }
 
-    return parsed.summary;
+    return {
+      summary: parsed.summary,
+      rawLlmResponse,
+    };
   } catch (err) {
     console.error(`[webhook] Scan summary generation failed for scan ${scan.id}:`, err);
-    return buildFallbackScanAiSummary(findings);
+    return {
+      summary: buildFallbackScanAiSummary(findings),
+      ...(typeof rawLlmResponse === 'string' ? { rawLlmResponse } : {}),
+    };
   }
 }
 
-async function finalizeScanWithSummary(scanRef: DocumentReference, summary: string) {
+async function finalizeScanWithSummary(scanRef: DocumentReference, summaryResult: BuiltScanAiSummaryResult) {
   await db.runTransaction(async (tx) => {
     const freshSnap = await tx.get(scanRef);
     if (!freshSnap.exists) return;
@@ -6328,9 +6340,14 @@ async function finalizeScanWithSummary(scanRef: DocumentReference, summary: stri
 
     tx.update(scanRef, {
       status: 'completed',
-      aiSummary: summary,
+      aiSummary: summaryResult.summary,
       completedAt: FieldValue.serverTimestamp(),
       summaryStartedAt: FieldValue.delete(),
+      ...(typeof summaryResult.rawLlmResponse === 'string'
+        ? { scanSummaryRawLlmResponse: summaryResult.rawLlmResponse }
+        : fresh.scanSummaryRawLlmResponse
+          ? { scanSummaryRawLlmResponse: FieldValue.delete() }
+          : {}),
       ...(fresh.errorMessage ? { errorMessage: FieldValue.delete() } : {}),
     });
 
@@ -6345,15 +6362,15 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
   const fresh = scanFromSnapshot(freshSnap);
   if (fresh.status !== 'summarising') return;
 
-  let summary: string;
+  let summaryResult: BuiltScanAiSummaryResult;
   try {
-    summary = await buildScanAiSummary(fresh);
+    summaryResult = await buildScanAiSummary(fresh);
   } catch (err) {
     console.error(`[webhook] Unexpected scan summary build error for scan ${fresh.id}:`, err);
-    summary = buildCountOnlyScanAiSummary(fresh);
+    summaryResult = { summary: buildCountOnlyScanAiSummary(fresh) };
   }
 
-  await finalizeScanWithSummary(scanRef, summary);
+  await finalizeScanWithSummary(scanRef, summaryResult);
   try {
     await rebuildAndPersistDashboardBreakdownsForScanIds({
       brandId: fresh.brandId,
