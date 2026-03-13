@@ -324,6 +324,17 @@ export function getFindingSourceLabel(source: FindingSource): string {
   return getScannerConfigBySource(source).displayName;
 }
 
+const SCAN_SOURCE_LABEL_COLLATOR = new Intl.Collator(undefined, { sensitivity: 'base' });
+
+export function compareScanSourcesByLabel(left: ScanFindingSource, right: ScanFindingSource): number {
+  return SCAN_SOURCE_LABEL_COLLATOR.compare(getFindingSourceLabel(left), getFindingSourceLabel(right))
+    || SCAN_SOURCE_ORDER.indexOf(left) - SCAN_SOURCE_ORDER.indexOf(right);
+}
+
+export function sortScanSourcesByLabel<TSource extends ScanFindingSource>(sources: readonly TSource[]): TSource[] {
+  return [...sources].sort(compareScanSourcesByLabel);
+}
+
 export function buildGoogleScannerQuery(
   source: GoogleFindingSource,
   baseQuery: string,

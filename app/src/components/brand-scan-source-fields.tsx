@@ -1,6 +1,11 @@
 'use client';
 
-import { getFindingSourceLabel, SCAN_SOURCE_ORDER, supportsSourceDeepSearch } from '@/lib/scan-sources';
+import {
+  getFindingSourceLabel,
+  SCAN_SOURCE_ORDER,
+  sortScanSourcesByLabel,
+  supportsSourceDeepSearch,
+} from '@/lib/scan-sources';
 import type { BrandScanSources } from '@/lib/types';
 import { ScanSourceIcon } from './scan-source-icon';
 
@@ -14,7 +19,7 @@ const SOURCE_ROWS: Array<{
   key: keyof BrandScanSources;
   label: string;
   supportsDeepSearch: boolean;
-}> = SCAN_SOURCE_ORDER.map((source) => ({
+}> = sortScanSourcesByLabel(SCAN_SOURCE_ORDER).map((source) => ({
   key: source,
   label: getFindingSourceLabel(source),
   supportsDeepSearch: supportsSourceDeepSearch(source),

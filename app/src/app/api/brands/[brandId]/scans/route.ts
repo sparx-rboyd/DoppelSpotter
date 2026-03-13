@@ -10,7 +10,7 @@ import {
   isScanDeletionActive,
 } from '@/lib/async-deletions';
 import { normalizeBrandScanSources } from '@/lib/brands';
-import { SCAN_SOURCE_ORDER } from '@/lib/scan-sources';
+import { SCAN_SOURCE_ORDER, sortScanSourcesByLabel } from '@/lib/scan-sources';
 import type { BrandProfile, Scan, ScanSummary, ScanStatus } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
@@ -25,12 +25,12 @@ function getScanSummarySources(scan: Scan): ScanSummary['sources'] {
   );
 
   if (runSources.size > 0) {
-    return SCAN_SOURCE_ORDER.filter((source) => runSources.has(source));
+    return sortScanSourcesByLabel(SCAN_SOURCE_ORDER.filter((source) => runSources.has(source)));
   }
 
   if (scan.effectiveSettings?.scanSources) {
     const normalized = normalizeBrandScanSources(scan.effectiveSettings.scanSources);
-    return SCAN_SOURCE_ORDER.filter((source) => normalized[source]);
+    return sortScanSourcesByLabel(SCAN_SOURCE_ORDER.filter((source) => normalized[source]));
   }
 
   return [];

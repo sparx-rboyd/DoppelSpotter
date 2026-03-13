@@ -28,7 +28,12 @@ import {
   formatScanScheduleFrequency,
   formatScheduledRunAt,
 } from '@/lib/scan-schedules';
-import { getFindingSourceLabel, SCAN_SOURCE_ORDER, supportsSourceDeepSearch } from '@/lib/scan-sources';
+import {
+  getFindingSourceLabel,
+  SCAN_SOURCE_ORDER,
+  sortScanSourcesByLabel,
+  supportsSourceDeepSearch,
+} from '@/lib/scan-sources';
 import { cn, formatInteger, formatScanDate } from '@/lib/utils';
 import type {
   ActorRunInfo,
@@ -2543,8 +2548,10 @@ export default function BrandDetailPage() {
   const isAiDeepSearchEnabled = activeScanSettings.allowAiDeepSearches;
   const isSummarisingFindings = activeScan?.status === 'summarising';
   const normalizedScanSources = activeScanSettings.scanSources;
-  const progressSources = SCAN_SOURCE_ORDER.filter(
-    (source) => normalizedScanSources[source] || allRuns.some((run) => run.source === source),
+  const progressSources = sortScanSourcesByLabel(
+    SCAN_SOURCE_ORDER.filter(
+      (source) => normalizedScanSources[source] || allRuns.some((run) => run.source === source),
+    ),
   );
   const progressSourcesWithFallback: FindingSource[] = progressSources.length > 0 ? progressSources : ['google'];
   const runsBySource = new Map(
@@ -2921,7 +2928,7 @@ export default function BrandDetailPage() {
   ];
   const findingSourceOptions = [
     { value: '', label: 'All scan types' },
-    ...SCAN_SOURCE_ORDER.map((source) => ({
+    ...sortScanSourcesByLabel(SCAN_SOURCE_ORDER).map((source) => ({
       value: source,
       label: getFindingSourceLabel(source),
     })),
@@ -3894,6 +3901,7 @@ export default function BrandDetailPage() {
                             const displayedIgnoredCount = isAnyFindingFilterActive
                               ? matchingIgnoredCount
                               : (scan.ignoredCount ?? 0);
+                            const orderedScanSources = sortScanSourcesByLabel(scan.sources ?? []);
                             const deleteDisabledReason = scanning
                               ? ACTIVE_SCAN_DELETE_TOOLTIP
                               : null;
@@ -3952,8 +3960,7 @@ export default function BrandDetailPage() {
                                           <span className="text-sm font-semibold text-gray-500">
                                             {formatScanDate(scan.startedAt)}
                                           </span>
-                                          {(scan.sources?.length ?? 0) > 0 && (
-                                            <>
+                                          {orderedScanSources.length > 0 && (
                                               <span className="hidden sm:flex flex-wrap items-center gap-2 text-gray-300">
                                                 <span
                                                   aria-hidden="true"
@@ -3961,9 +3968,9 @@ export default function BrandDetailPage() {
                                                 />
                                                 <span
                                                   className="flex flex-wrap items-center gap-1.5"
-                                                  aria-label={`Scan types: ${scan.sources?.map((source) => getFindingSourceLabel(source)).join(', ')}`}
+                                                  aria-label={`Scan types: ${orderedScanSources.map((source) => getFindingSourceLabel(source)).join(', ')}`}
                                                 >
-                                                  {scan.sources?.map((source) => (
+                                                  {orderedScanSources.map((source) => (
                                                     <span
                                                       key={source}
                                                       title={getFindingSourceLabel(source)}
@@ -3974,7 +3981,6 @@ export default function BrandDetailPage() {
                                                   ))}
                                                 </span>
                                               </span>
-                                            </>
                                           )}
                                         </span>
                                         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
