@@ -113,26 +113,35 @@ export default function HelpPage() {
   const isScrollingTo = useRef(false);
 
   useEffect(() => {
-    const topOffset = window.innerWidth >= 1024 ? 80 : 136;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (isScrollingTo.current) return;
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible.length > 0) {
-          setActiveId(visible[0].target.id);
+    const getTopOffset = () => (window.innerWidth >= 1024 ? 80 : 136);
+
+    const updateActiveSection = () => {
+      if (isScrollingTo.current) return;
+
+      const scrollMarker = window.scrollY + getTopOffset() + 8;
+      let nextActiveId = SECTIONS[0].id;
+
+      for (const section of SECTIONS) {
+        const element = document.getElementById(section.id);
+        if (!element) continue;
+        if (element.offsetTop <= scrollMarker) {
+          nextActiveId = section.id;
+        } else {
+          break;
         }
-      },
-      { rootMargin: `-${topOffset}px 0px -40% 0px`, threshold: 0 },
-    );
+      }
 
-    for (const { id } of SECTIONS) {
-      const element = document.getElementById(id);
-      if (element) observer.observe(element);
-    }
+      setActiveId((current) => (current === nextActiveId ? current : nextActiveId));
+    };
 
-    return () => observer.disconnect();
+    updateActiveSection();
+    window.addEventListener('scroll', updateActiveSection, { passive: true });
+    window.addEventListener('resize', updateActiveSection);
+
+    return () => {
+      window.removeEventListener('scroll', updateActiveSection);
+      window.removeEventListener('resize', updateActiveSection);
+    };
   }, []);
 
   const scrollToSection = (id: string) => {
