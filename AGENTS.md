@@ -615,11 +615,12 @@ Findings can now carry one optional lightweight taxonomy label: `theme`.
 The authenticated dashboard is now fully brand-scoped rather than a cross-brand recent-findings feed.
 
 **Behaviour:**
-- The dashboard first calls `GET /api/dashboard/bootstrap` to load the user's brands plus the persisted default brand selection
+- The dashboard first calls `GET /api/dashboard/bootstrap` to load lightweight brand-picker data (brand ids/names, schedule badge data, history-deletion state) plus the persisted default brand selection
 - The selected dashboard brand is stored on the user document as `users.dashboardPreferences.selectedBrandId`
 - If the saved brand no longer exists or no longer belongs to the user, bootstrap falls back to the oldest remaining brand and repairs the saved preference
 - Brand selection changes call `PATCH /api/dashboard/preferences` so the same default brand is restored across reloads and devices
 - Dashboard analytics call `GET /api/dashboard/metrics?brandId=...&scanId=...`
+- The metrics route also returns the selected brand's scan-derived summary badges (`scanCount`, latest scan start, and whether a scan is currently in progress), so bootstrap does not need to aggregate scans across every brand
 - The metrics route returns all terminal scans for the selected brand (newest first) for the scan-scope dropdown
 - Brands with `brandDeletion` are hidden from the dashboard brand picker; brands with `historyDeletion` remain selectable but report zero terminal scans/counts until deletion completes
 - Dashboard KPI totals come from denormalized per-scan `highCount`, `mediumCount`, `lowCount`, and `nonHitCount` fields so all-time rollups do not require hydrating every finding
@@ -635,9 +636,9 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 - When a brand has no terminal scans yet, the dashboard shows a CTA to run the first scan; if the first scan is already in progress, it instead shows a progress-focused CTA linked to the brand page
 
 **API:**
-- `GET /api/dashboard/bootstrap` — returns brand selector options plus the resolved selected brand id
+- `GET /api/dashboard/bootstrap` — returns lightweight brand selector options plus the resolved selected brand id
 - `PATCH /api/dashboard/preferences` — persists `{ selectedBrandId }` on the authenticated user document
-- `GET /api/dashboard/metrics?brandId=...&scanId=...` — returns scan selector options, KPI totals, active-scan state, and the scan-type/theme stacked-bar datasets
+- `GET /api/dashboard/metrics?brandId=...&scanId=...` — returns scan selector options, the selected brand's summary badges, KPI totals, active-scan state, and the scan-type/theme stacked-bar datasets
 
 ---
 

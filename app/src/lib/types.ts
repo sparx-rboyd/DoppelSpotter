@@ -235,8 +235,16 @@ export interface BrandSummary {
   createdAt: Timestamp;
 }
 
+export interface DashboardBootstrapBrand {
+  id: string;
+  name: string;
+  isHistoryDeletionInProgress: boolean;
+  scanSchedule?: Pick<BrandScanSchedule, 'enabled' | 'timeZone' | 'nextRunAt'>;
+  createdAt: Timestamp;
+}
+
 export interface DashboardBootstrapData {
-  brands: BrandSummary[];
+  brands: DashboardBootstrapBrand[];
   selectedBrandId: string | null;
 }
 
@@ -580,6 +588,9 @@ export interface DashboardTimeline {
 export interface DashboardMetricsData {
   brandId: string;
   selectedScanId: string | null;
+  selectedBrandScanCount: number;
+  selectedBrandLastScanStartedAt?: Timestamp;
+  selectedBrandIsScanInProgress: boolean;
   hasTerminalScans: boolean;
   activeScan: DashboardActiveScanSummary | null;
   scanOptions: ScanSummary[];

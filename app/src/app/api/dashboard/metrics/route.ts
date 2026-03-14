@@ -143,6 +143,9 @@ export async function GET(request: NextRequest) {
   const data: DashboardMetricsData = {
     brandId,
     selectedScanId,
+    selectedBrandScanCount: terminalScans.length,
+    ...(allScans[0]?.startedAt ? { selectedBrandLastScanStartedAt: allScans[0].startedAt } : {}),
+    selectedBrandIsScanInProgress: activeScan !== null,
     hasTerminalScans: terminalScans.length > 0,
     activeScan,
     scanOptions: terminalScans,

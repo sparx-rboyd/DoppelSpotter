@@ -34,8 +34,8 @@ import { UNLABELLED_DASHBOARD_BREAKDOWN_BUCKET } from '@/lib/dashboard';
 import { cn } from '@/lib/utils';
 import { formatDate, formatScanDate } from '@/lib/utils';
 import type {
-  BrandSummary,
   DashboardBreakdownCategory,
+  DashboardBootstrapBrand,
   DashboardBreakdownRow,
   DashboardBootstrapData,
   DashboardMetricsData,
@@ -101,7 +101,7 @@ function formatCompactDashboardDateTime(date: Parameters<typeof formatDate>[0]):
 export default function DashboardPage() {
   usePageTitle('Dashboard');
   const router = useRouter();
-  const [brands, setBrands] = useState<BrandSummary[]>([]);
+  const [brands, setBrands] = useState<DashboardBootstrapBrand[]>([]);
   const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
   const [selectedScanId, setSelectedScanId] = useState('');
   const [metrics, setMetrics] = useState<DashboardMetricsData | null>(null);
@@ -538,13 +538,15 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <CardContent className="flex flex-wrap gap-1.5 p-3 sm:gap-2 sm:p-5">
-                  <Badge variant="brand" className="px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-1 sm:text-xs">
-                    {selectedBrand.scanCount} scan{selectedBrand.scanCount !== 1 ? 's' : ''}
-                  </Badge>
-                  {selectedBrand.lastScanStartedAt && (
+                  {metrics && (
+                    <Badge variant="brand" className="px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-1 sm:text-xs">
+                      {metrics.selectedBrandScanCount} scan{metrics.selectedBrandScanCount !== 1 ? 's' : ''}
+                    </Badge>
+                  )}
+                  {metrics?.selectedBrandLastScanStartedAt && (
                     <Badge variant="default" className="px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-1 sm:text-xs">
-                      <span className="sm:hidden">Last {formatCompactDashboardDateTime(selectedBrand.lastScanStartedAt)}</span>
-                      <span className="hidden sm:inline">Last scan {formatDate(selectedBrand.lastScanStartedAt)}</span>
+                      <span className="sm:hidden">Last {formatCompactDashboardDateTime(metrics.selectedBrandLastScanStartedAt)}</span>
+                      <span className="hidden sm:inline">Last scan {formatDate(metrics.selectedBrandLastScanStartedAt)}</span>
                     </Badge>
                   )}
                   {selectedBrand.scanSchedule?.enabled && selectedBrand.scanSchedule.nextRunAt && (
@@ -553,7 +555,7 @@ export default function DashboardPage() {
                       <span className="hidden sm:inline">Next scan {formatDate(selectedBrand.scanSchedule.nextRunAt)}</span>
                     </Badge>
                   )}
-                  {selectedBrand.isScanInProgress && (
+                  {metrics?.selectedBrandIsScanInProgress && (
                     <Badge variant="brand" className="px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-1 sm:text-xs">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       Scan in progress
