@@ -19,6 +19,7 @@ import {
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
+import { SelectDropdown } from '@/components/ui/select-dropdown';
 import { cn } from '@/lib/utils';
 
 const SECTIONS = [
@@ -32,6 +33,11 @@ const SECTIONS = [
   { id: 'reports', label: 'Reports & Emails' },
   { id: 'account', label: 'Account & Data Management' },
 ];
+
+const SECTION_DROPDOWN_OPTIONS = SECTIONS.map((section) => ({
+  value: section.id,
+  label: section.label,
+}));
 
 const inlineLink = 'font-medium text-brand-700 transition hover:underline';
 
@@ -82,7 +88,7 @@ function HelpSection({
   children: ReactNode;
 }) {
   return (
-    <section id={id} className="scroll-mt-24">
+    <section id={id} className="scroll-mt-36 lg:scroll-mt-24">
       <Card>
         <CardHeader className="px-6 py-5">
           <div className="flex items-start gap-4">
@@ -107,6 +113,7 @@ export default function HelpPage() {
   const isScrollingTo = useRef(false);
 
   useEffect(() => {
+    const topOffset = window.innerWidth >= 1024 ? 80 : 136;
     const observer = new IntersectionObserver(
       (entries) => {
         if (isScrollingTo.current) return;
@@ -117,7 +124,7 @@ export default function HelpPage() {
           setActiveId(visible[0].target.id);
         }
       },
-      { rootMargin: '-80px 0px -40% 0px', threshold: 0 },
+      { rootMargin: `-${topOffset}px 0px -40% 0px`, threshold: 0 },
     );
 
     for (const { id } of SECTIONS) {
@@ -135,7 +142,7 @@ export default function HelpPage() {
     isScrollingTo.current = true;
     setActiveId(id);
 
-    const offset = 88;
+    const offset = window.innerWidth >= 1024 ? 88 : 144;
     const top = element.getBoundingClientRect().top + window.pageYOffset - offset;
     window.scrollTo({ top, behavior: 'smooth' });
 
@@ -154,13 +161,27 @@ export default function HelpPage() {
             <h1 className="text-2xl font-bold text-gray-900">Help</h1>
             <p className="mt-0.5 text-sm text-gray-500">
               A practical guide to setting up brands, tuning scans, reviewing findings, exporting reports,
-              and managing your account. Use the sidebar to jump straight to the part of the workflow you
-              need.
+              and managing your account. Use the section navigation to jump straight to the part of the
+              workflow you need.
             </p>
           </div>
 
+          <div className="sticky top-16 z-20 -mx-4 mb-5 border-y border-gray-200 bg-gray-50/95 px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6 lg:hidden">
+            <SelectDropdown
+              id="help-section-nav"
+              ariaLabel="Jump to help section"
+              label="Jump to section"
+              labelTone="subtle"
+              value={activeId}
+              options={SECTION_DROPDOWN_OPTIONS}
+              onChange={scrollToSection}
+              triggerClassName="h-11 border-gray-200 bg-white py-2 text-sm font-medium shadow-sm lg:py-2"
+              panelClassName="max-w-[calc(100vw-1.5rem)]"
+            />
+          </div>
+
           <div className="flex flex-col gap-8 lg:flex-row lg:gap-10 xl:gap-12">
-            <div className="w-full flex-none lg:w-72 xl:w-80">
+            <div className="hidden w-full flex-none lg:block lg:w-72 xl:w-80">
               <div className="sticky top-24">
                 <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-gray-400">
                   On this page
