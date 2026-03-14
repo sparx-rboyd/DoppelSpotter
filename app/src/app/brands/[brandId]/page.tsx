@@ -3,11 +3,12 @@
 import type { ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePageTitle } from '@/lib/use-page-title';
+import Image from 'next/image';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
-  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check, FileSpreadsheet, FileText, RotateCcw,
+  ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check, RotateCcw,
   Sparkles, Crosshair, MessageSquare,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -53,6 +54,8 @@ const ACTIVE_SCAN_DELETE_TOOLTIP =
   "Scan history can't be changed while a scan is running because current results are compared against previous findings.";
 const RUN_SCAN_DELETION_TOOLTIP =
   'Scans are still being deleted. You will be able to run a new scan when this is complete. This may take several minutes.';
+const SCAN_ACTION_BUTTON_CLASS_NAME =
+  'inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:bg-gray-50 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-60 lg:h-9 lg:w-9';
 const SCAN_RESULT_SET_HASH_PREFIX = 'scan-result-set-';
 const OTHER_FINDING_TAXONOMY_KEY = 'other';
 const DRILLDOWN_CATEGORY_QUERY_PARAM = 'category';
@@ -4644,31 +4647,69 @@ export default function BrandDetailPage() {
                                       <div className="mt-2 flex flex-shrink-0 items-center gap-1.5 pl-6 sm:mt-0 sm:gap-1.5 sm:pl-0 lg:gap-2">
                                         {showScanLevelActions && (
                                           <>
-                                            <Button
-                                              variant="secondary"
-                                              size="sm"
-                                              loading={exportingCsvScanId === scan.id}
-                                              disabled={exportingCsvScanId !== null && exportingCsvScanId !== scan.id}
-                                              onClick={() => void exportScanFindings(scan)}
-                                              aria-label="Export CSV"
-                                              className="flex-shrink-0"
+                                            <Tooltip
+                                              content="Download scan results as CSV"
+                                              align="end"
+                                              triggerClassName="flex-shrink-0"
                                             >
-                                              <FileSpreadsheet className="w-3.5 h-3.5" />
-                                              <span className="hidden sm:inline">CSV</span>
-                                            </Button>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.preventDefault();
+                                                  e.stopPropagation();
+                                                  void exportScanFindings(scan);
+                                                }}
+                                                disabled={exportingCsvScanId !== null && exportingCsvScanId !== scan.id}
+                                                aria-label="Download scan results as CSV"
+                                                className={SCAN_ACTION_BUTTON_CLASS_NAME}
+                                              >
+                                                {exportingCsvScanId === scan.id ? (
+                                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                ) : (
+                                                  <Image
+                                                    src="/csv.svg"
+                                                    alt=""
+                                                    aria-hidden="true"
+                                                    width={14}
+                                                    height={14}
+                                                    className="h-3.5 w-3.5"
+                                                    unoptimized
+                                                  />
+                                                )}
+                                              </button>
+                                            </Tooltip>
 
-                                            <Button
-                                              variant="secondary"
-                                              size="sm"
-                                              loading={exportingPdfScanId === scan.id}
-                                              disabled={exportingPdfScanId !== null && exportingPdfScanId !== scan.id}
-                                              onClick={() => void exportScanPdf(scan)}
-                                              aria-label="Export PDF"
-                                              className="flex-shrink-0"
+                                            <Tooltip
+                                              content="Download PDF scan report"
+                                              align="end"
+                                              triggerClassName="flex-shrink-0"
                                             >
-                                              <FileText className="w-3.5 h-3.5" />
-                                              <span className="hidden sm:inline">PDF</span>
-                                            </Button>
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.preventDefault();
+                                                  e.stopPropagation();
+                                                  void exportScanPdf(scan);
+                                                }}
+                                                disabled={exportingPdfScanId !== null && exportingPdfScanId !== scan.id}
+                                                aria-label="Download PDF scan report"
+                                                className={SCAN_ACTION_BUTTON_CLASS_NAME}
+                                              >
+                                                {exportingPdfScanId === scan.id ? (
+                                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                ) : (
+                                                  <Image
+                                                    src="/pdf.svg"
+                                                    alt=""
+                                                    aria-hidden="true"
+                                                    width={14}
+                                                    height={14}
+                                                    className="h-3.5 w-3.5"
+                                                    unoptimized
+                                                  />
+                                                )}
+                                              </button>
+                                            </Tooltip>
                                           </>
                                         )}
 
@@ -4714,25 +4755,27 @@ export default function BrandDetailPage() {
                                               </button>
                                             </Tooltip>
                                           ) : (
-                                            <button
-                                              type="button"
-                                              onClick={(e) => {
-                                                e.preventDefault();
-                                                e.stopPropagation();
-                                                if (requiresDeleteScanConfirmation) {
-                                                  setConfirmDeleteScanId(scan.id);
-                                                  setConfirmClear(false);
-                                                  return;
-                                                }
+                                            <Tooltip content="Delete scan" align="end" triggerClassName="flex-shrink-0">
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.preventDefault();
+                                                  e.stopPropagation();
+                                                  if (requiresDeleteScanConfirmation) {
+                                                    setConfirmDeleteScanId(scan.id);
+                                                    setConfirmClear(false);
+                                                    return;
+                                                  }
 
-                                                void deleteScan(scan.id);
-                                                setConfirmClear(false);
-                                              }}
-                                              className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 lg:h-9 lg:w-9"
-                                              aria-label="Delete scan"
-                                            >
-                                              <Trash2 className="w-3.5 h-3.5" />
-                                            </button>
+                                                  void deleteScan(scan.id);
+                                                  setConfirmClear(false);
+                                                }}
+                                                className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-500 transition hover:border-red-200 hover:bg-red-50 hover:text-red-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 lg:h-9 lg:w-9"
+                                                aria-label="Delete scan"
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                              </button>
+                                            </Tooltip>
                                           )
                                         )}
                                       </div>

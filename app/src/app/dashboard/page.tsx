@@ -514,27 +514,29 @@ export default function DashboardPage() {
             <div className="space-y-6 lg:space-y-8">
               <Card className="overflow-hidden border-brand-100">
                 <div className="border-b border-brand-100 bg-brand-50/70 px-5 py-4 lg:px-6 lg:py-5">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-                    <div className="w-full max-w-md flex-none">
-                      <SelectDropdown
-                        id="dashboard-brand-selector"
-                        label={<span className="font-medium text-brand-700">Focused brand</span>}
-                        ariaLabel="Select a brand to scope the dashboard"
-                        value={selectedBrand.id}
-                        options={brandOptions}
-                        onChange={handleBrandChange}
-                        searchable={brands.length > 8}
-                        searchPlaceholder="Search brands"
-                        buttonIcon={<Building2 className="h-4 w-4 text-brand-600" />}
-                      />
+                  <div className="flex flex-col gap-1">
+                    <span className="text-sm font-medium text-brand-700">Focused brand</span>
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                      <div className="w-full max-w-md flex-none">
+                        <SelectDropdown
+                          id="dashboard-brand-selector"
+                          ariaLabel="Select a brand to scope the dashboard"
+                          value={selectedBrand.id}
+                          options={brandOptions}
+                          onChange={handleBrandChange}
+                          searchable={brands.length > 8}
+                          searchPlaceholder="Search brands"
+                          buttonIcon={<Building2 className="h-4 w-4 text-brand-600" />}
+                        />
+                      </div>
+                      <Link
+                        href={selectedBrandHref}
+                        className="inline-flex items-center gap-1.5 self-start whitespace-nowrap text-sm font-medium text-brand-700 transition hover:text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 sm:self-auto"
+                      >
+                        Go to brand page
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
                     </div>
-                    <Link
-                      href={selectedBrandHref}
-                      className="inline-flex items-center gap-1.5 self-start whitespace-nowrap text-sm font-medium text-brand-700 transition hover:text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 sm:self-auto sm:translate-y-2"
-                    >
-                      Go to brand page
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
                   </div>
                 </div>
                 <CardContent className="flex flex-wrap gap-1.5 p-3 sm:gap-2 sm:p-4 lg:px-6 lg:py-4">
