@@ -53,6 +53,9 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │           │   ├── actors.ts     # Logical scanner registry (Google + Reddit + TikTok + Discord + GitHub + X) + Apify actor lookup helpers
 │           │   └── client.ts     # Apify client: source-specific actor input builders, run start helpers, dataset fetch
 │           ├── account-deletion.ts # Account-wide cleanup helper: cancel active runs, delete owned data
+│           ├── async-deletions.ts  # Resumable lease-based deletion passes for scans, brand history, and full brands
+│           ├── deletion-tasks.ts   # Cloud Tasks client: typed deletion payloads, enqueue helpers, inline-drain fallback
+│           ├── internal-google-oidc.ts # Reusable Google OIDC token verifier for internal service-to-service routes
 │           ├── dashboard.ts      # Dashboard metrics helpers: terminal-scan totals + source/theme rollups from stored scan summaries
 │           ├── dashboard-aggregates.ts # Scan-level dashboard breakdown backfill/rebuild helpers
 │           ├── mailersend.ts     # MailerSend email client for transactional emails

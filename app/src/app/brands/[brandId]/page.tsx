@@ -615,6 +615,7 @@ export default function BrandDetailPage() {
   const [customScanError, setCustomScanError] = useState('');
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const deletionPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const copiedScanLinkResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lookbackNudgeSuccessTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const progressScanKeyRef = useRef<string | null>(null);
@@ -716,6 +717,13 @@ export default function BrandDetailPage() {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
+    }
+  }
+
+  function stopDeletionPolling() {
+    if (deletionPollRef.current) {
+      clearInterval(deletionPollRef.current);
+      deletionPollRef.current = null;
     }
   }
 
@@ -1927,6 +1935,34 @@ export default function BrandDetailPage() {
     return () => stopPolling();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [brandId]);
+
+  // Poll the brand profile while a history deletion is in progress so the
+  // Run scan button re-enables automatically when Cloud Tasks finishes the job.
+  useEffect(() => {
+    if (!historyDeletionInProgress) {
+      stopDeletionPolling();
+      return;
+    }
+    if (deletionPollRef.current) return; // already polling
+    deletionPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/brands/${brandId}`, { credentials: 'same-origin' });
+        if (!res.ok) return;
+        const json = await res.json();
+        const updatedBrand = json.data as BrandProfile;
+        setBrand(updatedBrand);
+        if (!hasActiveHistoryDeletion(updatedBrand)) {
+          stopDeletionPolling();
+          // Refresh scans list now that deletion is complete
+          void fetchScans();
+        }
+      } catch {
+        // Transient failure — keep polling
+      }
+    }, 3000);
+    return () => stopDeletionPolling();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historyDeletionInProgress, brandId]);
 
   useEffect(() => {
     function syncAnchorTargetFromHash() {
