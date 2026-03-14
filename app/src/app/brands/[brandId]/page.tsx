@@ -738,7 +738,7 @@ export default function BrandDetailPage() {
     [selectedFindingCategories],
   );
   const selectedFindingSourceSet = useMemo(
-    () => new Set(selectedFindingSources),
+    () => new Set<FindingSource>(selectedFindingSources),
     [selectedFindingSources],
   );
   const normalizedSelectedFindingThemes = useMemo(
@@ -3425,8 +3425,7 @@ export default function BrandDetailPage() {
         ? finding.isFalsePositive === true
         : finding.isFalsePositive !== true && finding.severity === category
     ));
-    const matchesSource = selectedFindingSourceSet.size === 0
-      || (finding.source !== 'unknown' && selectedFindingSourceSet.has(finding.source));
+    const matchesSource = selectedFindingSourceSet.size === 0 || selectedFindingSourceSet.has(finding.source);
     const matchesTheme = !hasActiveFindingThemeFilter
       || normalizedSelectedFindingThemeSet.has(normalizeFindingsTaxonomyValue(finding.theme));
 
