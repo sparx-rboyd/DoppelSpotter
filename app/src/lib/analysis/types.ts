@@ -913,13 +913,13 @@ export function parseThemeNormalizationOutput(
         return { provisionalTheme, canonicalTheme };
       })
       .filter(
-        (item): item is ThemeNormalizationMapping =>
+        (item: { provisionalTheme: string; canonicalTheme: string | undefined }): item is ThemeNormalizationMapping =>
           item.provisionalTheme.length > 0
           && validProvisionalThemes.has(item.provisionalTheme)
           && !seenThemes.has(item.provisionalTheme)
           && typeof item.canonicalTheme === 'string',
       )
-      .map((item) => {
+      .map((item: ThemeNormalizationMapping) => {
         seenThemes.add(item.provisionalTheme);
         return item;
       });

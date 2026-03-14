@@ -5,7 +5,7 @@ import {
   loadBrandFindingTaxonomy,
   normalizeFindingTaxonomyLabel,
 } from '@/lib/findings-taxonomy';
-import type { FindingSource } from '@/lib/types';
+import type { FindingSource, Severity } from '@/lib/types';
 import { chatCompletion } from './openrouter';
 import {
   THEME_NORMALIZATION_SYSTEM_PROMPT,
@@ -108,7 +108,7 @@ function buildThemeNormalizationGroups(findings: ScanFindingSnapshot[]): ThemeNo
     const key = normalizeThemeKey(provisionalTheme);
     const existing = groups.get(key);
     const source = doc.get('source') as FindingSource;
-    const severity = doc.get('severity');
+    const severity = doc.get('severity') as unknown;
     const title = typeof doc.get('title') === 'string' ? doc.get('title').trim() : '';
     const analysis = typeof doc.get('llmAnalysis') === 'string' ? doc.get('llmAnalysis').trim() : '';
     const isFalsePositive = doc.get('isFalsePositive') === true;
@@ -129,7 +129,7 @@ function buildThemeNormalizationGroups(findings: ScanFindingSnapshot[]): ThemeNo
 
     if (isFalsePositive) {
       group.severityCounts.nonHit++;
-    } else if (severity === 'high' || severity === 'medium' || severity === 'low') {
+    } else if (isSeverity(severity)) {
       group.severityCounts[severity]++;
     } else {
       group.severityCounts.nonHit++;
@@ -247,6 +247,10 @@ function resolveCanonicalThemeLabel(
 function matchExistingThemeCase(label: string, themes: string[]): string | undefined {
   const key = normalizeThemeKey(label);
   return themes.find((theme) => normalizeThemeKey(theme) === key);
+}
+
+function isSeverity(value: unknown): value is Severity {
+  return value === 'high' || value === 'medium' || value === 'low';
 }
 
 function normalizeThemeKey(value: string): string {
