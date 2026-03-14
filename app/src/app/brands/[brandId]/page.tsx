@@ -75,6 +75,7 @@ type BookmarkUpdate = {
 
 type FindingSourceFilter = Exclude<FindingSource, 'unknown'>;
 type FindingSearchDisplayBucket = 'hit' | 'non-hit' | 'ignored' | 'addressed';
+type CrossScanTab = 'bookmarks' | 'ignored' | 'addressed';
 type FindingSearchResult = FindingSummary & {
   displayBucket: FindingSearchDisplayBucket;
   scanStartedAt?: FindingSummary['createdAt'];
@@ -560,13 +561,41 @@ export default function BrandDetailPage() {
   const [showNonHitsByScanId, setShowNonHitsByScanId] = useState<Record<string, boolean>>({});
   const [showIgnoredByScanId, setShowIgnoredByScanId] = useState<Record<string, boolean>>({});
   const [allBookmarkedFindings, setAllBookmarkedFindings] = useState<FindingSummary[]>([]);
+  const [bookmarkedFindingsTruncated, setBookmarkedFindingsTruncated] = useState(false);
+  const [bookmarkedFindingsTotalCount, setBookmarkedFindingsTotalCount] = useState<number | null>(null);
   const [allAddressedFindings, setAllAddressedFindings] = useState<FindingSummary[]>([]);
+  const [addressedFindingsTruncated, setAddressedFindingsTruncated] = useState(false);
   const [activeTab, setActiveTab] = useState<'scans' | 'bookmarks' | 'ignored' | 'addressed'>('scans');
   const [allIgnoredFindings, setAllIgnoredFindings] = useState<FindingSummary[]>([]);
+  const [ignoredFindingsTruncated, setIgnoredFindingsTruncated] = useState(false);
+  const [crossScanTabNextCursor, setCrossScanTabNextCursor] = useState<Record<CrossScanTab, string | null>>({
+    bookmarks: null,
+    addressed: null,
+    ignored: null,
+  });
+  const [crossScanTabLoading, setCrossScanTabLoading] = useState<Record<CrossScanTab, boolean>>({
+    bookmarks: false,
+    addressed: false,
+    ignored: false,
+  });
+  const [crossScanTabLoadingMore, setCrossScanTabLoadingMore] = useState<Record<CrossScanTab, boolean>>({
+    bookmarks: false,
+    addressed: false,
+    ignored: false,
+  });
+  const [crossScanTabErrors, setCrossScanTabErrors] = useState<Record<CrossScanTab, string>>({
+    bookmarks: '',
+    addressed: '',
+    ignored: '',
+  });
+  const [filteredCrossScanTabBadgeCounts, setFilteredCrossScanTabBadgeCounts] = useState<Record<CrossScanTab, number | null>>({
+    bookmarks: null,
+    addressed: null,
+    ignored: null,
+  });
   const [findingsSearchQuery, setFindingsSearchQuery] = useState('');
   const [debouncedFindingsSearchQuery, setDebouncedFindingsSearchQuery] = useState('');
   const [serverSearchLoading, setServerSearchLoading] = useState(false);
-  const [filterHydrationLoading, setFilterHydrationLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<FindingSearchResult[]>([]);
   const [searchResultsNextCursor, setSearchResultsNextCursor] = useState<string | null>(null);
   const [searchResultsError, setSearchResultsError] = useState('');
@@ -623,6 +652,17 @@ export default function BrandDetailPage() {
   const pendingScanFindingsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanNonHitsLoadsRef = useRef<Record<string, Promise<void>>>({});
   const pendingScanIgnoredLoadsRef = useRef<Record<string, Promise<void>>>({});
+  const crossScanTabRequestIdRef = useRef<Record<CrossScanTab, number>>({
+    bookmarks: 0,
+    addressed: 0,
+    ignored: 0,
+  });
+  const crossScanTabLoadedQueryKeyRef = useRef<Record<CrossScanTab, string | null>>({
+    bookmarks: null,
+    addressed: null,
+    ignored: null,
+  });
+  const filteredCrossScanTabBadgeCountRequestIdRef = useRef(0);
   const findingSearchAbortControllerRef = useRef<AbortController | null>(null);
   const findingSearchRequestIdRef = useRef(0);
   const runScanMenuRef = useRef<HTMLDivElement | null>(null);
@@ -632,9 +672,7 @@ export default function BrandDetailPage() {
   const normalizedFindingsSearchQuery = normalizeFindingsSearchText(debouncedFindingsSearchQuery);
   const normalizedSelectedFindingTheme = normalizeFindingsTaxonomyValue(selectedFindingTheme);
   const isFindingsSearchActive = normalizedFindingsSearchInput.length > 0;
-  const shouldUseServerFindingSearch = activeTab === 'scans' && isFindingsSearchActive;
   const shouldUseLocalTabFindingSearch = activeTab !== 'scans' && isFindingsSearchActive;
-  const canRunServerFindingSearch = normalizedFindingsSearchQuery.length >= FINDING_SEARCH_MIN_QUERY_LENGTH;
   const hasActiveFindingCategoryFilter = selectedFindingCategory !== null;
   const hasActiveFindingSourceFilter = selectedFindingSource !== null;
   const hasActiveFindingThemeFilter = normalizedSelectedFindingTheme.length > 0;
@@ -642,6 +680,12 @@ export default function BrandDetailPage() {
     hasActiveFindingCategoryFilter
     || hasActiveFindingSourceFilter
     || hasActiveFindingThemeFilter;
+  const isFilterOnlyScansMode = !isFindingsSearchActive && hasActiveNonSearchFindingFilters;
+  const shouldUseServerFindingSearch =
+    activeTab === 'scans' && (isFindingsSearchActive || hasActiveNonSearchFindingFilters);
+  const canRunServerFindingSearch =
+    normalizedFindingsSearchQuery.length >= FINDING_SEARCH_MIN_QUERY_LENGTH
+    || isFilterOnlyScansMode;
   const isAnyFindingFilterActive =
     isFindingsSearchActive
     || hasActiveFindingCategoryFilter
@@ -655,8 +699,8 @@ export default function BrandDetailPage() {
   ].filter(Boolean).length;
   const activeHighlightQuery = shouldUseServerFindingSearch
     ? (canRunServerFindingSearch ? debouncedFindingsSearchQuery : undefined)
-    : (shouldUseLocalTabFindingSearch ? findingsSearchQuery : undefined);
-  const findingsSearchLoading = shouldUseServerFindingSearch ? serverSearchLoading : filterHydrationLoading;
+    : (shouldUseLocalTabFindingSearch ? debouncedFindingsSearchQuery : undefined);
+  const findingsSearchLoading = serverSearchLoading;
 
   useEffect(() => {
     if (!isAnyFindingFilterActive) return;
@@ -880,6 +924,11 @@ export default function BrandDetailPage() {
     }
   }
 
+  async function loadMoreCrossScanTabFindings(tab: CrossScanTab) {
+    if (!crossScanTabNextCursor[tab] || crossScanTabLoadingMore[tab]) return;
+    await loadCrossScanTabFindings(tab, { append: true });
+  }
+
   // ---------------------------------------------------------------------------
   // Fetch scans list and auto-expand + pre-load the most recent scan
   // ---------------------------------------------------------------------------
@@ -1013,41 +1062,251 @@ export default function BrandDetailPage() {
     return requestPromise;
   }
 
-  async function loadAllIgnoredFindings() {
-    try {
-      const res = await fetch(`/api/brands/${brandId}/findings?ignoredOnly=true`, { credentials: 'same-origin' });
-      if (res.ok) {
-        const json = await res.json();
-        setAllIgnoredFindings(json.data ?? []);
-      }
-    } catch {
-      // Non-critical
+  const buildCrossScanTabQueryKey = useCallback(() => JSON.stringify({
+    q: debouncedFindingsSearchQuery.trim(),
+    category: selectedFindingCategory ?? '',
+    source: selectedFindingSource ?? '',
+    theme: selectedFindingTheme.trim(),
+  }), [
+    debouncedFindingsSearchQuery,
+    selectedFindingCategory,
+    selectedFindingSource,
+    selectedFindingTheme,
+  ]);
+
+  const getCrossScanTabFindings = useCallback((tab: CrossScanTab) => {
+    if (tab === 'bookmarks') return allBookmarkedFindings;
+    if (tab === 'addressed') return allAddressedFindings;
+    return allIgnoredFindings;
+  }, [allAddressedFindings, allBookmarkedFindings, allIgnoredFindings]);
+
+  function setCrossScanTabFindings(tab: CrossScanTab, findings: FindingSummary[]) {
+    if (tab === 'bookmarks') {
+      setAllBookmarkedFindings(findings);
+      return;
     }
+    if (tab === 'addressed') {
+      setAllAddressedFindings(findings);
+      return;
+    }
+    setAllIgnoredFindings(findings);
   }
 
-  async function loadAllAddressedFindings() {
-    try {
-      const res = await fetch(`/api/brands/${brandId}/findings?addressedOnly=true`, { credentials: 'same-origin' });
-      if (res.ok) {
-        const json = await res.json();
-        setAllAddressedFindings(json.data ?? []);
-      }
-    } catch {
-      // Non-critical
+  function setCrossScanTabTruncated(tab: CrossScanTab, truncated: boolean) {
+    if (tab === 'bookmarks') {
+      setBookmarkedFindingsTruncated(truncated);
+      return;
     }
+    if (tab === 'addressed') {
+      setAddressedFindingsTruncated(truncated);
+      return;
+    }
+    setIgnoredFindingsTruncated(truncated);
   }
 
-  async function loadAllBookmarkedFindings() {
+  const loadCrossScanTabFindings = useCallback(async (
+    tab: CrossScanTab,
+    options?: { append?: boolean },
+  ) => {
+    const append = options?.append === true;
+    const queryKey = buildCrossScanTabQueryKey();
+    const currentCursor = crossScanTabNextCursor[tab];
+
+    if (append && !currentCursor) return;
+
+    const requestId = crossScanTabRequestIdRef.current[tab] + 1;
+    crossScanTabRequestIdRef.current[tab] = requestId;
+    crossScanTabLoadedQueryKeyRef.current[tab] = queryKey;
+
+    setCrossScanTabErrors((prev) => ({ ...prev, [tab]: '' }));
+    if (append) {
+      setCrossScanTabLoadingMore((prev) => ({ ...prev, [tab]: true }));
+    } else {
+      setCrossScanTabLoading((prev) => ({ ...prev, [tab]: true }));
+    }
+
     try {
-      const res = await fetch(`/api/brands/${brandId}/findings?bookmarkedOnly=true`, { credentials: 'same-origin' });
-      if (res.ok) {
-        const json = await res.json();
-        setAllBookmarkedFindings(json.data ?? []);
+      const params = new URLSearchParams({
+        limit: `${FINDING_SEARCH_RESULTS_PAGE_SIZE}`,
+      });
+      if (tab === 'bookmarks') {
+        params.set('bookmarkedOnly', 'true');
+      } else if (tab === 'addressed') {
+        params.set('addressedOnly', 'true');
+      } else {
+        params.set('ignoredOnly', 'true');
+      }
+      if (append && currentCursor) {
+        params.set('cursor', currentCursor);
+      }
+      if (debouncedFindingsSearchQuery.trim()) {
+        params.set('q', debouncedFindingsSearchQuery.trim());
+      }
+      if (selectedFindingCategory) {
+        params.set('category', selectedFindingCategory);
+      }
+      if (selectedFindingSource) {
+        params.set('source', selectedFindingSource);
+      }
+      if (selectedFindingTheme.trim()) {
+        params.set('theme', selectedFindingTheme.trim());
+      }
+      if (tab === 'bookmarks' && !append && !debouncedFindingsSearchQuery.trim() && !selectedFindingCategory && !selectedFindingSource && !selectedFindingTheme.trim()) {
+        params.set('includeCount', 'true');
+      }
+
+      const res = await fetch(`/api/brands/${brandId}/findings?${params.toString()}`, {
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? 'Failed to load findings');
+      }
+
+      const json = await res.json().catch(() => ({}));
+      if (crossScanTabRequestIdRef.current[tab] !== requestId) {
+        return;
+      }
+
+      const nextFindings = (Array.isArray(json.data) ? json.data : []) as FindingSummary[];
+      setCrossScanTabFindings(
+        tab,
+        append
+          ? (() => {
+              const seen = new Set(getCrossScanTabFindings(tab).map((finding) => finding.id));
+              const appended = nextFindings.filter((finding) => !seen.has(finding.id));
+              return appended.length > 0 ? [...getCrossScanTabFindings(tab), ...appended] : getCrossScanTabFindings(tab);
+            })()
+          : nextFindings,
+      );
+      setCrossScanTabNextCursor((prev) => ({
+        ...prev,
+        [tab]: json.hasMore ? (json.nextCursor ?? null) : null,
+      }));
+      setCrossScanTabTruncated(tab, json.truncated === true);
+      if (tab === 'bookmarks' && typeof json.totalCount === 'number') {
+        setBookmarkedFindingsTotalCount(json.totalCount);
+      }
+    } catch (err) {
+      if (crossScanTabRequestIdRef.current[tab] !== requestId) {
+        return;
+      }
+      setCrossScanTabErrors((prev) => ({
+        ...prev,
+        [tab]: err instanceof Error ? err.message : 'Failed to load findings',
+      }));
+      if (!append) {
+        crossScanTabLoadedQueryKeyRef.current[tab] = null;
+        setCrossScanTabFindings(tab, []);
+        setCrossScanTabNextCursor((prev) => ({ ...prev, [tab]: null }));
+        setCrossScanTabTruncated(tab, false);
+      }
+    } finally {
+      if (crossScanTabRequestIdRef.current[tab] !== requestId) {
+        return;
+      }
+      if (append) {
+        setCrossScanTabLoadingMore((prev) => ({ ...prev, [tab]: false }));
+      } else {
+        setCrossScanTabLoading((prev) => ({ ...prev, [tab]: false }));
+      }
+    }
+  }, [
+    brandId,
+    buildCrossScanTabQueryKey,
+    crossScanTabNextCursor,
+    debouncedFindingsSearchQuery,
+    getCrossScanTabFindings,
+    selectedFindingCategory,
+    selectedFindingSource,
+    selectedFindingTheme,
+  ]);
+
+  const refreshBookmarkedFindingsCount = useCallback(async () => {
+    try {
+      const params = new URLSearchParams({
+        bookmarkedOnly: 'true',
+        includeCount: 'true',
+        limit: '1',
+      });
+      const res = await fetch(`/api/brands/${brandId}/findings?${params.toString()}`, {
+        credentials: 'same-origin',
+      });
+      if (!res.ok) return;
+      const json = await res.json().catch(() => ({}));
+      if (typeof json.totalCount === 'number') {
+        setBookmarkedFindingsTotalCount(json.totalCount);
       }
     } catch {
       // Non-critical
     }
-  }
+  }, [brandId]);
+
+  const refreshFilteredCrossScanTabBadgeCounts = useCallback(async () => {
+    const requestId = filteredCrossScanTabBadgeCountRequestIdRef.current + 1;
+    filteredCrossScanTabBadgeCountRequestIdRef.current = requestId;
+
+    const buildParams = (tab: CrossScanTab) => {
+      const params = new URLSearchParams({
+        includeCount: 'true',
+        limit: '1',
+      });
+      if (tab === 'bookmarks') {
+        params.set('bookmarkedOnly', 'true');
+      } else if (tab === 'addressed') {
+        params.set('addressedOnly', 'true');
+      } else {
+        params.set('ignoredOnly', 'true');
+      }
+      if (debouncedFindingsSearchQuery.trim()) {
+        params.set('q', debouncedFindingsSearchQuery.trim());
+      }
+      if (selectedFindingCategory) {
+        params.set('category', selectedFindingCategory);
+      }
+      if (selectedFindingSource) {
+        params.set('source', selectedFindingSource);
+      }
+      if (selectedFindingTheme.trim()) {
+        params.set('theme', selectedFindingTheme.trim());
+      }
+      return params;
+    };
+
+    try {
+      const [bookmarksRes, addressedRes, ignoredRes] = await Promise.all([
+        fetch(`/api/brands/${brandId}/findings?${buildParams('bookmarks').toString()}`, { credentials: 'same-origin' }),
+        fetch(`/api/brands/${brandId}/findings?${buildParams('addressed').toString()}`, { credentials: 'same-origin' }),
+        fetch(`/api/brands/${brandId}/findings?${buildParams('ignored').toString()}`, { credentials: 'same-origin' }),
+      ]);
+
+      const [bookmarksJson, addressedJson, ignoredJson] = await Promise.all([
+        bookmarksRes.ok ? bookmarksRes.json().catch(() => ({})) : Promise.resolve({}),
+        addressedRes.ok ? addressedRes.json().catch(() => ({})) : Promise.resolve({}),
+        ignoredRes.ok ? ignoredRes.json().catch(() => ({})) : Promise.resolve({}),
+      ]);
+
+      if (filteredCrossScanTabBadgeCountRequestIdRef.current !== requestId) {
+        return;
+      }
+
+      setFilteredCrossScanTabBadgeCounts({
+        bookmarks: typeof bookmarksJson.totalCount === 'number' ? bookmarksJson.totalCount : 0,
+        addressed: typeof addressedJson.totalCount === 'number' ? addressedJson.totalCount : 0,
+        ignored: typeof ignoredJson.totalCount === 'number' ? ignoredJson.totalCount : 0,
+      });
+    } catch {
+      if (filteredCrossScanTabBadgeCountRequestIdRef.current !== requestId) {
+        return;
+      }
+    }
+  }, [
+    brandId,
+    debouncedFindingsSearchQuery,
+    selectedFindingCategory,
+    selectedFindingSource,
+    selectedFindingTheme,
+  ]);
 
   const loadFindingTaxonomyOptions = useCallback(async (options?: { excludeScanId?: string | null }) => {
     try {
@@ -1336,6 +1595,7 @@ export default function BrandDetailPage() {
       bookmarkNote?: string | null;
     },
   ) {
+    const wasBookmarked = triggerFinding.isBookmarked === true;
     const isBookmarked = responseData.isBookmarked ?? triggerFinding.isBookmarked ?? false;
     const bookmarkNote = responseData.bookmarkNote ?? null;
 
@@ -1366,6 +1626,12 @@ export default function BrandDetailPage() {
 
       return prev.map((finding) => (finding.id === triggerFinding.id ? updatedFinding : finding));
     });
+    if (wasBookmarked !== isBookmarked) {
+      setBookmarkedFindingsTotalCount((prev) => {
+        if (prev === null) return prev;
+        return isBookmarked ? prev + 1 : Math.max(0, prev - 1);
+      });
+    }
     updateVisibleSearchResults(
       (result) => result.id === triggerFinding.id,
       (result) => applyMetadataUpdate(result),
@@ -1897,11 +2163,8 @@ export default function BrandDetailPage() {
       setError('');
       setLoading(true);
 
-      // Fire non-critical loads immediately so they run in parallel with brand + scans fetches
-      void loadAllBookmarkedFindings();
-      void loadAllAddressedFindings();
-      void loadAllIgnoredFindings();
       void loadFindingTaxonomyOptions();
+      void refreshBookmarkedFindingsCount();
 
       try {
         const brandProfile = await refreshBrandProfile();
@@ -1934,7 +2197,21 @@ export default function BrandDetailPage() {
     fetchData();
     return () => stopPolling();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [brandId]);
+  }, [brandId, loadFindingTaxonomyOptions, refreshBookmarkedFindingsCount]);
+
+  useEffect(() => {
+    if (!isAnyFindingFilterActive) {
+      filteredCrossScanTabBadgeCountRequestIdRef.current += 1;
+      setFilteredCrossScanTabBadgeCounts({
+        bookmarks: null,
+        addressed: null,
+        ignored: null,
+      });
+      return;
+    }
+
+    void refreshFilteredCrossScanTabBadgeCounts();
+  }, [isAnyFindingFilterActive, refreshFilteredCrossScanTabBadgeCounts]);
 
   // Poll the brand profile while a history deletion is in progress so the
   // Run scan button re-enables automatically when Cloud Tasks finishes the job.
@@ -2081,53 +2358,29 @@ export default function BrandDetailPage() {
   ]);
 
   useEffect(() => {
-    if (activeTab !== 'scans' || isFindingsSearchActive || !hasActiveNonSearchFindingFilters) {
-      setFilterHydrationLoading(false);
+    if (activeTab === 'scans') {
       return;
     }
 
-    // Filter mode needs a complete cross-scan view, so hydrate every scan bucket
-    // instead of relying on summary counts that may be stale or incomplete.
-    const needsHydration = scans.some((scan) => (
-      scanFindings[scan.id] === undefined
-      || scanNonHits[scan.id] === undefined
-      || scanIgnored[scan.id] === undefined
-    ));
-
-    if (!needsHydration) {
-      setFilterHydrationLoading(false);
+    const queryKey = buildCrossScanTabQueryKey();
+    if (crossScanTabLoadedQueryKeyRef.current[activeTab] === queryKey) {
       return;
     }
 
-    let cancelled = false;
-    setFilterHydrationLoading(true);
-
-    void Promise.all(
-      scans.flatMap((scan) => {
-        const loads: Promise<void>[] = [];
-        if (scanFindings[scan.id] === undefined) {
-          loads.push(loadScanFindings(scan.id));
-        }
-        if (scanNonHits[scan.id] === undefined) {
-          loads.push(loadScanNonHits(scan.id));
-        }
-        if (scanIgnored[scan.id] === undefined) {
-          loads.push(loadScanIgnored(scan.id));
-        }
-
-        return loads;
-      }),
-    ).finally(() => {
-      if (!cancelled) {
-        setFilterHydrationLoading(false);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, hasActiveNonSearchFindingFilters, isFindingsSearchActive, scans, scanFindings, scanNonHits, scanIgnored]);
+    setCrossScanTabNextCursor((prev) => ({ ...prev, [activeTab]: null }));
+    setCrossScanTabErrors((prev) => ({ ...prev, [activeTab]: '' }));
+    setCrossScanTabTruncated(activeTab, false);
+    void loadCrossScanTabFindings(activeTab);
+  }, [
+    activeTab,
+    buildCrossScanTabQueryKey,
+    debouncedFindingsSearchQuery,
+    getCrossScanTabFindings,
+    loadCrossScanTabFindings,
+    selectedFindingCategory,
+    selectedFindingSource,
+    selectedFindingTheme,
+  ]);
 
   const availableFindingThemes = useMemo(() => collectDistinctFindingTaxonomyLabels([
     ...findingTaxonomyOptions.themes,
@@ -2554,6 +2807,7 @@ export default function BrandDetailPage() {
       setExpandedScanIds((prev) => prev.filter((id) => id !== scanId));
       setScans((prev) => prev.filter((s) => s.id !== scanId));
       void loadFindingTaxonomyOptions();
+      void refreshBookmarkedFindingsCount();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete scan');
     } finally {
@@ -2583,8 +2837,22 @@ export default function BrandDetailPage() {
       setScanNonHits({});
       setScanIgnored({});
       setAllBookmarkedFindings([]);
+      setBookmarkedFindingsTotalCount(0);
       setAllAddressedFindings([]);
       setAllIgnoredFindings([]);
+      setCrossScanTabNextCursor({
+        bookmarks: null,
+        addressed: null,
+        ignored: null,
+      });
+      setCrossScanTabErrors({
+        bookmarks: '',
+        addressed: '',
+        ignored: '',
+      });
+      setBookmarkedFindingsTruncated(false);
+      setAddressedFindingsTruncated(false);
+      setIgnoredFindingsTruncated(false);
       setFindingTaxonomyOptions({ themes: [] });
       setExpandedScanIds([]);
       setActiveScan(null);
@@ -3111,6 +3379,27 @@ export default function BrandDetailPage() {
   const visibleAddressedCount = visibleAddressedFindings.length;
   const visibleIgnoredFindings = filterFindings(allIgnoredFindings) ?? [];
   const visibleIgnoredCount = visibleIgnoredFindings.length;
+  const activeCrossScanTab = activeTab === 'scans' ? null : activeTab;
+  const activeCrossScanTabLoading = activeCrossScanTab ? crossScanTabLoading[activeCrossScanTab] : false;
+  const activeCrossScanTabLoadingMore = activeCrossScanTab ? crossScanTabLoadingMore[activeCrossScanTab] : false;
+  const activeCrossScanTabError = activeCrossScanTab ? crossScanTabErrors[activeCrossScanTab] : '';
+  const activeCrossScanTabNextCursor = activeCrossScanTab ? crossScanTabNextCursor[activeCrossScanTab] : null;
+  const activeCrossScanTabTruncated = activeCrossScanTab
+    ? (activeCrossScanTab === 'bookmarks'
+      ? bookmarkedFindingsTruncated
+      : activeCrossScanTab === 'addressed'
+        ? addressedFindingsTruncated
+        : ignoredFindingsTruncated)
+    : false;
+  const bookmarksTabBadgeCount = isAnyFindingFilterActive
+    ? (filteredCrossScanTabBadgeCounts.bookmarks ?? visibleBookmarkedCount)
+    : (bookmarkedFindingsTotalCount ?? visibleBookmarkedCount);
+  const addressedTabBadgeCount = isAnyFindingFilterActive
+    ? (filteredCrossScanTabBadgeCounts.addressed ?? visibleAddressedCount)
+    : totalAddressed;
+  const ignoredTabBadgeCount = isAnyFindingFilterActive
+    ? (filteredCrossScanTabBadgeCounts.ignored ?? visibleIgnoredCount)
+    : totalIgnored;
   const visibleLiveScanFindings = filterFindings(liveScanFindings) ?? [];
   const visibleLiveScanNonHits = sortBySeverity(filterFindings(liveScanNonHits) ?? []);
   const isSearchResultsMode = shouldUseServerFindingSearch;
@@ -3450,23 +3739,29 @@ export default function BrandDetailPage() {
                         </div>
                       </div>
                       {isAnyFindingFilterActive && (
-                        <p className="mt-3 text-xs text-white/80">
-                          {isSearchResultsMode
-                            ? (
-                              isSearchQueryTooShort
-                                ? `Type at least ${FINDING_SEARCH_MIN_QUERY_LENGTH} characters to search findings.`
-                                : findingsSearchLoading
-                                  ? 'Searching findings across all result sets...'
-                                  : searchResultsError
-                                    ? searchResultsError
-                                    : `Showing ${searchResultsCountLabel} that match the current ${activeFindingsFilterLabel}.`
-                            )
-                            : (
-                              findingsSearchLoading
-                                ? 'Filtering across loaded findings...'
-                                : `Showing only findings that match the current ${activeFindingsFilterLabel}.`
+                        <div className="mt-3 flex items-center gap-2 text-xs text-white/80">
+                          {((isSearchResultsMode && findingsSearchLoading && !isSearchQueryTooShort)
+                            || (!isSearchResultsMode && activeCrossScanTabLoading)) && (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin flex-shrink-0" />
                             )}
-                        </p>
+                          <p>
+                            {isSearchResultsMode
+                              ? (
+                                isSearchQueryTooShort
+                                  ? `Type at least ${FINDING_SEARCH_MIN_QUERY_LENGTH} characters to search findings.`
+                                  : findingsSearchLoading
+                                        ? 'Searching findings across all result sets...'
+                                    : searchResultsError
+                                      ? searchResultsError
+                                      : `Showing ${searchResultsCountLabel} that match the current ${activeFindingsFilterLabel}.`
+                              )
+                              : (
+                                    activeCrossScanTabLoading
+                                      ? `Refreshing ${activeTab} that match the current ${activeFindingsFilterLabel}...`
+                                      : `Showing only findings in this tab that match the current ${activeFindingsFilterLabel}.`
+                              )}
+                          </p>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -3520,9 +3815,9 @@ export default function BrandDetailPage() {
                         )}
                       >
                         Bookmarks
-                        {visibleBookmarkedCount > 0 && (
+                        {bookmarksTabBadgeCount > 0 && (
                           <Badge variant="default" className="rounded-full border-none bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-600">
-                            {formatInteger(visibleBookmarkedCount)}
+                            {formatInteger(bookmarksTabBadgeCount)}
                           </Badge>
                         )}
                       </button>
@@ -3537,9 +3832,9 @@ export default function BrandDetailPage() {
                         )}
                       >
                         Addressed
-                        {visibleAddressedCount > 0 && (
+                        {addressedTabBadgeCount > 0 && (
                           <Badge variant="default" className="rounded-full border-none bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-600">
-                            {formatInteger(visibleAddressedCount)}
+                            {formatInteger(addressedTabBadgeCount)}
                           </Badge>
                         )}
                       </button>
@@ -3554,9 +3849,9 @@ export default function BrandDetailPage() {
                         )}
                       >
                         Ignored
-                        {visibleIgnoredCount > 0 && (
+                        {ignoredTabBadgeCount > 0 && (
                           <Badge variant="default" className="rounded-full border-none bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-600">
-                            {formatInteger(visibleIgnoredCount)}
+                            {formatInteger(ignoredTabBadgeCount)}
                           </Badge>
                         )}
                       </button>
@@ -3692,126 +3987,234 @@ export default function BrandDetailPage() {
                     ) : (
                       <>
                     {activeTab === 'bookmarks' && (
-                      visibleBookmarkedCount === 0 ? (
-                        <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
-                            <Bookmark className="w-5 h-5 text-brand-600" />
+                      <>
+                        {activeCrossScanTabLoading && visibleBookmarkedCount === 0 ? (
+                          <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <Loader2 className="w-5 h-5 animate-spin text-brand-600" />
+                            <p className="text-sm text-gray-500">Loading bookmarked findings…</p>
                           </div>
-                          <p className="text-sm text-gray-500">
-                            {isAnyFindingFilterActive ? `No bookmarked findings match the current ${activeFindingsFilterLabel}.` : 'No bookmarked findings yet.'}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-6">
-                          {(['high', 'medium', 'low'] as const)
-                            .filter((sev) => bookmarkedHits.some((finding) => finding.severity === sev))
-                            .map((sev) => (
-                              <SeverityGroup
-                                key={`bookmarked-${sev}`}
-                                severity={sev}
-                                findings={bookmarkedHits.filter((finding) => finding.severity === sev)}
-                                selectedFindingIds={selectedFindingIdSet}
-                                onSelectionChange={handleFindingSelectionChange}
-                                onAddressToggle={handleAddressedToggle}
-                                onReclassify={handleReclassifyFinding}
-                                onBookmarkUpdate={handleBookmarkUpdate}
-                                onNoteUpdate={handleFindingNoteUpdate}
-                                forceExpanded={true}
-                                highlightQuery={activeHighlightQuery}
-                              />
-                            ))}
-
-                          {bookmarkedNonHits.length > 0 && (
-                            <div className="overflow-hidden sm:rounded-xl sm:border sm:border-gray-200 sm:bg-white">
-                              <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2.5 sm:rounded-none sm:border-b sm:border-gray-100 sm:px-4 sm:py-3">
-                                <Bookmark className="w-3.5 h-3.5 text-gray-400" />
-                                <span className="text-sm font-medium text-gray-500">
-                                  Non-findings
-                                  <span className="ml-1.5 text-xs font-normal text-gray-400">
-                                    ({bookmarkedNonHits.length})
-                                  </span>
-                                </span>
-                                <span className="hidden sm:inline text-xs text-gray-400">· bookmarked despite AI classifying them as false positives · reclassify to any category</span>
-                              </div>
-                              <div className="space-y-3 pt-2 sm:space-y-4 sm:border-t sm:border-gray-100 sm:p-4">
-                                {bookmarkedNonHits.map((finding) => (
-                                  <FindingCard
-                                    key={finding.id}
-                                    finding={finding}
-                                    isSelected={selectedFindingIdSet.has(finding.id)}
-                                    highlightQuery={activeHighlightQuery}
-                                    onSelectionChange={handleFindingSelectionChange}
-                                    onReclassify={handleReclassifyFinding}
-                                    onBookmarkUpdate={handleBookmarkUpdate}
-                                    onNoteUpdate={handleFindingNoteUpdate}
-                                  />
-                                ))}
-                              </div>
+                        ) : activeCrossScanTabError && visibleBookmarkedCount === 0 ? (
+                          <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-4 text-sm text-red-700">
+                            {activeCrossScanTabError}
+                          </div>
+                        ) : visibleBookmarkedCount === 0 ? (
+                          <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
+                              <Bookmark className="w-5 h-5 text-brand-600" />
                             </div>
-                          )}
-                        </div>
-                      )
+                            <p className="text-sm text-gray-500">
+                              {isAnyFindingFilterActive ? `No bookmarked findings match the current ${activeFindingsFilterLabel}.` : 'No bookmarked findings yet.'}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            {(['high', 'medium', 'low'] as const)
+                              .filter((sev) => bookmarkedHits.some((finding) => finding.severity === sev))
+                              .map((sev) => (
+                                <SeverityGroup
+                                  key={`bookmarked-${sev}`}
+                                  severity={sev}
+                                  findings={bookmarkedHits.filter((finding) => finding.severity === sev)}
+                                  selectedFindingIds={selectedFindingIdSet}
+                                  onSelectionChange={handleFindingSelectionChange}
+                                  onAddressToggle={handleAddressedToggle}
+                                  onReclassify={handleReclassifyFinding}
+                                  onBookmarkUpdate={handleBookmarkUpdate}
+                                  onNoteUpdate={handleFindingNoteUpdate}
+                                  forceExpanded={true}
+                                  highlightQuery={activeHighlightQuery}
+                                />
+                              ))}
+
+                            {bookmarkedNonHits.length > 0 && (
+                              <div className="overflow-hidden sm:rounded-xl sm:border sm:border-gray-200 sm:bg-white">
+                                <div className="flex items-center gap-2 rounded-lg bg-gray-50 px-3 py-2.5 sm:rounded-none sm:border-b sm:border-gray-100 sm:px-4 sm:py-3">
+                                  <Bookmark className="w-3.5 h-3.5 text-gray-400" />
+                                  <span className="text-sm font-medium text-gray-500">
+                                    Non-findings
+                                    <span className="ml-1.5 text-xs font-normal text-gray-400">
+                                      ({bookmarkedNonHits.length})
+                                    </span>
+                                  </span>
+                                  <span className="hidden sm:inline text-xs text-gray-400">· bookmarked despite AI classifying them as false positives · reclassify to any category</span>
+                                </div>
+                                <div className="space-y-3 pt-2 sm:space-y-4 sm:border-t sm:border-gray-100 sm:p-4">
+                                  {bookmarkedNonHits.map((finding) => (
+                                    <FindingCard
+                                      key={finding.id}
+                                      finding={finding}
+                                      isSelected={selectedFindingIdSet.has(finding.id)}
+                                      highlightQuery={activeHighlightQuery}
+                                      onSelectionChange={handleFindingSelectionChange}
+                                      onReclassify={handleReclassifyFinding}
+                                      onBookmarkUpdate={handleBookmarkUpdate}
+                                      onNoteUpdate={handleFindingNoteUpdate}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        {activeCrossScanTabError && visibleBookmarkedCount > 0 && (
+                          <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-4 text-sm text-red-700">
+                            {activeCrossScanTabError}
+                          </div>
+                        )}
+                        {(activeCrossScanTabNextCursor || activeCrossScanTabTruncated) && (
+                          <div className="flex flex-col items-center gap-3 pt-2">
+                            {activeCrossScanTabNextCursor && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => void loadMoreCrossScanTabFindings('bookmarks')}
+                                loading={activeCrossScanTabLoadingMore}
+                                disabled={activeCrossScanTabLoadingMore}
+                              >
+                                Load more
+                              </Button>
+                            )}
+                            {activeCrossScanTabTruncated && (
+                              <p className="text-center text-xs text-amber-700">
+                                Results were capped to keep this tab responsive. Narrow the current search or filters to explore further.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {activeTab === 'addressed' && (
-                      visibleAddressedCount === 0 ? (
-                        <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
-                            <Check className="w-5 h-5 text-brand-600" />
+                      <>
+                        {activeCrossScanTabLoading && visibleAddressedCount === 0 ? (
+                          <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <Loader2 className="w-5 h-5 animate-spin text-brand-600" />
+                            <p className="text-sm text-gray-500">Loading addressed findings…</p>
                           </div>
-                          <p className="text-sm text-gray-500">
-                            {isAnyFindingFilterActive ? `No addressed findings match the current ${activeFindingsFilterLabel}.` : 'No addressed findings yet.'}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-6">
-                          {(['high', 'medium', 'low'] as const)
-                            .filter((sev) => visibleAddressedFindings.some((finding) => finding.severity === sev))
-                            .map((sev) => (
-                              <SeverityGroup
-                                key={`addressed-${sev}`}
-                                severity={sev}
-                                findings={visibleAddressedFindings.filter((finding) => finding.severity === sev)}
-                                selectedFindingIds={selectedFindingIdSet}
-                                onSelectionChange={handleFindingSelectionChange}
-                                onAddressToggle={handleAddressedToggle}
-                                onBookmarkUpdate={handleBookmarkUpdate}
-                                onNoteUpdate={handleFindingNoteUpdate}
-                                forceExpanded={true}
-                                highlightQuery={activeHighlightQuery}
-                              />
-                            ))}
-                        </div>
-                      )
+                        ) : activeCrossScanTabError && visibleAddressedCount === 0 ? (
+                          <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-4 text-sm text-red-700">
+                            {activeCrossScanTabError}
+                          </div>
+                        ) : visibleAddressedCount === 0 ? (
+                          <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
+                              <Check className="w-5 h-5 text-brand-600" />
+                            </div>
+                            <p className="text-sm text-gray-500">
+                              {isAnyFindingFilterActive ? `No addressed findings match the current ${activeFindingsFilterLabel}.` : 'No addressed findings yet.'}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-6">
+                            {(['high', 'medium', 'low'] as const)
+                              .filter((sev) => visibleAddressedFindings.some((finding) => finding.severity === sev))
+                              .map((sev) => (
+                                <SeverityGroup
+                                  key={`addressed-${sev}`}
+                                  severity={sev}
+                                  findings={visibleAddressedFindings.filter((finding) => finding.severity === sev)}
+                                  selectedFindingIds={selectedFindingIdSet}
+                                  onSelectionChange={handleFindingSelectionChange}
+                                  onAddressToggle={handleAddressedToggle}
+                                  onBookmarkUpdate={handleBookmarkUpdate}
+                                  onNoteUpdate={handleFindingNoteUpdate}
+                                  forceExpanded={true}
+                                  highlightQuery={activeHighlightQuery}
+                                />
+                              ))}
+                          </div>
+                        )}
+                        {activeCrossScanTabError && visibleAddressedCount > 0 && (
+                          <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-4 text-sm text-red-700">
+                            {activeCrossScanTabError}
+                          </div>
+                        )}
+                        {(activeCrossScanTabNextCursor || activeCrossScanTabTruncated) && (
+                          <div className="flex flex-col items-center gap-3 pt-2">
+                            {activeCrossScanTabNextCursor && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => void loadMoreCrossScanTabFindings('addressed')}
+                                loading={activeCrossScanTabLoadingMore}
+                                disabled={activeCrossScanTabLoadingMore}
+                              >
+                                Load more
+                              </Button>
+                            )}
+                            {activeCrossScanTabTruncated && (
+                              <p className="text-center text-xs text-amber-700">
+                                Results were capped to keep this tab responsive. Narrow the current search or filters to explore further.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {activeTab === 'ignored' && (
-                      visibleIgnoredCount === 0 ? (
-                        <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
-                            <EyeOff className="w-5 h-5 text-brand-600" />
+                      <>
+                        {activeCrossScanTabLoading && visibleIgnoredCount === 0 ? (
+                          <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <Loader2 className="w-5 h-5 animate-spin text-brand-600" />
+                            <p className="text-sm text-gray-500">Loading ignored findings…</p>
                           </div>
-                          <p className="text-sm text-gray-500">
-                            {isAnyFindingFilterActive ? `No ignored findings match the current ${activeFindingsFilterLabel}.` : 'No ignored findings yet.'}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="space-y-4">
-                          {visibleIgnoredFindings.map((finding) => (
-                            <FindingCard
-                              key={finding.id}
-                              finding={finding}
-                              isSelected={selectedFindingIdSet.has(finding.id)}
-                              highlightQuery={activeHighlightQuery}
-                              onSelectionChange={handleFindingSelectionChange}
-                              onIgnoreToggle={handleIgnoreToggle}
-                              onReclassify={handleReclassifyFinding}
-                              onBookmarkUpdate={handleBookmarkUpdate}
-                              onNoteUpdate={handleFindingNoteUpdate}
-                            />
-                          ))}
-                        </div>
-                      )
+                        ) : activeCrossScanTabError && visibleIgnoredCount === 0 ? (
+                          <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-4 text-sm text-red-700">
+                            {activeCrossScanTabError}
+                          </div>
+                        ) : visibleIgnoredCount === 0 ? (
+                          <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
+                              <EyeOff className="w-5 h-5 text-brand-600" />
+                            </div>
+                            <p className="text-sm text-gray-500">
+                              {isAnyFindingFilterActive ? `No ignored findings match the current ${activeFindingsFilterLabel}.` : 'No ignored findings yet.'}
+                            </p>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            {visibleIgnoredFindings.map((finding) => (
+                              <FindingCard
+                                key={finding.id}
+                                finding={finding}
+                                isSelected={selectedFindingIdSet.has(finding.id)}
+                                highlightQuery={activeHighlightQuery}
+                                onSelectionChange={handleFindingSelectionChange}
+                                onIgnoreToggle={handleIgnoreToggle}
+                                onReclassify={handleReclassifyFinding}
+                                onBookmarkUpdate={handleBookmarkUpdate}
+                                onNoteUpdate={handleFindingNoteUpdate}
+                              />
+                            ))}
+                          </div>
+                        )}
+                        {activeCrossScanTabError && visibleIgnoredCount > 0 && (
+                          <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-4 text-sm text-red-700">
+                            {activeCrossScanTabError}
+                          </div>
+                        )}
+                        {(activeCrossScanTabNextCursor || activeCrossScanTabTruncated) && (
+                          <div className="flex flex-col items-center gap-3 pt-2">
+                            {activeCrossScanTabNextCursor && (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => void loadMoreCrossScanTabFindings('ignored')}
+                                loading={activeCrossScanTabLoadingMore}
+                                disabled={activeCrossScanTabLoadingMore}
+                              >
+                                Load more
+                              </Button>
+                            )}
+                            {activeCrossScanTabTruncated && (
+                              <p className="text-center text-xs text-amber-700">
+                                Results were capped to keep this tab responsive. Narrow the current search or filters to explore further.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {activeTab === 'scans' && (

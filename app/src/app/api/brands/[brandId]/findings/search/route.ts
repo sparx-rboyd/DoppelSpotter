@@ -229,6 +229,8 @@ export async function GET(request: NextRequest, { params }: Params) {
   const source = parseSearchSource(request.nextUrl.searchParams.get('source'));
   const theme = request.nextUrl.searchParams.get('theme')?.trim() ?? '';
   const normalizedTheme = normalizeThemeValue(theme);
+  const hasActiveFilters = Boolean(category || source || normalizedTheme);
+  const isFilterOnlyRequest = normalizedQuery.length === 0 && hasActiveFilters;
   const scanId = request.nextUrl.searchParams.get('scanId')?.trim() ?? '';
   const scope = parseSearchScope(request.nextUrl.searchParams.get('tab'));
   const resultLimit = parseResultLimit(request.nextUrl.searchParams.get('limit'));
@@ -272,7 +274,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     });
   }
 
-  if (normalizedQuery.length < MIN_SEARCH_QUERY_LENGTH) {
+  if (normalizedQuery.length < MIN_SEARCH_QUERY_LENGTH && !isFilterOnlyRequest) {
     return NextResponse.json({
       data: {
         results: [] as FindingSearchResult[],

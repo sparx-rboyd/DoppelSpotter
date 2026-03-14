@@ -1,4 +1,5 @@
-import { type Query, type QueryDocumentSnapshot } from '@google-cloud/firestore';
+import { Buffer } from 'node:buffer';
+import { FieldPath, Timestamp, type Query, type QueryDocumentSnapshot } from '@google-cloud/firestore';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
@@ -11,17 +12,158 @@ import {
 } from '@/lib/async-deletions';
 import { scheduleDeletionTaskOrRunInline } from '@/lib/deletion-tasks';
 import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
-import type { BrandProfile, FindingSummary } from '@/lib/types';
+import type { BrandProfile, FindingCategory, FindingSource, FindingSummary } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string }> };
 const FINDINGS_PAGE_SIZE = 200;
+const DEFAULT_RESULT_LIMIT = 50;
+const MAX_RESULT_LIMIT = 100;
+const FINDINGS_QUERY_SCAN_BATCH_SIZE = 200;
+const MAX_SCANNED_FINDINGS = 5000;
+
+type CrossScanTab = 'bookmarks' | 'addressed' | 'ignored';
+
+type FindingsCursor = {
+  sortSeconds: number;
+  sortNanoseconds: number;
+  findingId: string;
+};
+
+function normalizeSearchText(value: string) {
+  return value.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function normalizeThemeValue(value?: string) {
+  return value?.toLowerCase().replace(/\s+/g, ' ').trim() ?? '';
+}
+
+function parseSearchCategory(value?: string | null): FindingCategory | null {
+  const normalized = value?.toLowerCase().replace(/\s+/g, '').trim();
+  if (!normalized) return null;
+  if (normalized === 'high' || normalized === 'medium' || normalized === 'low') return normalized;
+  if (normalized === 'non-hit' || normalized === 'nonhit' || normalized === 'nonhits') return 'non-hit';
+  return null;
+}
+
+function parseSearchSource(value?: string | null): FindingSource | null {
+  if (
+    value === 'google'
+    || value === 'reddit'
+    || value === 'tiktok'
+    || value === 'youtube'
+    || value === 'facebook'
+    || value === 'instagram'
+    || value === 'telegram'
+    || value === 'apple_app_store'
+    || value === 'google_play'
+    || value === 'domains'
+    || value === 'discord'
+    || value === 'github'
+    || value === 'x'
+    || value === 'unknown'
+  ) {
+    return value;
+  }
+
+  return null;
+}
+
+function parseResultLimit(value?: string | null) {
+  const parsed = Number.parseInt(value ?? `${DEFAULT_RESULT_LIMIT}`, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_RESULT_LIMIT;
+  return Math.min(parsed, MAX_RESULT_LIMIT);
+}
+
+function encodeCursor(cursor: FindingsCursor) {
+  return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
+}
+
+function decodeCursor(value?: string | null): FindingsCursor | null {
+  if (!value) return null;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as Partial<FindingsCursor>;
+    if (
+      typeof parsed.sortSeconds !== 'number'
+      || typeof parsed.sortNanoseconds !== 'number'
+      || typeof parsed.findingId !== 'string'
+      || !parsed.findingId.trim()
+    ) {
+      return null;
+    }
+
+    return {
+      sortSeconds: parsed.sortSeconds,
+      sortNanoseconds: parsed.sortNanoseconds,
+      findingId: parsed.findingId.trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildFindingSearchText(finding: FindingSummary) {
+  const xHandleSearchText = finding.xAuthorHandle
+    ? `${finding.xAuthorHandle} @${finding.xAuthorHandle}`
+    : '';
+
+  return normalizeSearchText(`${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis} ${xHandleSearchText}`);
+}
+
+function matchesCrossScanTabFilters(
+  finding: FindingSummary,
+  params: {
+    tab: CrossScanTab;
+    normalizedQuery: string;
+    category: FindingCategory | null;
+    source: FindingSource | null;
+    normalizedTheme: string;
+  },
+) {
+  if (params.tab === 'bookmarks' && finding.isBookmarked !== true) {
+    return false;
+  }
+  if (params.tab === 'addressed' && !(finding.isAddressed === true && !finding.isFalsePositive)) {
+    return false;
+  }
+  if (params.tab === 'ignored' && !(finding.isIgnored === true && !finding.isFalsePositive && !finding.isAddressed)) {
+    return false;
+  }
+
+  if (params.normalizedQuery && !buildFindingSearchText(finding).includes(params.normalizedQuery)) {
+    return false;
+  }
+
+  if (
+    params.category
+    && !(
+      params.category === 'non-hit'
+        ? finding.isFalsePositive === true
+        : finding.isFalsePositive !== true && finding.severity === params.category
+    )
+  ) {
+    return false;
+  }
+
+  if (params.source && finding.source !== params.source) {
+    return false;
+  }
+
+  if (params.normalizedTheme && normalizeThemeValue(finding.theme) !== params.normalizedTheme) {
+    return false;
+  }
+
+  return true;
+}
 
 async function loadMatchingFindingSummaries(
   query: Query,
   matchesFinding: (finding: FindingSummary) => boolean,
-): Promise<FindingSummary[]> {
+  options?: { matchLimit?: number },
+): Promise<{ findings: FindingSummary[]; truncated: boolean }> {
   const findings: FindingSummary[] = [];
   let cursor: QueryDocumentSnapshot | undefined;
+  const resultLimit = options?.matchLimit;
 
   while (true) {
     let pageQuery = query.limit(FINDINGS_PAGE_SIZE);
@@ -40,14 +182,28 @@ async function loadMatchingFindingSummaries(
 
       if (matchesFinding(finding)) {
         findings.push(finding);
+        if (resultLimit !== undefined && findings.length >= resultLimit + 1) {
+          break;
+        }
       }
     }
 
     cursor = snapshot.docs[snapshot.docs.length - 1];
+    if (resultLimit !== undefined && findings.length >= resultLimit + 1) {
+      break;
+    }
     if (snapshot.size < FINDINGS_PAGE_SIZE) break;
   }
 
-  return findings;
+  if (resultLimit === undefined) {
+    return { findings, truncated: false };
+  }
+
+  const truncated = findings.length > resultLimit;
+  return {
+    findings: truncated ? findings.slice(0, resultLimit) : findings,
+    truncated,
+  };
 }
 
 // GET /api/brands/[brandId]/findings
@@ -62,11 +218,27 @@ export async function GET(request: NextRequest, { params }: Params) {
   if (error) return error;
 
   const { brandId } = await params;
+  const rawQuery = request.nextUrl.searchParams.get('q')?.trim() ?? '';
+  const normalizedQuery = normalizeSearchText(rawQuery);
+  const category = parseSearchCategory(request.nextUrl.searchParams.get('category'));
+  const source = parseSearchSource(request.nextUrl.searchParams.get('source'));
+  const theme = request.nextUrl.searchParams.get('theme')?.trim() ?? '';
+  const normalizedTheme = normalizeThemeValue(theme);
+  const resultLimit = parseResultLimit(request.nextUrl.searchParams.get('limit'));
+  const parsedCursor = decodeCursor(request.nextUrl.searchParams.get('cursor'));
+  const includeCount = request.nextUrl.searchParams.get('includeCount') === 'true';
   const nonHitsOnly = request.nextUrl.searchParams.get('nonHitsOnly') === 'true';
   const ignoredOnly = request.nextUrl.searchParams.get('ignoredOnly') === 'true';
   const addressedOnly = request.nextUrl.searchParams.get('addressedOnly') === 'true';
   const bookmarkedOnly = request.nextUrl.searchParams.get('bookmarkedOnly') === 'true';
   const scanId = request.nextUrl.searchParams.get('scanId');
+  const crossScanTab: CrossScanTab | null = bookmarkedOnly
+    ? 'bookmarks'
+    : addressedOnly
+      ? 'addressed'
+      : ignoredOnly
+        ? 'ignored'
+        : null;
 
   const brandDoc = await db.collection('brands').doc(brandId).get();
   if (!brandDoc.exists) return errorResponse('Brand not found', 404);
@@ -84,6 +256,142 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   if (scanId && deletingScanIds.has(scanId)) {
     return NextResponse.json({ data: [] });
+  }
+
+  if (!scanId && crossScanTab) {
+    let query: Query = db
+      .collection('findings')
+      .where('brandId', '==', brandId)
+      .where('userId', '==', uid);
+
+    if (crossScanTab === 'bookmarks') {
+      query = query.where('isBookmarked', '==', true);
+    } else if (crossScanTab === 'addressed') {
+      query = query.where('isAddressed', '==', true);
+    } else {
+      query = query.where('isIgnored', '==', true);
+    }
+
+    const primarySortField = crossScanTab === 'bookmarks'
+      ? 'bookmarkedAt'
+      : crossScanTab === 'addressed'
+        ? 'addressedAt'
+        : 'createdAt';
+
+    const orderedQuery = query
+      .select(
+        'scanId',
+        'brandId',
+        'source',
+        'severity',
+        'title',
+        'theme',
+        'llmAnalysis',
+        'url',
+        'xAuthorId',
+        'xAuthorHandle',
+        'xAuthorUrl',
+        'xMatchBasis',
+        'isFalsePositive',
+        'isIgnored',
+        'isAddressed',
+        'isBookmarked',
+        'addressedAt',
+        'bookmarkNote',
+        'bookmarkedAt',
+        'createdAt',
+      )
+      .orderBy(primarySortField, 'desc')
+      .orderBy(FieldPath.documentId(), 'desc');
+
+    const collectedMatches: FindingSummary[] = [];
+    const collectedMatchCursors: FindingsCursor[] = [];
+    let lastScannedCursor = parsedCursor;
+    let scannedFindings = 0;
+    let exhausted = false;
+    let matchedCount = 0;
+
+    while ((includeCount || collectedMatches.length < resultLimit + 1) && scannedFindings < MAX_SCANNED_FINDINGS) {
+      let pageQuery = orderedQuery.limit(FINDINGS_QUERY_SCAN_BATCH_SIZE);
+      if (lastScannedCursor) {
+        pageQuery = pageQuery.startAfter(
+          new Timestamp(lastScannedCursor.sortSeconds, lastScannedCursor.sortNanoseconds),
+          lastScannedCursor.findingId,
+        );
+      }
+
+      const snapshot = await pageQuery.get();
+      if (snapshot.empty) {
+        exhausted = true;
+        break;
+      }
+
+      for (const doc of snapshot.docs) {
+        const finding = {
+          id: doc.id,
+          ...(doc.data() as Omit<FindingSummary, 'id'>),
+        } satisfies FindingSummary;
+
+        const sortValue = crossScanTab === 'bookmarks'
+          ? finding.bookmarkedAt ?? finding.createdAt
+          : crossScanTab === 'addressed'
+            ? finding.addressedAt ?? finding.createdAt
+            : finding.createdAt;
+
+        lastScannedCursor = {
+          sortSeconds: sortValue.seconds,
+          sortNanoseconds: sortValue.nanoseconds,
+          findingId: finding.id,
+        };
+        scannedFindings++;
+
+        if (
+          !deletingScanIds.has(finding.scanId)
+          && matchesCrossScanTabFilters(finding, {
+            tab: crossScanTab,
+            normalizedQuery,
+            category,
+            source,
+            normalizedTheme,
+          })
+        ) {
+          matchedCount++;
+          if (collectedMatches.length < resultLimit + 1) {
+            collectedMatches.push(finding);
+            collectedMatchCursors.push(lastScannedCursor);
+          }
+          if (!includeCount && collectedMatches.length >= resultLimit + 1) {
+            break;
+          }
+        }
+
+        if (scannedFindings >= MAX_SCANNED_FINDINGS) {
+          break;
+        }
+      }
+
+      if (snapshot.size < FINDINGS_QUERY_SCAN_BATCH_SIZE) {
+        exhausted = true;
+        break;
+      }
+    }
+
+    const hasMore = collectedMatches.length > resultLimit;
+    const visibleMatches = hasMore ? collectedMatches.slice(0, resultLimit) : collectedMatches;
+    const visibleMatchCursors = hasMore ? collectedMatchCursors.slice(0, resultLimit) : collectedMatchCursors;
+    const nextCursor = hasMore && visibleMatchCursors.length > 0
+      ? encodeCursor(visibleMatchCursors[visibleMatchCursors.length - 1])
+      : null;
+    const truncated = !hasMore && !exhausted && scannedFindings >= MAX_SCANNED_FINDINGS;
+    const totalCount = includeCount ? matchedCount : undefined;
+
+    return NextResponse.json({
+      data: visibleMatches,
+      nextCursor,
+      hasMore,
+      truncated,
+      ...(totalCount !== undefined ? { totalCount } : {}),
+    });
   }
 
   let query = db
@@ -160,7 +468,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     return !finding.isFalsePositive && !finding.isIgnored && !finding.isAddressed;
   };
 
-  const findings = await loadMatchingFindingSummaries(orderedQuery, matchesFinding);
+  const { findings } = await loadMatchingFindingSummaries(orderedQuery, matchesFinding);
 
   return NextResponse.json({ data: findings });
 }
