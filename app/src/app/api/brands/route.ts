@@ -8,8 +8,6 @@ import {
   normalizeBrandAnalysisSeverityDefinitions,
 } from '@/lib/analysis-severity';
 import {
-  drainBrandDeletion,
-  drainBrandHistoryDeletion,
   isBrandDeletionActive,
   isBrandHistoryDeletionActive,
   isScanDeletionActive,
@@ -101,16 +99,7 @@ export async function GET(request: NextRequest) {
   const brands = brandSnapshot.docs.reduce<BrandSummary[]>((acc, doc) => {
       const data = doc.data() as Pick<BrandProfile, 'name' | 'createdAt' | 'scanSchedule' | 'historyDeletion' | 'brandDeletion'>;
       if (isBrandDeletionActive(data)) {
-        void drainBrandDeletion({ brandId: doc.id, userId: uid }).catch(() => {
-          // Non-critical
-        });
         return acc;
-      }
-
-      if (isBrandHistoryDeletionActive(data)) {
-        void drainBrandHistoryDeletion({ brandId: doc.id, userId: uid }).catch(() => {
-          // Non-critical
-        });
       }
 
       const counts = countsByBrandId.get(doc.id);

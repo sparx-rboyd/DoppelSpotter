@@ -87,8 +87,8 @@ export function BrandAnalysisSettingsFields({
 
           return (
             <div key={severity} className="rounded-2xl border border-gray-200 bg-gray-50/60 p-4">
-              <div className="flex items-start justify-between gap-4">
-                <SeverityBadge severity={severity} />
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+                <SeverityBadge severity={severity} className="w-full justify-start sm:w-auto" />
                 <button
                   type="button"
                   role="switch"
@@ -97,7 +97,7 @@ export function BrandAnalysisSettingsFields({
                   onClick={() => handleToggle(severity)}
                   className={`inline-flex items-center gap-2 rounded-md text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
                     isCustom ? 'text-brand-700' : 'text-gray-600'
-                  }`}
+                  } self-start sm:self-auto`}
                 >
                   <span>{isCustom ? 'Customisation on' : 'Customisation off'}</span>
                   <span

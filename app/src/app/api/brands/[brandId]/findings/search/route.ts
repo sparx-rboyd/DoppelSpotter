@@ -4,9 +4,6 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { errorResponse, requireAuth } from '@/lib/api-utils';
 import {
-  drainBrandDeletion,
-  drainBrandHistoryDeletion,
-  drainScanDeletion,
   isBrandDeletionActive,
   isBrandHistoryDeletionActive,
   loadDeletingScanIdsForBrand,
@@ -243,9 +240,6 @@ export async function GET(request: NextRequest, { params }: Params) {
   const brand = brandDoc.data() as BrandProfile;
   if (brand.userId !== uid) return errorResponse('Forbidden', 403);
   if (isBrandDeletionActive(brand)) {
-    void drainBrandDeletion({ brandId, userId: uid }).catch(() => {
-      // Non-critical
-    });
     return NextResponse.json({
       data: {
         results: [] as FindingSearchResult[],
@@ -256,9 +250,6 @@ export async function GET(request: NextRequest, { params }: Params) {
     });
   }
   if (isBrandHistoryDeletionActive(brand)) {
-    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch(() => {
-      // Non-critical
-    });
     return NextResponse.json({
       data: {
         results: [] as FindingSearchResult[],
@@ -270,12 +261,6 @@ export async function GET(request: NextRequest, { params }: Params) {
   }
 
   const deletingScanIds = new Set(await loadDeletingScanIdsForBrand({ brandId, userId: uid }));
-  const firstDeletingScanId = deletingScanIds.values().next().value as string | undefined;
-  if (firstDeletingScanId) {
-    void drainScanDeletion({ brandId, scanId: firstDeletingScanId, userId: uid }).catch(() => {
-      // Non-critical
-    });
-  }
   if (scanId && deletingScanIds.has(scanId)) {
     return NextResponse.json({
       data: {

@@ -9,11 +9,11 @@ import {
 } from '@/lib/analysis-severity';
 import {
   drainBrandDeletion,
-  drainBrandHistoryDeletion,
   isBrandDeletionActive,
   isBrandHistoryDeletionActive,
   markBrandDeletionQueued,
 } from '@/lib/async-deletions';
+import { scheduleDeletionTaskOrRunInline } from '@/lib/deletion-tasks';
 import {
   hasEnabledBrandScanSource,
   isValidAllowAiDeepSearches,
@@ -51,15 +51,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const data = doc.data() as Omit<BrandProfile, 'id'>;
   if (data.userId !== uid) return errorResponse('Forbidden', 403);
   if (isBrandDeletionActive(data)) {
-    void drainBrandDeletion({ brandId, userId: uid }).catch((error) => {
-      console.error(`[brand-delete] Failed to continue deletion for brand ${brandId}:`, error);
-    });
     return errorResponse('Brand not found', 404);
-  }
-  if (isBrandHistoryDeletionActive(data)) {
-    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch((error: unknown) => {
-      console.error(`[brand-history-delete] Failed to continue deletion for brand ${brandId}:`, error);
-    });
   }
 
   return NextResponse.json({ data: { id: doc.id, ...data } });
@@ -208,8 +200,15 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   if (brand.userId !== uid) return errorResponse('Forbidden', 403);
 
   if (isBrandDeletionActive(brand)) {
-    void drainBrandDeletion({ brandId, userId: uid }).catch((error) => {
-      console.error(`[brand-delete] Failed to continue deletion for brand ${brandId}:`, error);
+    await scheduleDeletionTaskOrRunInline({
+      payload: {
+        kind: 'brand',
+        brandId,
+        userId: uid,
+      },
+      requestHeaders: request.headers,
+      logPrefix: `[brand-delete] Brand ${brandId}`,
+      runInline: () => drainBrandDeletion({ brandId, userId: uid }),
     });
     return new NextResponse(null, { status: 202 });
   }
@@ -229,8 +228,15 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   }
 
   await markBrandDeletionQueued(brandId);
-  void drainBrandDeletion({ brandId, userId: uid }).catch((error) => {
-    console.error(`[brand-delete] Failed to process deletion for brand ${brandId}:`, error);
+  await scheduleDeletionTaskOrRunInline({
+    payload: {
+      kind: 'brand',
+      brandId,
+      userId: uid,
+    },
+    requestHeaders: request.headers,
+    logPrefix: `[brand-delete] Brand ${brandId}`,
+    runInline: () => drainBrandDeletion({ brandId, userId: uid }),
   });
 
   return new NextResponse(null, { status: 202 });

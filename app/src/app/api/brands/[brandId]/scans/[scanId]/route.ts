@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { drainScanDeletion, isBrandDeletionActive, isBrandHistoryDeletionActive, isScanDeletionActive, markScanDeletionQueued } from '@/lib/async-deletions';
+import { scheduleDeletionTaskOrRunInline } from '@/lib/deletion-tasks';
 import type { BrandProfile, Scan } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string; scanId: string }> };
@@ -67,8 +68,16 @@ export async function DELETE(request: NextRequest, { params }: Params) {
     await markScanDeletionQueued(scanId);
   }
 
-  void drainScanDeletion({ brandId, scanId, userId: uid }).catch((error) => {
-    console.error(`[scan-delete] Failed to process deletion for scan ${scanId}:`, error);
+  await scheduleDeletionTaskOrRunInline({
+    payload: {
+      kind: 'scan',
+      brandId,
+      scanId,
+      userId: uid,
+    },
+    requestHeaders: request.headers,
+    logPrefix: `[scan-delete] Scan ${scanId}`,
+    runInline: () => drainScanDeletion({ brandId, scanId, userId: uid }),
   });
 
   return new NextResponse(null, { status: 202 });

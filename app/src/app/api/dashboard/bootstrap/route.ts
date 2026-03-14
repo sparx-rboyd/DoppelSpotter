@@ -3,8 +3,6 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth } from '@/lib/api-utils';
 import {
-  drainBrandDeletion,
-  drainBrandHistoryDeletion,
   isBrandDeletionActive,
   isBrandHistoryDeletionActive,
   isScanDeletionActive,
@@ -78,16 +76,7 @@ export async function GET(request: NextRequest) {
   const brands = brandSnapshot.docs.reduce<BrandSummary[]>((acc, doc) => {
       const data = doc.data() as Pick<BrandProfile, 'name' | 'createdAt' | 'scanSchedule' | 'historyDeletion' | 'brandDeletion'>;
       if (isBrandDeletionActive(data)) {
-        void drainBrandDeletion({ brandId: doc.id, userId: uid }).catch(() => {
-          // Non-critical
-        });
         return acc;
-      }
-
-      if (isBrandHistoryDeletionActive(data)) {
-        void drainBrandHistoryDeletion({ brandId: doc.id, userId: uid }).catch(() => {
-          // Non-critical
-        });
       }
 
       const counts = countsByBrandId.get(doc.id);

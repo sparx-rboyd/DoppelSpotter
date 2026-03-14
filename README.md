@@ -345,6 +345,8 @@ For true end-to-end scan testing, Apify needs to call back into the app's webhoo
 | `MAILERSEND_API_TOKEN` | Optional | Enables transactional emails such as verification, reset, and scan summaries. |
 | `AUTH_JWT_SECRET` | Yes | Signs auth cookies and password-reset / verification tokens. |
 | `SCHEDULE_DISPATCH_SERVICE_ACCOUNT_EMAIL` | Optional unless using scheduled scans in production | Restricts the scheduled-scan dispatch endpoint to the expected Google service account. |
+| `DELETION_TASKS_QUEUE_PATH` | Optional unless using Cloud Tasks-backed deletions in production | Full Cloud Tasks queue path used to enqueue deletion worker jobs. |
+| `DELETION_TASKS_SERVICE_ACCOUNT_EMAIL` | Optional unless using Cloud Tasks-backed deletions in production | Service account email used both to sign deletion worker task requests and to validate them on receipt. |
 | `GCP_PROJECT_ID` | Yes | Firestore project ID. |
 | `FIRESTORE_DATABASE_ID` | No | Firestore database ID, defaults to `(default)`. |
 | `APP_URL` | Yes | Public base URL used for callbacks and links. |
@@ -357,6 +359,7 @@ For true end-to-end scan testing, Apify needs to call back into the app's webhoo
 - The app is built from `app/Dockerfile`.
 - `cloudbuild.yaml` builds the image, pushes it to Artifact Registry, and deploys it to Cloud Run.
 - Runtime environment variables are expected to be managed on the Cloud Run service.
+- Optional internal background work uses Google OIDC-authenticated Cloud Scheduler and Cloud Tasks calls back into Cloud Run routes.
 - The Cloud Build trigger is scoped so `app/**` changes deploy the app without being triggered by landing-page-only edits.
 
 ### Pitch Page Deployment

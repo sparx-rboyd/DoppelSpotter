@@ -45,6 +45,25 @@ export function formatDate(date: AnyTimestamp | null | undefined): string {
   }
 }
 
+/**
+ * Format a Firestore Timestamp or Date as a compact date/time label.
+ * Output: "14/03/26 07:00"
+ */
+export function formatCompactDateTime(date: AnyTimestamp | null | undefined): string {
+  if (!date) return '—';
+  try {
+    return new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(toDate(date)).replace(',', '');
+  } catch {
+    return '—';
+  }
+}
+
 function ordinalSuffix(n: number): string {
   const v = n % 100;
   if (v >= 11 && v <= 13) return 'th';

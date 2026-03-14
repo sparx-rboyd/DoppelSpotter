@@ -17,6 +17,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 - Scraping: Apify platform (hosted actors)
 - AI analysis: OpenRouter → `deepseek/deespseek-v3.2` (default)
 - Hosting: Google Cloud Run (app) + Cloudflare Workers (landing page)
+- Background jobs: Cloud Scheduler (scheduled scans) + Cloud Tasks (async deletions)
 - CI/CD: GCP Cloud Build
 
 ---
@@ -43,7 +44,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │       │       ├── brands/       # CRUD + findings + scans per brand
 │       │       ├── dashboard/    # Dashboard bootstrap, persisted selection, and analytics metrics
 │       │       ├── findings/     # Cross-brand findings query
-│       │       ├── internal/     # Internal service-to-service routes (scheduled scan dispatch)
+│       │       ├── internal/     # Internal service-to-service routes (scheduled scan dispatch + Cloud Tasks deletion worker)
 │       │       ├── scan/         # Trigger scan + poll status
 │       │       └── webhooks/apify/  # Apify webhook receiver → AI analysis pipeline
 │       ├── settings/             # Authenticated account settings page (password + account deletion)
@@ -66,6 +67,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │               └── types.ts      # Google + Reddit + TikTok + Discord + GitHub + X analysis output interfaces + parsers
 └── docs/
     ├── GCP_SETUP.md
+    ├── GCP_DELETION_TASKS_SETUP.md
     └── PIPELINE_SETUP.md
 ```
 
@@ -187,6 +189,13 @@ POST /api/internal/scheduled-scans/dispatch
  └─ reuses the shared scan runner to reserve the new scan and advance `nextRunAt` atomically
  └─ if the brand already has a pending/running/summarising scan, skips that occurrence and advances `nextRunAt` to the next future slot
 
+POST /api/internal/deletions/drain
+ └─ validates a Google-signed OIDC bearer token from Cloud Tasks
+ └─ checks both the token audience (worker route URL) and the caller email against `DELETION_TASKS_SERVICE_ACCOUNT_EMAIL`
+ └─ accepts a typed deletion payload for `scan`, `brand-history`, or `brand`
+ └─ calls the matching bounded drain helper from `app/src/lib/async-deletions.ts`
+ └─ if more work remains, enqueues exactly one follow-up Cloud Task instead of relying on later user traffic
+
 POST /api/scan
  └─ verifies ownership, then delegates to the shared scan runner
  └─ refuses to start while `brands.historyDeletion` or `brands.brandDeletion` is active
@@ -238,13 +247,13 @@ GET /api/brands/[brandId]/scans/[scanId]/export/pdf
 
 DELETE /api/brands/[brandId]/scans/[scanId]
  └─ verifies ownership; returns 409 if scan is pending/running
- └─ marks `scans.deletion = { status: 'queued', ... }`, returns 202 immediately, and drains the delete in Firestore-sized chunks
+ └─ marks `scans.deletion = { status: 'queued', ... }`, returns 202 immediately, and enqueues a Cloud Tasks deletion worker (falls back to inline draining only when Cloud Tasks is not configured or enqueueing fails)
  └─ list/search/taxonomy routes hide that scan while background cleanup is still deleting findings/documents
 
 DELETE /api/brands/[brandId]
  └─ verifies ownership
  └─ returns 409 if any scan for the brand is still pending/running/summarising
- └─ marks `brands.brandDeletion = { status: 'queued', ... }`, returns 202 immediately, and drains findings/scans/brand deletion in chunks
+ └─ marks `brands.brandDeletion = { status: 'queued', ... }`, returns 202 immediately, and enqueues a Cloud Tasks deletion worker (falls back to inline draining only when Cloud Tasks is not configured or enqueueing fails)
  └─ brand list + dashboard bootstrap hide deleting brands immediately so they do not reappear on reload
 
 GET /api/brands/[brandId]/findings?scanId=xxx
@@ -253,7 +262,7 @@ GET /api/brands/[brandId]/findings?scanId=xxx
 
 DELETE /api/brands/[brandId]/findings
  └─ verifies ownership; returns 409 if any scan for the brand is still pending/running/summarising
- └─ marks `brands.historyDeletion = { status: 'queued', ... }`, returns 202 immediately, and drains findings/scans deletion in chunks
+ └─ marks `brands.historyDeletion = { status: 'queued', ... }`, returns 202 immediately, and enqueues a Cloud Tasks deletion worker (falls back to inline draining only when Cloud Tasks is not configured or enqueueing fails)
  └─ brand detail, brand list, and dashboard surfaces treat the brand as empty while that history purge is still in progress
 
 GET /api/brands/[brandId]/findings/search?q=...
@@ -643,6 +652,8 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | `MAILERSEND_API_TOKEN` | MailerSend API token used to send branded transactional emails |
 | `AUTH_JWT_SECRET` | JWT signing secret used for 7-day auth cookies and 1-hour password-reset links |
 | `SCHEDULE_DISPATCH_SERVICE_ACCOUNT_EMAIL` | Email of the dedicated Cloud Scheduler service account allowed to call the internal scheduled-scan dispatch route |
+| `DELETION_TASKS_QUEUE_PATH` | Full Cloud Tasks queue resource path used to enqueue deletion-worker jobs |
+| `DELETION_TASKS_SERVICE_ACCOUNT_EMAIL` | Email of the dedicated Cloud Tasks service account allowed to call the internal deletion worker route and used to sign those task requests |
 | `GCP_PROJECT_ID` | Google Cloud project ID |
 | `FIRESTORE_DATABASE_ID` | Firestore DB (default: `(default)`) |
 | `APP_URL` | Public base URL — used to construct webhook callback URLs |

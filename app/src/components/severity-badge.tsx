@@ -1,9 +1,11 @@
 import { AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { type Severity } from '@/lib/types';
 import { Badge } from './ui/badge';
 
 interface SeverityBadgeProps {
   severity: Severity;
+  className?: string;
 }
 
 const config = {
@@ -24,10 +26,10 @@ const config = {
   },
 };
 
-export function SeverityBadge({ severity }: SeverityBadgeProps) {
+export function SeverityBadge({ severity, className }: SeverityBadgeProps) {
   const { variant, label, icon: Icon } = config[severity];
   return (
-    <Badge variant={variant}>
+    <Badge variant={variant} className={cn(className)}>
       <Icon className="w-3.5 h-3.5" />
       {label}
     </Badge>

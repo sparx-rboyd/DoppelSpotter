@@ -21,6 +21,7 @@
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
     "@google-cloud/firestore": "^8.3.0",
+    "@google-cloud/tasks": "^6.2.1",
     "@react-pdf/renderer": "^4.3.2",
     "apify-client": "^2.11.2",
     "bcryptjs": "^3.0.3",

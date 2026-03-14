@@ -189,11 +189,11 @@ export function DashboardLineChart({
     : 'from-white via-white/95';
 
   return (
-    <div className={`relative ${expanded ? 'h-full min-h-0' : ''}`}>
-      <div className={`relative ${expanded ? 'h-full min-h-0' : ''}`}>
+    <div className={`relative max-w-full min-w-0 ${expanded ? 'h-full min-h-0' : ''}`}>
+      <div className={`relative max-w-full min-w-0 ${expanded ? 'h-full min-h-0' : ''}`}>
         <div
           ref={scrollRef}
-          className={`overflow-x-auto select-none ${expanded ? 'h-full min-h-0 pb-3' : 'pb-2'}`}
+          className={`max-w-full overflow-x-auto select-none ${expanded ? 'h-full min-h-0 pb-3' : 'pb-2'}`}
           onScroll={updateScrollCues}
         >
           <div

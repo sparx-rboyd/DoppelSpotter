@@ -589,6 +589,9 @@ export default function BrandDetailPage() {
   const [exportingCsvScanId, setExportingCsvScanId] = useState<string | null>(null);
   const [exportingPdfScanId, setExportingPdfScanId] = useState<string | null>(null);
   const [copiedScanLinkId, setCopiedScanLinkId] = useState<string | null>(null);
+  const [isMobileSearchFiltersOpen, setIsMobileSearchFiltersOpen] = useState(() => (
+    Boolean(initialFindingCategory || initialFindingSource || initialFindingTheme)
+  ));
 
   const [isLookbackNudgeOpen, setIsLookbackNudgeOpen] = useState(false);
   const [lookbackNudgeLoading, setLookbackNudgeLoading] = useState(false);
@@ -643,6 +646,12 @@ export default function BrandDetailPage() {
     || hasActiveFindingCategoryFilter
     || hasActiveFindingSourceFilter
     || hasActiveFindingThemeFilter;
+  const activeFindingControlCount = [
+    isFindingsSearchActive,
+    hasActiveFindingThemeFilter,
+    hasActiveFindingCategoryFilter,
+    hasActiveFindingSourceFilter,
+  ].filter(Boolean).length;
   const activeHighlightQuery = shouldUseServerFindingSearch
     ? (canRunServerFindingSearch ? debouncedFindingsSearchQuery : undefined)
     : (shouldUseLocalTabFindingSearch ? findingsSearchQuery : undefined);
@@ -651,6 +660,11 @@ export default function BrandDetailPage() {
   useEffect(() => {
     if (!isAnyFindingFilterActive) return;
     setConfirmDeleteScanId(null);
+  }, [isAnyFindingFilterActive]);
+
+  useEffect(() => {
+    if (!isAnyFindingFilterActive) return;
+    setIsMobileSearchFiltersOpen(true);
   }, [isAnyFindingFilterActive]);
 
   useEffect(() => {
@@ -3152,7 +3166,7 @@ export default function BrandDetailPage() {
                   <div className="flex flex-col gap-3 sm:gap-5 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0 space-y-4">
                       <h2 className="text-xl font-semibold text-white sm:text-2xl">Findings</h2>
-                      <div className="flex flex-wrap items-center gap-2.5">
+                      <div className="hidden flex-wrap items-center gap-2.5 sm:flex">
                         <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
                           {scans.length === 0
                             ? 'No scans yet'
@@ -3281,108 +3295,144 @@ export default function BrandDetailPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:gap-3 lg:flex-row lg:items-center">
-                    <div className="relative max-w-lg flex-1">
-                      <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
-                      <Input
-                        value={findingsSearchQuery}
-                        onChange={(e) => setFindingsSearchQuery(e.target.value)}
-                        placeholder="Search finding titles, URLs, and analyses"
-                        aria-label="Search findings"
-                        className="pl-9 pr-10 border-white/20 bg-white placeholder:text-gray-400"
-                        style={isFindingsSearchActive ? { color: '#6b7280' } : undefined}
-                      />
-                      {isFindingsSearchActive && (
-                        <button
-                          type="button"
-                          onClick={() => setFindingsSearchQuery('')}
-                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition"
-                          aria-label="Clear findings search"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      )}
+                  <div className="mt-4 sm:mt-5">
+                    <div className="sm:hidden">
+                      <button
+                        type="button"
+                        onClick={() => setIsMobileSearchFiltersOpen((current) => !current)}
+                        className="flex w-full items-center justify-between rounded-xl border border-white/15 bg-white/8 px-3 py-2.5 text-left text-sm font-medium text-white/90 transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                        aria-expanded={isMobileSearchFiltersOpen}
+                        aria-controls="mobile-search-filter-panel"
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <Search className="h-4 w-4 flex-none" />
+                          <span>Search &amp; filter</span>
+                          {activeFindingControlCount > 0 && (
+                            <span className="inline-flex items-center rounded-full bg-white/14 px-2 py-0.5 text-[11px] font-semibold text-white/90 ring-1 ring-white/10">
+                              {activeFindingControlCount} active
+                            </span>
+                          )}
+                        </span>
+                        <ChevronDown
+                          className={cn(
+                            'h-4 w-4 flex-none transition-transform',
+                            isMobileSearchFiltersOpen && 'rotate-180',
+                          )}
+                        />
+                      </button>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-3 lg:flex-shrink-0">
-                      <SelectDropdown
-                        id="findings-theme-filter"
-                        ariaLabel="Filter findings by theme"
-                        value={selectedFindingTheme}
-                        options={findingThemeOptions}
-                        onChange={handleFindingThemeFilterChange}
-                        triggerClassName={cn(
-                          'min-w-[10rem] border-white/20',
-                          hasActiveFindingThemeFilter && 'border-brand-200 bg-brand-50',
-                        )}
-                        triggerStyle={{ color: '#6b7280' }}
-                        matchTriggerWidth={false}
-                        panelClassName="min-w-[16rem] max-w-[calc(100vw-1.5rem)]"
-                        dividerAfterValue=""
-                        showActiveIndicator={hasActiveFindingThemeFilter}
-                      />
-                      <SelectDropdown
-                        id="findings-severity-filter"
-                        ariaLabel="Filter findings by severity"
-                        value={selectedFindingCategory ?? ''}
-                        options={findingCategoryOptions}
-                        onChange={handleFindingCategoryFilterChange}
-                        triggerClassName={cn(
-                          'min-w-[10rem] border-white/20',
-                          hasActiveFindingCategoryFilter && 'border-brand-200 bg-brand-50',
-                        )}
-                        triggerStyle={{ color: '#6b7280' }}
-                        matchTriggerWidth={false}
-                        panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
-                        dividerAfterValue=""
-                        showActiveIndicator={hasActiveFindingCategoryFilter}
-                      />
-                      <SelectDropdown
-                        id="findings-source-filter"
-                        ariaLabel="Filter findings by scan type"
-                        value={selectedFindingSource ?? ''}
-                        options={findingSourceOptions}
-                        onChange={handleFindingSourceFilterChange}
-                        triggerClassName={cn(
-                          'min-w-[10rem] border-white/20',
-                          hasActiveFindingSourceFilter && 'border-brand-200 bg-brand-50',
-                        )}
-                        triggerStyle={{ color: '#6b7280' }}
-                        matchTriggerWidth={false}
-                        panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
-                        dividerAfterValue=""
-                        showActiveIndicator={hasActiveFindingSourceFilter}
-                      />
+                    <div
+                      id="mobile-search-filter-panel"
+                      className={cn(
+                        'mt-3 sm:mt-0',
+                        isMobileSearchFiltersOpen ? 'block' : 'hidden',
+                        'sm:block',
+                      )}
+                    >
+                      <div className="flex flex-col gap-2 sm:mt-5 sm:gap-3 lg:flex-row lg:items-center">
+                        <div className="relative max-w-lg flex-1">
+                          <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                          <Input
+                            value={findingsSearchQuery}
+                            onChange={(e) => setFindingsSearchQuery(e.target.value)}
+                            placeholder="Search finding titles, URLs, and analyses"
+                            aria-label="Search findings"
+                            className="pl-9 pr-10 border-white/20 bg-white placeholder:text-gray-400"
+                            style={isFindingsSearchActive ? { color: '#6b7280' } : undefined}
+                          />
+                          {isFindingsSearchActive && (
+                            <button
+                              type="button"
+                              onClick={() => setFindingsSearchQuery('')}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300 hover:text-gray-500 transition"
+                              aria-label="Clear findings search"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-row sm:gap-3 lg:flex-shrink-0">
+                          <SelectDropdown
+                            id="findings-theme-filter"
+                            ariaLabel="Filter findings by theme"
+                            value={selectedFindingTheme}
+                            options={findingThemeOptions}
+                            onChange={handleFindingThemeFilterChange}
+                            triggerClassName={cn(
+                              'min-w-[10rem] border-white/20',
+                              hasActiveFindingThemeFilter && 'border-brand-200 bg-brand-50',
+                            )}
+                            triggerStyle={{ color: '#6b7280' }}
+                            matchTriggerWidth={false}
+                            panelClassName="min-w-[16rem] max-w-[calc(100vw-1.5rem)]"
+                            dividerAfterValue=""
+                            showActiveIndicator={hasActiveFindingThemeFilter}
+                          />
+                          <SelectDropdown
+                            id="findings-severity-filter"
+                            ariaLabel="Filter findings by severity"
+                            value={selectedFindingCategory ?? ''}
+                            options={findingCategoryOptions}
+                            onChange={handleFindingCategoryFilterChange}
+                            triggerClassName={cn(
+                              'min-w-[10rem] border-white/20',
+                              hasActiveFindingCategoryFilter && 'border-brand-200 bg-brand-50',
+                            )}
+                            triggerStyle={{ color: '#6b7280' }}
+                            matchTriggerWidth={false}
+                            panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
+                            dividerAfterValue=""
+                            showActiveIndicator={hasActiveFindingCategoryFilter}
+                          />
+                          <SelectDropdown
+                            id="findings-source-filter"
+                            ariaLabel="Filter findings by scan type"
+                            value={selectedFindingSource ?? ''}
+                            options={findingSourceOptions}
+                            onChange={handleFindingSourceFilterChange}
+                            triggerClassName={cn(
+                              'min-w-[10rem] border-white/20',
+                              hasActiveFindingSourceFilter && 'border-brand-200 bg-brand-50',
+                            )}
+                            triggerStyle={{ color: '#6b7280' }}
+                            matchTriggerWidth={false}
+                            panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
+                            dividerAfterValue=""
+                            showActiveIndicator={hasActiveFindingSourceFilter}
+                          />
+                          {isAnyFindingFilterActive && (
+                            <button
+                              type="button"
+                              onClick={resetFindingsSearchAndFilters}
+                              className="flex w-full items-center justify-center gap-1.5 rounded-full border border-white/15 bg-white/8 px-3 py-2 text-xs font-medium text-white/85 transition hover:bg-white/12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:inline-flex sm:w-auto"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      </div>
                       {isAnyFindingFilterActive && (
-                        <button
-                          type="button"
-                          onClick={resetFindingsSearchAndFilters}
-                          className="flex w-full items-center justify-center gap-1.5 rounded-full border border-white/15 bg-white/8 px-3 py-2 text-xs font-medium text-white/85 transition hover:bg-white/12 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white sm:inline-flex sm:w-auto"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          Reset
-                        </button>
+                        <p className="mt-3 text-xs text-white/80">
+                          {isSearchResultsMode
+                            ? (
+                              isSearchQueryTooShort
+                                ? `Type at least ${FINDING_SEARCH_MIN_QUERY_LENGTH} characters to search findings.`
+                                : findingsSearchLoading
+                                  ? 'Searching findings across all result sets...'
+                                  : searchResultsError
+                                    ? searchResultsError
+                                    : `Showing ${searchResultsCountLabel} that match the current ${activeFindingsFilterLabel}.`
+                            )
+                            : (
+                              findingsSearchLoading
+                                ? 'Filtering across loaded findings...'
+                                : `Showing only findings that match the current ${activeFindingsFilterLabel}.`
+                            )}
+                        </p>
                       )}
                     </div>
                   </div>
-                  {isAnyFindingFilterActive && (
-                    <p className="mt-3 text-xs text-white/80">
-                      {isSearchResultsMode
-                        ? (
-                          isSearchQueryTooShort
-                            ? `Type at least ${FINDING_SEARCH_MIN_QUERY_LENGTH} characters to search findings.`
-                            : findingsSearchLoading
-                              ? 'Searching findings across all result sets...'
-                              : searchResultsError
-                                ? searchResultsError
-                                : `Showing ${searchResultsCountLabel} that match the current ${activeFindingsFilterLabel}.`
-                        )
-                        : (
-                          findingsSearchLoading
-                            ? 'Filtering across loaded findings...'
-                            : `Showing only findings that match the current ${activeFindingsFilterLabel}.`
-                        )}
-                    </p>
-                  )}
                 </div>
 
                 {activeTab === 'scans' && isAwaitingClearHistoryConfirmation && (

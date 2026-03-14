@@ -5,7 +5,12 @@ const nextConfig: NextConfig = {
   devIndicators: false,
   output: 'standalone',
   outputFileTracingRoot: path.join(__dirname),
-  serverExternalPackages: ['@google-cloud/firestore', 'apify-client'],
+  serverExternalPackages: [
+    '@google-cloud/firestore',
+    '@google-cloud/tasks',
+    'apify-client',
+    'google-gax',
+  ],
   // proxy-agent is required dynamically by apify-client and is not auto-traced
   // by @vercel/nft — force-include it and its sub-agents in the standalone bundle.
   outputFileTracingIncludes: {

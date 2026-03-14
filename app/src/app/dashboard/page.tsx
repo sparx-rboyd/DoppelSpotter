@@ -75,6 +75,29 @@ function buildDashboardDrilldownCategoryParam(category: DashboardBreakdownCatego
   return category === 'nonHit' ? 'non-hit' : category;
 }
 
+function formatCompactDashboardDateTime(date: Parameters<typeof formatDate>[0]): string {
+  if (!date) return '—';
+  try {
+    const resolvedDate = typeof (date as { toDate?: unknown }).toDate === 'function'
+      ? (date as { toDate(): Date }).toDate()
+      : '_seconds' in (date as { _seconds?: number })
+        ? new Date((date as { _seconds: number })._seconds * 1000)
+        : 'seconds' in (date as { seconds?: number })
+          ? new Date((date as { seconds: number }).seconds * 1000)
+          : date as Date;
+
+    return new Intl.DateTimeFormat('en-GB', {
+      day: '2-digit',
+      month: '2-digit',
+      year: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(resolvedDate).replace(',', '');
+  } catch {
+    return '—';
+  }
+}
+
 export default function DashboardPage() {
   usePageTitle('Dashboard');
   const router = useRouter();
@@ -514,22 +537,24 @@ export default function DashboardPage() {
                     </Link>
                   </div>
                 </div>
-                <CardContent className="flex flex-wrap gap-2 p-5">
-                  <Badge variant="brand">
+                <CardContent className="flex flex-wrap gap-1.5 p-3 sm:gap-2 sm:p-5">
+                  <Badge variant="brand" className="px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-1 sm:text-xs">
                     {selectedBrand.scanCount} scan{selectedBrand.scanCount !== 1 ? 's' : ''}
                   </Badge>
                   {selectedBrand.lastScanStartedAt && (
-                    <Badge variant="default">
-                      Last scan {formatDate(selectedBrand.lastScanStartedAt)}
+                    <Badge variant="default" className="px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-1 sm:text-xs">
+                      <span className="sm:hidden">Last {formatCompactDashboardDateTime(selectedBrand.lastScanStartedAt)}</span>
+                      <span className="hidden sm:inline">Last scan {formatDate(selectedBrand.lastScanStartedAt)}</span>
                     </Badge>
                   )}
                   {selectedBrand.scanSchedule?.enabled && selectedBrand.scanSchedule.nextRunAt && (
-                    <Badge variant="default">
-                      Next scan {formatDate(selectedBrand.scanSchedule.nextRunAt)}
+                    <Badge variant="default" className="px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-1 sm:text-xs">
+                      <span className="sm:hidden">Next {formatCompactDashboardDateTime(selectedBrand.scanSchedule.nextRunAt)}</span>
+                      <span className="hidden sm:inline">Next scan {formatDate(selectedBrand.scanSchedule.nextRunAt)}</span>
                     </Badge>
                   )}
                   {selectedBrand.isScanInProgress && (
-                    <Badge variant="brand">
+                    <Badge variant="brand" className="px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-1 sm:text-xs">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       Scan in progress
                     </Badge>
@@ -645,13 +670,13 @@ export default function DashboardPage() {
                   </div>
 
                   <div className="grid gap-6 xl:grid-cols-2">
-                    <Card>
+                    <Card className="min-w-0 overflow-hidden">
                       {renderChartHeader(
                         'Findings by scan type',
                         'Compare where actionable findings are appearing across scan types.',
                         'source-breakdown',
                       )}
-                      <CardContent>
+                      <CardContent className="min-w-0 overflow-hidden">
                         <DashboardStackedBarChart
                           data={metrics.sourceBreakdown}
                           emptyMessage="No actionable scan-type findings are available in this scope yet."
@@ -661,13 +686,13 @@ export default function DashboardPage() {
                       </CardContent>
                     </Card>
 
-                    <Card>
+                    <Card className="min-w-0 overflow-hidden">
                       {renderChartHeader(
                         'Findings by theme',
                         'See which themes recur most often among actionable findings.',
                         'theme-breakdown',
                       )}
-                      <CardContent>
+                      <CardContent className="min-w-0 overflow-hidden">
                         <DashboardStackedBarChart
                           data={metrics.themeBreakdown}
                           emptyMessage="No actionable theme-labelled findings are available in this scope yet."
@@ -680,13 +705,13 @@ export default function DashboardPage() {
 
                   {isAllScansScope && (
                     <div className="grid gap-6 xl:grid-cols-2">
-                      <Card>
+                      <Card className="min-w-0 overflow-hidden">
                         {renderChartHeader(
                           'Findings by scan type over time',
                           'Cumulative findings at all severity levels over time, by scan type.',
                           'source-timeline',
                         )}
-                        <CardContent className="space-y-4">
+                        <CardContent className="min-w-0 space-y-4 overflow-hidden">
                           <div className="flex justify-end">
                             <DashboardSeriesFilter
                               buttonLabelSingular="scan type"
@@ -705,13 +730,13 @@ export default function DashboardPage() {
                         </CardContent>
                       </Card>
 
-                      <Card>
+                      <Card className="min-w-0 overflow-hidden">
                         {renderChartHeader(
                           'Findings by theme over time',
                           'Cumulative findings at all severity levels over time, by theme.',
                           'theme-timeline',
                         )}
-                        <CardContent className="space-y-4">
+                        <CardContent className="min-w-0 space-y-4 overflow-hidden">
                           <div className="flex justify-end">
                             <DashboardSeriesFilter
                               buttonLabelSingular="theme"

@@ -2,9 +2,6 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { errorResponse, requireAuth } from '@/lib/api-utils';
 import {
-  drainBrandDeletion,
-  drainBrandHistoryDeletion,
-  drainScanDeletion,
   isBrandDeletionActive,
   isBrandHistoryDeletionActive,
   isScanDeletionActive,
@@ -45,15 +42,7 @@ export async function GET(request: NextRequest) {
   const brand = brandDoc.data() as BrandProfile;
   if (brand.userId !== uid) return errorResponse('Forbidden', 403);
   if (isBrandDeletionActive(brand)) {
-    void drainBrandDeletion({ brandId, userId: uid }).catch(() => {
-      // Non-critical
-    });
     return errorResponse('Brand not found', 404);
-  }
-  if (isBrandHistoryDeletionActive(brand)) {
-    void drainBrandHistoryDeletion({ brandId, userId: uid }).catch(() => {
-      // Non-critical
-    });
   }
   const historyDeletionInProgress = isBrandHistoryDeletionActive(brand);
 
@@ -82,12 +71,6 @@ export async function GET(request: NextRequest) {
     id: doc.id,
     ...(doc.data() as Omit<Scan, 'id'>),
   }));
-  const deletingScan = allScans.find((scan) => isScanDeletionActive(scan));
-  if (deletingScan) {
-    void drainScanDeletion({ brandId, scanId: deletingScan.id, userId: uid }).catch(() => {
-      // Non-critical
-    });
-  }
 
   const terminalDashboardScans: Scan[] = (historyDeletionInProgress ? [] : allScans)
     .filter((scan) => !isScanDeletionActive(scan))
