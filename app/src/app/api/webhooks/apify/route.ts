@@ -165,6 +165,18 @@ const TRACKING_QUERY_PARAM_NAMES = new Set([
   'msclkid',
 ]);
 
+const GOOGLE_URL_SUPPRESSION_SOURCES: Finding['source'][] = [
+  'google',
+  'youtube',
+  'facebook',
+  'instagram',
+  'telegram',
+  'apple_app_store',
+  'google_play',
+];
+
+const REDDIT_POST_ID_SUPPRESSION_SOURCES: Finding['source'][] = ['reddit', 'google'];
+
 /**
  * POST /api/webhooks/apify
  *
@@ -755,17 +767,19 @@ async function loadPreviousFindingUrls({
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', userId)
-    .select('scanId', 'url')
+    .where('source', 'in', GOOGLE_URL_SUPPRESSION_SOURCES)
+    .select('scanId', 'canonicalId', 'url')
     .get();
 
   const urls = new Set<string>();
   for (const doc of previousFindingsSnap.docs) {
-    const data = doc.data() as { scanId?: string; url?: string };
-    if (data.scanId === currentScanId || typeof data.url !== 'string' || data.url.trim().length === 0) {
+    const data = doc.data() as { scanId?: string; canonicalId?: string; url?: string };
+    if (data.scanId === currentScanId) {
       continue;
     }
 
-    const normalizedUrl = normalizeUrlForFinding(data.url);
+    const normalizedUrl = normalizeStoredCanonicalId(data.canonicalId)
+      ?? (typeof data.url === 'string' ? normalizeUrlForFinding(data.url) : null);
     if (normalizedUrl) {
       urls.add(normalizedUrl);
     }
@@ -787,20 +801,30 @@ async function loadPreviousRedditPostIds({
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', userId)
-    .select('scanId', 'rawData', 'url')
+    .where('source', 'in', REDDIT_POST_ID_SUPPRESSION_SOURCES)
+    .select('scanId', 'source', 'canonicalId', 'rawData', 'url')
     .get();
 
   const postIds = new Set<string>();
   for (const doc of previousFindingsSnap.docs) {
-    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown>; url?: string };
+    const data = doc.data() as {
+      scanId?: string;
+      source?: Finding['source'];
+      canonicalId?: string;
+      rawData?: Record<string, unknown>;
+      url?: string;
+    };
     if (data.scanId === currentScanId) {
       continue;
     }
 
-    const postId = readRedditStoredFindingRawData(data.rawData)?.post.id
-      ?? readGoogleStoredFindingRawData(data.rawData)?.verifiedRedditPost?.postId
-      ?? extractRedditPostIdFromUrl(readGoogleStoredFindingRawData(data.rawData)?.normalizedUrl)
-      ?? extractRedditPostIdFromUrl(data.url);
+    const postId = data.source === 'reddit'
+      ? normalizeStoredCanonicalId(data.canonicalId)
+        ?? readRedditStoredFindingRawData(data.rawData)?.post.id
+      : readGoogleStoredFindingRawData(data.rawData)?.verifiedRedditPost?.postId
+        ?? extractRedditPostIdFromUrl(readGoogleStoredFindingRawData(data.rawData)?.normalizedUrl)
+        ?? extractRedditPostIdFromUrl(data.url)
+        ?? extractRedditPostIdFromUrl(normalizeStoredCanonicalId(data.canonicalId) ?? undefined);
     if (typeof postId === 'string' && postId.trim().length > 0) {
       postIds.add(postId.trim());
     }
@@ -822,17 +846,19 @@ async function loadPreviousTikTokVideoIds({
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', userId)
-    .select('scanId', 'rawData')
+    .where('source', '==', 'tiktok')
+    .select('scanId', 'canonicalId', 'rawData')
     .get();
 
   const videoIds = new Set<string>();
   for (const doc of previousFindingsSnap.docs) {
-    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown> };
+    const data = doc.data() as { scanId?: string; canonicalId?: string; rawData?: Record<string, unknown> };
     if (data.scanId === currentScanId) {
       continue;
     }
 
-    const videoId = readTikTokStoredFindingRawData(data.rawData)?.video.id;
+    const videoId = normalizeStoredCanonicalId(data.canonicalId)
+      ?? readTikTokStoredFindingRawData(data.rawData)?.video.id;
     if (typeof videoId === 'string' && videoId.trim().length > 0) {
       videoIds.add(videoId.trim());
     }
@@ -854,17 +880,19 @@ async function loadPreviousDiscordServerIds({
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', userId)
-    .select('scanId', 'rawData')
+    .where('source', '==', 'discord')
+    .select('scanId', 'canonicalId', 'rawData')
     .get();
 
   const serverIds = new Set<string>();
   for (const doc of previousFindingsSnap.docs) {
-    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown> };
+    const data = doc.data() as { scanId?: string; canonicalId?: string; rawData?: Record<string, unknown> };
     if (data.scanId === currentScanId) {
       continue;
     }
 
-    const serverId = readDiscordStoredFindingRawData(data.rawData)?.server.id;
+    const serverId = normalizeStoredCanonicalId(data.canonicalId)
+      ?? readDiscordStoredFindingRawData(data.rawData)?.server.id;
     if (typeof serverId === 'string' && serverId.trim().length > 0) {
       serverIds.add(serverId.trim());
     }
@@ -886,17 +914,19 @@ async function loadPreviousDomainRegistrationDomains({
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', userId)
-    .select('scanId', 'rawData')
+    .where('source', '==', 'domains')
+    .select('scanId', 'canonicalId', 'rawData')
     .get();
 
   const domains = new Set<string>();
   for (const doc of previousFindingsSnap.docs) {
-    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown> };
+    const data = doc.data() as { scanId?: string; canonicalId?: string; rawData?: Record<string, unknown> };
     if (data.scanId === currentScanId) {
       continue;
     }
 
-    const domain = readDomainRegistrationStoredFindingRawData(data.rawData)?.domainRecord.domain;
+    const domain = normalizeStoredCanonicalId(data.canonicalId, { lowerCase: true })
+      ?? readDomainRegistrationStoredFindingRawData(data.rawData)?.domainRecord.domain?.trim().toLowerCase();
     if (typeof domain === 'string' && domain.trim().length > 0) {
       domains.add(domain.trim().toLowerCase());
     }
@@ -918,17 +948,19 @@ async function loadPreviousGitHubRepoFullNames({
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', userId)
-    .select('scanId', 'rawData')
+    .where('source', '==', 'github')
+    .select('scanId', 'canonicalId', 'rawData')
     .get();
 
   const repoFullNames = new Set<string>();
   for (const doc of previousFindingsSnap.docs) {
-    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown> };
+    const data = doc.data() as { scanId?: string; canonicalId?: string; rawData?: Record<string, unknown> };
     if (data.scanId === currentScanId) {
       continue;
     }
 
-    const fullName = readGitHubStoredFindingRawData(data.rawData)?.repo.fullName;
+    const fullName = normalizeStoredCanonicalId(data.canonicalId, { lowerCase: true })
+      ?? readGitHubStoredFindingRawData(data.rawData)?.repo.fullName?.trim().toLowerCase();
     if (typeof fullName === 'string' && fullName.trim().length > 0) {
       repoFullNames.add(fullName.trim().toLowerCase());
     }
@@ -950,17 +982,19 @@ async function loadPreviousXTweetIds({
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', userId)
-    .select('scanId', 'rawData')
+    .where('source', '==', 'x')
+    .select('scanId', 'canonicalId', 'rawData')
     .get();
 
   const tweetIds = new Set<string>();
   for (const doc of previousFindingsSnap.docs) {
-    const data = doc.data() as { scanId?: string; rawData?: Record<string, unknown> };
+    const data = doc.data() as { scanId?: string; canonicalId?: string; rawData?: Record<string, unknown> };
     if (data.scanId === currentScanId) {
       continue;
     }
 
-    const tweetId = readXStoredFindingRawData(data.rawData)?.tweet.id;
+    const tweetId = normalizeStoredCanonicalId(data.canonicalId)
+      ?? readXStoredFindingRawData(data.rawData)?.tweet.id;
     if (typeof tweetId === 'string' && tweetId.trim().length > 0) {
       tweetIds.add(tweetId.trim());
     }
@@ -982,14 +1016,14 @@ async function loadPreviousXAccountKeys({
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', userId)
-    .select('scanId', 'rawData', 'isFalsePositive', 'xAuthorId', 'xAuthorHandle')
+    .where('source', '==', 'x')
+    .select('scanId', 'isFalsePositive', 'xAuthorId', 'xAuthorHandle')
     .get();
 
   const accountKeys = new Set<string>();
   for (const doc of previousFindingsSnap.docs) {
     const data = doc.data() as {
       scanId?: string;
-      rawData?: Record<string, unknown>;
       isFalsePositive?: boolean;
       xAuthorId?: string;
       xAuthorHandle?: string;
@@ -998,10 +1032,9 @@ async function loadPreviousXAccountKeys({
       continue;
     }
 
-    const storedRawData = readXStoredFindingRawData(data.rawData);
     const accountKey = buildXAccountKey({
-      authorId: data.xAuthorId ?? storedRawData?.tweet.author.id,
-      authorHandle: data.xAuthorHandle ?? storedRawData?.tweet.author.userName,
+      authorId: data.xAuthorId,
+      authorHandle: data.xAuthorHandle,
     });
     if (accountKey) {
       accountKeys.add(accountKey);
@@ -3938,6 +3971,7 @@ async function upsertGoogleFinding({
         userId: scan.userId,
         source: preferredSource,
         actorId,
+        canonicalId: candidate.normalizedUrl,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
         ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
@@ -3964,6 +3998,7 @@ async function upsertGoogleFinding({
 
     const updates: Record<string, unknown> = {
       source: preferredSource,
+      canonicalId: candidate.normalizedUrl,
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
@@ -4064,6 +4099,7 @@ async function upsertRedditFinding({
         userId: scan.userId,
         source: preferredSource,
         actorId,
+        canonicalId: candidate.postId,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
         ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
@@ -4090,6 +4126,7 @@ async function upsertRedditFinding({
 
     const updates: Record<string, unknown> = {
       source: preferredSource,
+      canonicalId: candidate.postId,
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
@@ -4196,6 +4233,7 @@ async function upsertTikTokFinding({
         userId: scan.userId,
         source: preferredSource,
         actorId,
+        canonicalId: candidate.videoId,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
         ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
@@ -4222,6 +4260,7 @@ async function upsertTikTokFinding({
 
     const updates: Record<string, unknown> = {
       source: preferredSource,
+      canonicalId: candidate.videoId,
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
@@ -4322,6 +4361,7 @@ async function upsertDiscordFinding({
         userId: scan.userId,
         source: preferredSource,
         actorId,
+        canonicalId: candidate.serverId,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
         ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
@@ -4348,6 +4388,7 @@ async function upsertDiscordFinding({
 
     const updates: Record<string, unknown> = {
       source: preferredSource,
+      canonicalId: candidate.serverId,
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
@@ -4448,6 +4489,7 @@ async function upsertDomainRegistrationFinding({
         userId: scan.userId,
         source: preferredSource,
         actorId,
+        canonicalId: candidate.domain.toLowerCase(),
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
         ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
@@ -4474,6 +4516,7 @@ async function upsertDomainRegistrationFinding({
 
     const updates: Record<string, unknown> = {
       source: preferredSource,
+      canonicalId: candidate.domain.toLowerCase(),
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
@@ -4575,6 +4618,7 @@ async function upsertXFinding({
         userId: scan.userId,
         source: preferredSource,
         actorId,
+        canonicalId: candidate.tweetId,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
         ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
@@ -4605,6 +4649,7 @@ async function upsertXFinding({
 
     const updates: Record<string, unknown> = {
       source: preferredSource,
+      canonicalId: candidate.tweetId,
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
@@ -4709,6 +4754,7 @@ async function upsertGitHubFinding({
         userId: scan.userId,
         source: preferredSource,
         actorId,
+        canonicalId: candidate.fullName.toLowerCase(),
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
         ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
@@ -4735,6 +4781,7 @@ async function upsertGitHubFinding({
 
     const updates: Record<string, unknown> = {
       source: preferredSource,
+      canonicalId: candidate.fullName.toLowerCase(),
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
@@ -6649,6 +6696,19 @@ function buildXFindingId(scanId: string, tweetId: string): string {
 
 function buildGitHubFindingId(scanId: string, fullName: string): string {
   return `${GITHUB_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${fullName.toLowerCase()}`).digest('hex')}`;
+}
+
+function normalizeStoredCanonicalId(canonicalId: unknown, options?: { lowerCase?: boolean }): string | null {
+  if (typeof canonicalId !== 'string') {
+    return null;
+  }
+
+  const trimmed = canonicalId.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  return options?.lowerCase ? trimmed.toLowerCase() : trimmed;
 }
 
 function normalizeRedditPostUrl(url: string): string | null {

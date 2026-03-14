@@ -324,6 +324,8 @@ export interface Finding extends FindingSummary {
   userId: string;
   actorId: string;
   description: string;
+  /** Source-specific canonical identity used for cross-scan dedup. */
+  canonicalId?: string;
   rawData: Record<string, unknown>;
   /** Timestamp when the finding was ignored by the user. */
   ignoredAt?: Timestamp;

@@ -371,12 +371,12 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **Scan-level summary:** after all actor runs finish, the webhook runs one final LLM pass over the scan's actionable findings and stores a concise `aiSummary` on the scan document for the brand page
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
 - **Safe words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to treat results containing these terms with reduced caution unless there are strong warning signs elsewhere
-- **Historical URL suppression:** Google runs load previously seen normalized finding URLs for the brand and filter them out before any LLM classification begins
-- **Historical Reddit suppression:** Reddit runs load previously seen Reddit post ids for the brand and filter them out before any LLM classification begins, including legacy Google-Reddit findings where the post id can still be recovered from stored URLs/debug data
-- **Historical TikTok suppression:** TikTok runs load previously seen TikTok video ids for the brand and filter them out before any LLM classification begins
-- **Historical Discord suppression:** Discord runs load previously seen Discord server ids for the brand and filter them out before any LLM classification begins
-- **Historical GitHub suppression:** GitHub runs load previously seen repository `fullName` values for the brand and filter them out before any LLM classification begins
-- **Historical X suppression:** X runs load previously seen tweet ids for the brand and filter them out before any LLM classification begins; after classification, handle-only hits are additionally suppressed for accounts that already have a previous real X finding for the brand
+- **Historical URL suppression:** Google-family runs load previously seen normalized finding URLs for the brand from only the relevant Google-backed finding sources and filter them out before any LLM classification begins; each finding now also stores a top-level `canonicalId` copy of that normalized URL
+- **Historical Reddit suppression:** Reddit runs load previously seen Reddit post ids from Reddit findings plus legacy Google findings that embed verified Reddit snapshots, preferring the top-level `canonicalId` on Reddit findings and falling back to stored raw data / URLs for legacy Google crossover records
+- **Historical TikTok suppression:** TikTok runs load previously seen TikTok video ids only from prior TikTok findings, preferring the top-level `canonicalId` and falling back to stored raw data for older records
+- **Historical Discord suppression:** Discord runs load previously seen Discord server ids only from prior Discord findings, preferring the top-level `canonicalId` and falling back to stored raw data for older records
+- **Historical GitHub suppression:** GitHub runs load previously seen repository `fullName` values only from prior GitHub findings, preferring the lowercased top-level `canonicalId` and falling back to stored raw data for older records
+- **Historical X suppression:** X runs load previously seen tweet ids only from prior X findings, preferring the top-level `canonicalId` and falling back to stored raw data for older records; handle-only hits are additionally suppressed for accounts that already have a previous real X finding for the brand using denormalized `xAuthorId` / `xAuthorHandle` fields instead of parsing raw data
 - **User preference hints:** each scan prepares a tiny LLM-authored soft-guidance summary from explicit user-review signals before actor-run analysis begins; this is now the only historical-review context sent into classification prompts
 - **Existing taxonomy hints:** prompts receive the current brand's distinct `theme` labels so the LLM can reuse them exactly where appropriate, while still inventing a new short label when none fit
 - **Scanner-aware prompt policy:** specialist Google scans reuse the same shared prompt builders, but small scanner-policy helpers inject specialist-focus instructions instead of duplicating whole prompt families
@@ -674,7 +674,7 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | `authRateLimits` | id (`<scope>:<sha256(client-identifier)>`), scope, keyHash, attemptCount, windowStartedAt, lastAttemptAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **lookbackPeriod?** (`1year`\|`1month`\|`1week`\|`since_last_scan`, default `1year`), **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `apple_app_store`, `google_play`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), **lookbackNudgeDismissed?**, createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), **deletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), actorIds[], actorRuns{} (`scannerId`, `source`, `status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`, `displayQuery?`, `deepSearchSuggestionsProcessed?`, `suggestedSearches?`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, dashboardBreakdowns?** (`version`, `source[]`, `theme[]` compact dashboard chart summaries), **userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`apple_app_store`\|`google_play`\|`domains`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, **xAuthorId?**, **xAuthorHandle?**, **xAuthorUrl?**, **xMatchBasis?** (`none`\|`handle_only`\|`content_only`\|`handle_and_content`), rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
+| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`apple_app_store`\|`google_play`\|`domains`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, description, llmAnalysis, url?, **canonicalId?** (source-specific normalized dedupe key: normalized URL / post id / video id / repo fullName / domain / tweet id), **xAuthorId?**, **xAuthorHandle?**, **xAuthorUrl?**, **xMatchBasis?** (`none`\|`handle_only`\|`content_only`\|`handle_and_content`), rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 
 ---
 
@@ -740,6 +740,16 @@ npm run backfill-scan-counts -- --force  # recomputes all scans from findings
 ```
 
 Script: `app/scripts/backfill-scan-counts.ts`.
+
+To backfill source-specific finding `canonicalId` values onto existing findings after introducing the field (or to recompute all of them from stored findings data):
+
+```bash
+# Run from the app/ directory
+npm run backfill-finding-canonical-ids
+npm run backfill-finding-canonical-ids -- --force
+```
+
+Script: `app/scripts/backfill-finding-canonical-ids.ts`.
 
 To audit or repair orphaned Firestore scan/finding documents after manual data edits, partial deletions, or incident recovery work:
 

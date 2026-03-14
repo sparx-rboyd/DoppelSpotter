@@ -14,6 +14,7 @@
     "add-user": "tsx scripts/add-user.ts",
     "add-invite-code": "tsx scripts/add-invite-code.ts",
     "backfill-scan-counts": "tsx scripts/backfill-scan-counts.ts",
+    "backfill-finding-canonical-ids": "tsx scripts/backfill-finding-canonical-ids.ts",
     "backfill-scan-dashboard-breakdowns": "tsx scripts/backfill-scan-dashboard-breakdowns.ts",
     "audit-orphaned-firestore-docs": "tsx scripts/audit-orphaned-firestore-docs.ts",
     "repair-orphaned-firestore-docs": "tsx scripts/repair-orphaned-firestore-docs.ts"
