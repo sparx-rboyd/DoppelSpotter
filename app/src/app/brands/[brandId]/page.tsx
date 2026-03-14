@@ -1938,8 +1938,9 @@ export default function BrandDetailPage() {
 
   // Poll the brand profile while a history deletion is in progress so the
   // Run scan button re-enables automatically when Cloud Tasks finishes the job.
+  const isDeletionInProgress = hasActiveHistoryDeletion(brand);
   useEffect(() => {
-    if (!historyDeletionInProgress) {
+    if (!isDeletionInProgress) {
       stopDeletionPolling();
       return;
     }
@@ -1962,7 +1963,7 @@ export default function BrandDetailPage() {
     }, 3000);
     return () => stopDeletionPolling();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyDeletionInProgress, brandId]);
+  }, [isDeletionInProgress, brandId]);
 
   useEffect(() => {
     function syncAnchorTargetFromHash() {
