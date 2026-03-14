@@ -4315,11 +4315,24 @@ export default function BrandDetailPage() {
                                 <div className="bg-brand-50/40 px-3 py-3 sm:px-6 sm:py-4 lg:px-7 lg:py-5">
                                   <div className="flex items-start justify-between gap-4 lg:gap-6">
                                     <div className="min-w-0 flex-1">
-                                      <div className="flex min-w-0 items-center gap-3 text-left">
-                                        <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
-                                        <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
-                                          Scan in progress
-                                        </span>
+                                      <div className="flex min-w-0 items-center justify-between gap-3 text-left">
+                                        <div className="flex min-w-0 items-center gap-3">
+                                          <Loader2 className="w-4 h-4 text-brand-600 animate-spin flex-shrink-0" />
+                                          <span className="text-sm font-semibold text-brand-700 flex-shrink-0">
+                                            Scan in progress
+                                          </span>
+                                        </div>
+                                        {!cancelling && (
+                                          <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={cancelScan}
+                                            className="flex-shrink-0 whitespace-nowrap hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                                          >
+                                            <X className="w-3.5 h-3.5" />
+                                            Cancel
+                                          </Button>
+                                        )}
                                       </div>
                                       <div className="mt-4 pl-0 sm:pl-7 lg:mt-5">
                                         <div className="mb-5 flex flex-wrap items-center gap-2.5 lg:mb-6">
@@ -4409,17 +4422,6 @@ export default function BrandDetailPage() {
                                         )}
                                       </div>
                                     </div>
-                                    {!cancelling && (
-                                      <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={cancelScan}
-                                        className="flex-shrink-0 hover:bg-red-50 hover:text-red-600 hover:border-red-200"
-                                      >
-                                        <X className="w-3.5 h-3.5" />
-                                        Cancel
-                                      </Button>
-                                    )}
                                   </div>
                                 </div>
                                 <div className="border-t border-brand-100 bg-brand-50/30 px-2 py-3 sm:px-6 sm:py-5 lg:px-7 lg:py-6">
