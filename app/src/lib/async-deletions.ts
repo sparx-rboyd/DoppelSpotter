@@ -4,7 +4,7 @@ import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
 import type { AsyncDeletionState, BrandProfile, Scan } from '@/lib/types';
 
-const DELETION_BATCH_LIMIT = 200;
+const DELETION_BATCH_LIMIT = 50;
 const DELETION_LEASE_MS = 60_000;
 const DEFAULT_DRAIN_BUDGET_MS = 8_000;
 
@@ -188,6 +188,7 @@ export async function processScanDeletionPass(params: {
       .collection('findings')
       .where('scanId', '==', scanId)
       .where('userId', '==', userId)
+      .select()
       .limit(DELETION_BATCH_LIMIT)
       .get();
 
@@ -228,6 +229,7 @@ export async function processBrandHistoryDeletionPass(params: {
       .collection('findings')
       .where('brandId', '==', brandId)
       .where('userId', '==', userId)
+      .select()
       .limit(DELETION_BATCH_LIMIT)
       .get();
 
@@ -241,6 +243,7 @@ export async function processBrandHistoryDeletionPass(params: {
       .collection('scans')
       .where('brandId', '==', brandId)
       .where('userId', '==', userId)
+      .select()
       .limit(DELETION_BATCH_LIMIT)
       .get();
 
@@ -281,6 +284,7 @@ export async function processBrandDeletionPass(params: {
       .collection('findings')
       .where('brandId', '==', brandId)
       .where('userId', '==', userId)
+      .select()
       .limit(DELETION_BATCH_LIMIT)
       .get();
 
@@ -294,6 +298,7 @@ export async function processBrandDeletionPass(params: {
       .collection('scans')
       .where('brandId', '==', brandId)
       .where('userId', '==', userId)
+      .select('status')
       .limit(DELETION_BATCH_LIMIT)
       .get();
 
