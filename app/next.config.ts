@@ -22,6 +22,8 @@ const nextConfig: NextConfig = {
       './node_modules/https-proxy-agent/**/*',
       './node_modules/pac-proxy-agent/**/*',
       './node_modules/socks-proxy-agent/**/*',
+      './node_modules/@google-cloud/tasks/**/*',
+      './node_modules/google-gax/**/*',
     ],
   },
 };
