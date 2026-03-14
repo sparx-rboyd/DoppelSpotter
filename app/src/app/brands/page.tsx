@@ -54,9 +54,9 @@ export default function BrandsPage() {
   return (
     <AuthGuard>
       <Navbar />
-      <main className="pt-16 min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-          <div className="flex items-center justify-between mb-8">
+      <main className="min-h-screen bg-gray-50 pt-16 lg:pt-[4.5rem]">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8 lg:py-10 xl:max-w-[88rem]">
+          <div className="mb-8 flex items-center justify-between lg:mb-8">
             <div>
               <h1 className="text-2xl font-bold text-gray-900">Brands</h1>
               <p className="text-sm text-gray-500 mt-0.5">Manage the brands you&apos;re monitoring</p>
@@ -102,13 +102,13 @@ export default function BrandsPage() {
           )}
 
           {!loading && brands.length > 0 && (
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 lg:gap-5">
               {brands.map((brand) => (
                 <Link key={brand.id} href={`/brands/${brand.id}`}>
                   <Card className="hover:border-brand-300 transition cursor-pointer">
-                    <CardContent className="flex items-center gap-4 py-4">
-                      <div className="w-10 h-10 bg-brand-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <Shield className="w-5 h-5 text-brand-600" />
+                    <CardContent className="flex items-center gap-4 py-4 lg:gap-5 lg:py-5">
+                      <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg bg-brand-50 lg:h-11 lg:w-11 lg:rounded-xl">
+                        <Shield className="h-5 w-5 text-brand-600" />
                       </div>
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-gray-900 truncate">{brand.name}</h3>

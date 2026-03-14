@@ -468,7 +468,7 @@ export default function DashboardPage() {
             type="button"
             aria-label={`Expand ${title}`}
             onClick={() => setExpandedChartId(chartId)}
-            className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:border-gray-300 hover:bg-gray-50 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+            className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-500 transition hover:border-gray-300 hover:bg-gray-50 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 lg:h-10 lg:w-10"
           >
             <Expand className="h-4 w-4" />
           </button>
@@ -481,9 +481,9 @@ export default function DashboardPage() {
     <AuthGuard>
       <Navbar />
 
-      <main className="min-h-screen bg-gray-50 pt-16">
-        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <div className="mb-8">
+      <main className="min-h-screen bg-gray-50 pt-16 lg:pt-[4.5rem]">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8 lg:py-10 xl:max-w-[88rem]">
+          <div className="mb-8 lg:mb-8">
             <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
           </div>
 
@@ -511,10 +511,10 @@ export default function DashboardPage() {
           )}
 
           {!bootstrapLoading && !bootstrapError && brands.length > 0 && selectedBrand && (
-            <div className="space-y-6">
+            <div className="space-y-6 lg:space-y-8">
               <Card className="overflow-hidden border-brand-100">
-                <div className="border-b border-brand-100 bg-brand-50/70 px-5 py-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
+                <div className="border-b border-brand-100 bg-brand-50/70 px-5 py-4 lg:px-6 lg:py-5">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
                     <div className="w-full max-w-md flex-none">
                       <SelectDropdown
                         id="dashboard-brand-selector"
@@ -530,14 +530,14 @@ export default function DashboardPage() {
                     </div>
                     <Link
                       href={selectedBrandHref}
-                      className="inline-flex items-center gap-1.5 self-start whitespace-nowrap text-sm font-medium text-brand-700 transition hover:text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 sm:mb-2 sm:self-auto"
+                      className="inline-flex items-center gap-1.5 self-start whitespace-nowrap text-sm font-medium text-brand-700 transition hover:text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 sm:self-auto sm:translate-y-2"
                     >
                       Go to brand page
                       <ArrowRight className="h-4 w-4" />
                     </Link>
                   </div>
                 </div>
-                <CardContent className="flex flex-wrap gap-1.5 p-3 sm:gap-2 sm:p-5">
+                <CardContent className="flex flex-wrap gap-1.5 p-3 sm:gap-2 sm:p-4 lg:px-6 lg:py-4">
                   {metrics && (
                     <Badge variant="brand" className="px-2 py-0.5 text-[11px] sm:px-2.5 sm:py-1 sm:text-xs">
                       {metrics.selectedBrandScanCount} scan{metrics.selectedBrandScanCount !== 1 ? 's' : ''}
@@ -606,7 +606,7 @@ export default function DashboardPage() {
               )}
 
               {metrics && metrics.hasTerminalScans && (
-                <section className="space-y-6">
+                <section className="space-y-6 lg:space-y-8">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -636,7 +636,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-4 md:grid-cols-2 lg:gap-5 xl:grid-cols-4">
                     <DashboardMetricCard
                       label="High severity"
                       value={metrics.totals.high}
@@ -671,7 +671,7 @@ export default function DashboardPage() {
                     />
                   </div>
 
-                  <div className="grid gap-6 xl:grid-cols-2">
+                  <div className="grid gap-6 lg:gap-7 xl:grid-cols-2">
                     <Card className="min-w-0 overflow-hidden">
                       {renderChartHeader(
                         'Findings by scan type',

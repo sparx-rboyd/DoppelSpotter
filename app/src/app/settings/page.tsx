@@ -186,13 +186,13 @@ export default function SettingsPage() {
   return (
     <AuthGuard>
       <Navbar />
-      <main className="min-h-screen bg-gray-50 pt-16">
-        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <div className="mb-8">
+      <main className="min-h-screen bg-gray-50 pt-16 lg:pt-[4.5rem]">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8 lg:py-10 xl:max-w-[88rem]">
+          <div className="mb-8 lg:mb-8">
             <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
           </div>
 
-          <div className="space-y-6">
+          <div className="space-y-6 lg:space-y-8">
             <Card>
               <CardHeader className="px-6 py-5">
                 <div className="flex items-start gap-4">
@@ -221,7 +221,7 @@ export default function SettingsPage() {
                       required
                       value={currentPassword}
                       onChange={(event) => setCurrentPassword(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500 lg:py-3"
                       placeholder="Enter your current password"
                     />
                   </div>
@@ -238,7 +238,7 @@ export default function SettingsPage() {
                       minLength={8}
                       value={newPassword}
                       onChange={(event) => setNewPassword(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500 lg:py-3"
                       placeholder="Choose a new password"
                     />
                   </div>
@@ -255,7 +255,7 @@ export default function SettingsPage() {
                       minLength={8}
                       value={confirmPassword}
                       onChange={(event) => setConfirmPassword(event.target.value)}
-                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500 lg:py-3"
                       placeholder="Re-enter your new password"
                     />
                   </div>
@@ -297,7 +297,7 @@ export default function SettingsPage() {
               </CardHeader>
 
               <CardContent className="p-6">
-                <div className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between lg:p-6">
                   <div className="space-y-1">
                     <p className="font-medium text-gray-900">Warn before opening domain registration findings</p>
                     <p className="text-sm text-gray-500">
@@ -401,7 +401,7 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              <div className="mt-6 flex justify-end gap-3">
+              <div className="mt-6 flex justify-end gap-3 lg:gap-4">
                 <Button
                   type="button"
                   variant="secondary"

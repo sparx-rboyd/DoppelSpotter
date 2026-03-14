@@ -62,18 +62,18 @@ export default function SignupClient() {
   }
 
   return (
-    <div className="min-h-screen hero-pattern flex items-center justify-center px-4 py-8">
-      <div className="w-full max-w-sm">
-        <div className="flex items-center justify-center gap-2 mb-8">
-          <ScanEye className="text-brand-600 w-8 h-8" />
+    <div className="hero-pattern flex min-h-screen items-center justify-center px-4 py-8 lg:px-6 lg:py-10">
+      <div className="w-full max-w-sm lg:max-w-md">
+        <div className="mb-8 flex items-center justify-center gap-2 lg:mb-8 lg:gap-2.5">
+          <ScanEye className="h-8 w-8 text-brand-600 lg:h-9 lg:w-9" />
           <span className="font-bold text-xl tracking-tight text-gray-900">DoppelSpotter</span>
         </div>
 
-        <div className="bg-white rounded-2xl border border-gray-200 p-8">
+        <div className="rounded-2xl border border-gray-200 bg-white p-8 lg:rounded-[1.75rem] lg:p-10">
           <h1 className="text-xl font-bold text-gray-900 mb-1">Create your account</h1>
           <p className="text-sm text-gray-600">Registration is invite-only. Enter your 10-character invite code to continue.</p>
 
-          <form onSubmit={handleSubmit} className="space-y-4 mt-6">
+          <form onSubmit={handleSubmit} className="mt-6 space-y-4 lg:mt-7 lg:space-y-5">
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
                 Email address
@@ -85,7 +85,7 @@ export default function SignupClient() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500 lg:py-3"
               />
             </div>
 
@@ -104,7 +104,7 @@ export default function SignupClient() {
                 maxLength={10}
                 value={inviteCode}
                 onChange={(e) => setInviteCode(e.target.value.toLowerCase().replace(/\s+/g, '').slice(0, 10))}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 tracking-[0.2em] focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 tracking-[0.2em] transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500 lg:py-3"
               />
             </div>
 
@@ -120,7 +120,7 @@ export default function SignupClient() {
                 minLength={8}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500 lg:py-3"
               />
             </div>
 
@@ -136,7 +136,7 @@ export default function SignupClient() {
                 minLength={8}
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent transition"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 transition focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand-500 lg:py-3"
               />
             </div>
 
@@ -149,7 +149,7 @@ export default function SignupClient() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-brand-600 hover:bg-brand-700 disabled:opacity-60 text-white font-medium py-2.5 rounded-full transition flex items-center justify-center gap-2"
+              className="flex w-full items-center justify-center gap-2 rounded-full bg-brand-600 py-2.5 font-medium text-white transition hover:bg-brand-700 disabled:opacity-60 lg:py-3"
             >
               {loading ? (
                 <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />

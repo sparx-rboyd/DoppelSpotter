@@ -67,13 +67,13 @@ export function UserMenu() {
         aria-label="Open user menu"
         onClick={() => setIsOpen((open) => !open)}
         className={cn(
-          'flex items-center gap-2 rounded-full border px-2 py-1.5 text-sm transition',
+          'flex items-center gap-2 rounded-full border px-2 py-1.5 text-sm transition lg:px-2.5 lg:py-2',
           isOpen
             ? 'border-white/30 bg-white/15 text-white'
             : 'border-white/15 text-white/80 hover:border-white/25 hover:bg-white/10 hover:text-white',
         )}
       >
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-white">
+        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 text-white lg:h-9 lg:w-9">
           <User className="h-4 w-4" aria-hidden="true" />
         </span>
         <ChevronDown className={cn('h-4 w-4 transition', isOpen && 'rotate-180')} />

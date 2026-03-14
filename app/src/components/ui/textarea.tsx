@@ -24,7 +24,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function 
         ref={ref}
         id={id}
         className={cn(
-          'brand-form-input w-full rounded-lg border px-3 py-2 text-sm text-gray-900 transition',
+          'brand-form-input w-full rounded-lg border px-3 py-2 text-sm text-gray-900 transition lg:py-3',
           'focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent',
           'disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-50 disabled:text-gray-400 disabled:opacity-100',
           error ? 'border-red-400 bg-red-50' : 'border-gray-300 bg-white',

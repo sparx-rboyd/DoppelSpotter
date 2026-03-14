@@ -77,7 +77,7 @@ function buildFieldLabel(
 
 function buildTriggerButtonClassName(disabled?: boolean, customClassName?: string) {
   return cn(
-    'brand-form-input flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm text-gray-900 transition',
+    'brand-form-input flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm text-gray-900 transition lg:py-3',
     'focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent',
     'border-gray-300 bg-white',
     disabled && 'cursor-not-allowed bg-gray-50 text-gray-400',

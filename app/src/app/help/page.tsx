@@ -57,11 +57,11 @@ function HelpAccordion({
       open={defaultOpen}
       className="group overflow-hidden rounded-lg border border-gray-200 bg-white"
     >
-      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3.5 text-sm font-medium text-gray-900 hover:bg-gray-50 [&::-webkit-details-marker]:hidden">
+      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3.5 text-sm font-medium text-gray-900 hover:bg-gray-50 lg:px-5 lg:py-4 [&::-webkit-details-marker]:hidden">
         {title}
         <ChevronRight className="h-4 w-4 flex-shrink-0 text-gray-400 transition-transform group-open:rotate-90" />
       </summary>
-      <div className="border-t border-gray-100 px-4 pb-4 pt-3 text-sm leading-6 text-gray-500">
+      <div className="border-t border-gray-100 px-4 pb-4 pt-3 text-sm leading-6 text-gray-500 lg:px-5 lg:pb-5 lg:pt-4">
         {children}
       </div>
     </details>
@@ -95,7 +95,7 @@ function HelpSection({
             </div>
           </div>
         </CardHeader>
-        <CardContent className="space-y-5 px-6 pb-6">{children}</CardContent>
+        <CardContent className="space-y-5 px-6 pb-6 lg:space-y-6">{children}</CardContent>
       </Card>
     </section>
   );
@@ -148,9 +148,9 @@ export default function HelpPage() {
     <AuthGuard>
       <Navbar />
 
-      <main className="min-h-screen bg-gray-50 pt-16">
-        <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-          <div className="mb-8">
+      <main className="min-h-screen bg-gray-50 pt-16 lg:pt-[4.5rem]">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8 lg:py-10 xl:max-w-[88rem]">
+          <div className="mb-8 lg:mb-8">
             <h1 className="text-2xl font-bold text-gray-900">Help</h1>
             <p className="mt-0.5 text-sm text-gray-500">
               A practical guide to setting up brands, tuning scans, reviewing findings, exporting reports,
@@ -159,8 +159,8 @@ export default function HelpPage() {
             </p>
           </div>
 
-          <div className="flex flex-col gap-8 lg:flex-row">
-            <div className="w-full flex-none lg:w-64">
+          <div className="flex flex-col gap-8 lg:flex-row lg:gap-10 xl:gap-12">
+            <div className="w-full flex-none lg:w-72 xl:w-80">
               <div className="sticky top-24">
                 <p className="mb-2 px-3 text-xs font-semibold uppercase tracking-widest text-gray-400">
                   On this page
@@ -185,7 +185,7 @@ export default function HelpPage() {
               </div>
             </div>
 
-            <div className="flex-1 space-y-6">
+            <div className="flex-1 space-y-6 lg:space-y-8">
               <HelpSection
                 id="overview"
                 icon={Compass}

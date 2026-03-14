@@ -323,9 +323,9 @@ export default function EditBrandPage() {
   return (
     <AuthGuard>
       <Navbar />
-      <main className="pt-16 min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-          <div className="flex items-center gap-3 mb-8">
+      <main className="min-h-screen bg-gray-50 pt-16 lg:pt-[4.5rem]">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8 lg:py-10 xl:max-w-[88rem]">
+          <div className="mb-8 flex items-center gap-3 lg:mb-8 lg:gap-4">
             <Link href={`/brands/${brandId}`} className="text-gray-500 hover:text-gray-900 transition">
               <ArrowLeft className="w-5 h-5" />
             </Link>
@@ -348,7 +348,7 @@ export default function EditBrandPage() {
           )}
 
           {!loadingBrand && !loadError && (
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form onSubmit={handleSubmit} className="space-y-6 lg:space-y-8">
               <Card>
                 <CardHeader className="px-6 py-5">
                   <h2 className="font-semibold text-gray-900">Brand details</h2>
@@ -536,7 +536,7 @@ export default function EditBrandPage() {
                 </p>
               )}
 
-              <div className="flex gap-3 justify-end">
+              <div className="flex justify-end gap-3 lg:gap-4">
                 <Link href={`/brands/${brandId}`}>
                   <Button type="button" variant="secondary" disabled={deleting}>Cancel</Button>
                 </Link>
@@ -612,7 +612,7 @@ export default function EditBrandPage() {
                 </div>
               </div>
 
-              <div className="mt-6 flex justify-end gap-3">
+              <div className="mt-6 flex justify-end gap-3 lg:gap-4">
                 <Button
                   type="button"
                   variant="secondary"
