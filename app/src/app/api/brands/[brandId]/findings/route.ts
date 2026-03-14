@@ -45,6 +45,20 @@ function parseSearchCategory(value?: string | null): FindingCategory | null {
   return null;
 }
 
+function parseSearchCategories(values: string[]) {
+  const seen = new Set<FindingCategory>();
+  const parsedValues: FindingCategory[] = [];
+
+  for (const value of values) {
+    const parsedValue = parseSearchCategory(value);
+    if (!parsedValue || seen.has(parsedValue)) continue;
+    seen.add(parsedValue);
+    parsedValues.push(parsedValue);
+  }
+
+  return parsedValues;
+}
+
 function parseSearchSource(value?: string | null): FindingSource | null {
   if (
     value === 'google'
@@ -66,6 +80,34 @@ function parseSearchSource(value?: string | null): FindingSource | null {
   }
 
   return null;
+}
+
+function parseSearchSources(values: string[]) {
+  const seen = new Set<FindingSource>();
+  const parsedValues: FindingSource[] = [];
+
+  for (const value of values) {
+    const parsedValue = parseSearchSource(value);
+    if (!parsedValue || seen.has(parsedValue)) continue;
+    seen.add(parsedValue);
+    parsedValues.push(parsedValue);
+  }
+
+  return parsedValues;
+}
+
+function parseSearchThemes(values: string[]) {
+  const seen = new Set<string>();
+  const parsedValues: string[] = [];
+
+  for (const value of values) {
+    const normalizedValue = normalizeThemeValue(value);
+    if (!normalizedValue || seen.has(normalizedValue)) continue;
+    seen.add(normalizedValue);
+    parsedValues.push(normalizedValue);
+  }
+
+  return parsedValues;
 }
 
 function parseResultLimit(value?: string | null) {
@@ -115,9 +157,9 @@ function matchesCrossScanTabFilters(
   params: {
     tab: CrossScanTab;
     normalizedQuery: string;
-    category: FindingCategory | null;
-    source: FindingSource | null;
-    normalizedTheme: string;
+    categorySet: Set<FindingCategory>;
+    sourceSet: Set<FindingSource>;
+    normalizedThemeSet: Set<string>;
   },
 ) {
   if (params.tab === 'bookmarks' && finding.isBookmarked !== true) {
@@ -134,22 +176,21 @@ function matchesCrossScanTabFilters(
     return false;
   }
 
+  if (params.categorySet.size > 0) {
+    const matchesCategory = finding.isFalsePositive === true
+      ? params.categorySet.has('non-hit')
+      : params.categorySet.has(finding.severity);
+    if (!matchesCategory) return false;
+  }
+
+  if (params.sourceSet.size > 0 && !params.sourceSet.has(finding.source)) {
+    return false;
+  }
+
   if (
-    params.category
-    && !(
-      params.category === 'non-hit'
-        ? finding.isFalsePositive === true
-        : finding.isFalsePositive !== true && finding.severity === params.category
-    )
+    params.normalizedThemeSet.size > 0
+    && !params.normalizedThemeSet.has(normalizeThemeValue(finding.theme))
   ) {
-    return false;
-  }
-
-  if (params.source && finding.source !== params.source) {
-    return false;
-  }
-
-  if (params.normalizedTheme && normalizeThemeValue(finding.theme) !== params.normalizedTheme) {
     return false;
   }
 
@@ -220,10 +261,12 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { brandId } = await params;
   const rawQuery = request.nextUrl.searchParams.get('q')?.trim() ?? '';
   const normalizedQuery = normalizeSearchText(rawQuery);
-  const category = parseSearchCategory(request.nextUrl.searchParams.get('category'));
-  const source = parseSearchSource(request.nextUrl.searchParams.get('source'));
-  const theme = request.nextUrl.searchParams.get('theme')?.trim() ?? '';
-  const normalizedTheme = normalizeThemeValue(theme);
+  const categories = parseSearchCategories(request.nextUrl.searchParams.getAll('category'));
+  const sources = parseSearchSources(request.nextUrl.searchParams.getAll('source'));
+  const normalizedThemes = parseSearchThemes(request.nextUrl.searchParams.getAll('theme'));
+  const categorySet = new Set(categories);
+  const sourceSet = new Set(sources);
+  const normalizedThemeSet = new Set(normalizedThemes);
   const resultLimit = parseResultLimit(request.nextUrl.searchParams.get('limit'));
   const parsedCursor = decodeCursor(request.nextUrl.searchParams.get('cursor'));
   const includeCount = request.nextUrl.searchParams.get('includeCount') === 'true';
@@ -350,9 +393,9 @@ export async function GET(request: NextRequest, { params }: Params) {
           && matchesCrossScanTabFilters(finding, {
             tab: crossScanTab,
             normalizedQuery,
-            category,
-            source,
-            normalizedTheme,
+            categorySet,
+            sourceSet,
+            normalizedThemeSet,
           })
         ) {
           matchedCount++;

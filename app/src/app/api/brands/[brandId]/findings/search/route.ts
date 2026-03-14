@@ -50,6 +50,20 @@ function parseSearchCategory(value?: string | null): FindingCategory | null {
   return null;
 }
 
+function parseSearchCategories(values: string[]) {
+  const seen = new Set<FindingCategory>();
+  const parsedValues: FindingCategory[] = [];
+
+  for (const value of values) {
+    const parsedValue = parseSearchCategory(value);
+    if (!parsedValue || seen.has(parsedValue)) continue;
+    seen.add(parsedValue);
+    parsedValues.push(parsedValue);
+  }
+
+  return parsedValues;
+}
+
 function parseSearchSource(value?: string | null): FindingSource | null {
   if (
     value === 'google'
@@ -71,6 +85,34 @@ function parseSearchSource(value?: string | null): FindingSource | null {
   }
 
   return null;
+}
+
+function parseSearchSources(values: string[]) {
+  const seen = new Set<FindingSource>();
+  const parsedValues: FindingSource[] = [];
+
+  for (const value of values) {
+    const parsedValue = parseSearchSource(value);
+    if (!parsedValue || seen.has(parsedValue)) continue;
+    seen.add(parsedValue);
+    parsedValues.push(parsedValue);
+  }
+
+  return parsedValues;
+}
+
+function parseSearchThemes(values: string[]) {
+  const seen = new Set<string>();
+  const parsedValues: string[] = [];
+
+  for (const value of values) {
+    const normalizedValue = normalizeThemeValue(value);
+    if (!normalizedValue || seen.has(normalizedValue)) continue;
+    seen.add(normalizedValue);
+    parsedValues.push(normalizedValue);
+  }
+
+  return parsedValues;
 }
 
 function parseResultLimit(value?: string | null) {
@@ -159,9 +201,9 @@ function matchesSearchFilters(
   finding: FindingSummary,
   params: {
     normalizedQuery: string;
-    category: FindingCategory | null;
-    source: FindingSource | null;
-    normalizedTheme: string;
+    categorySet: Set<FindingCategory>;
+    sourceSet: Set<FindingSource>;
+    normalizedThemeSet: Set<string>;
     scope: FindingSearchScope;
   },
 ) {
@@ -172,22 +214,21 @@ function matchesSearchFilters(
   const matchesText = buildFindingSearchText(finding).includes(params.normalizedQuery);
   if (!matchesText) return false;
 
+  if (params.categorySet.size > 0) {
+    const matchesCategory = finding.isFalsePositive === true
+      ? params.categorySet.has('non-hit')
+      : params.categorySet.has(finding.severity);
+    if (!matchesCategory) return false;
+  }
+
+  if (params.sourceSet.size > 0 && !params.sourceSet.has(finding.source)) {
+    return false;
+  }
+
   if (
-    params.category
-    && !(
-      params.category === 'non-hit'
-        ? finding.isFalsePositive === true
-        : finding.isFalsePositive !== true && finding.severity === params.category
-    )
+    params.normalizedThemeSet.size > 0
+    && !params.normalizedThemeSet.has(normalizeThemeValue(finding.theme))
   ) {
-    return false;
-  }
-
-  if (params.source && finding.source !== params.source) {
-    return false;
-  }
-
-  if (params.normalizedTheme && normalizeThemeValue(finding.theme) !== params.normalizedTheme) {
     return false;
   }
 
@@ -225,11 +266,13 @@ export async function GET(request: NextRequest, { params }: Params) {
   const { brandId } = await params;
   const rawQuery = request.nextUrl.searchParams.get('q')?.trim() ?? '';
   const normalizedQuery = normalizeSearchText(rawQuery);
-  const category = parseSearchCategory(request.nextUrl.searchParams.get('category'));
-  const source = parseSearchSource(request.nextUrl.searchParams.get('source'));
-  const theme = request.nextUrl.searchParams.get('theme')?.trim() ?? '';
-  const normalizedTheme = normalizeThemeValue(theme);
-  const hasActiveFilters = Boolean(category || source || normalizedTheme);
+  const categories = parseSearchCategories(request.nextUrl.searchParams.getAll('category'));
+  const sources = parseSearchSources(request.nextUrl.searchParams.getAll('source'));
+  const normalizedThemes = parseSearchThemes(request.nextUrl.searchParams.getAll('theme'));
+  const categorySet = new Set(categories);
+  const sourceSet = new Set(sources);
+  const normalizedThemeSet = new Set(normalizedThemes);
+  const hasActiveFilters = categories.length > 0 || sources.length > 0 || normalizedThemes.length > 0;
   const isFilterOnlyRequest = normalizedQuery.length === 0 && hasActiveFilters;
   const scanId = request.nextUrl.searchParams.get('scanId')?.trim() ?? '';
   const scope = parseSearchScope(request.nextUrl.searchParams.get('tab'));
@@ -355,7 +398,13 @@ export async function GET(request: NextRequest, { params }: Params) {
       };
       scannedFindings++;
 
-      if (!deletingScanIds.has(finding.scanId) && matchesSearchFilters(finding, { normalizedQuery, category, source, normalizedTheme, scope })) {
+      if (!deletingScanIds.has(finding.scanId) && matchesSearchFilters(finding, {
+        normalizedQuery,
+        categorySet,
+        sourceSet,
+        normalizedThemeSet,
+        scope,
+      })) {
         collectedMatches.push(finding);
         collectedMatchCursors.push(lastScannedCursor);
         if (collectedMatches.length >= resultLimit + 1) {

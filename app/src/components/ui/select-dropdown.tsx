@@ -52,6 +52,30 @@ type SelectDropdownProps = {
   showActiveIndicator?: boolean;
 };
 
+type MultiSelectDropdownProps = {
+  id: string;
+  selectedValues: string[];
+  options: SelectDropdownOption[];
+  onChange: (values: string[]) => void;
+  defaultLabel: string;
+  selectionLabelSingular: string;
+  selectionLabelPlural: string;
+  ariaLabel?: string;
+  label?: ReactNode;
+  tooltip?: string;
+  disabled?: boolean;
+  searchable?: boolean;
+  searchPlaceholder?: string;
+  buttonIcon?: ReactNode;
+  labelTone?: 'default' | 'subtle';
+  emptyMessage?: string;
+  triggerClassName?: string;
+  triggerStyle?: CSSProperties;
+  panelClassName?: string;
+  matchTriggerWidth?: boolean;
+  showActiveIndicator?: boolean;
+};
+
 const FLOATING_PANEL_GAP_PX = 8;
 const FLOATING_PANEL_VIEWPORT_MARGIN_PX = 12;
 
@@ -406,6 +430,259 @@ export function SelectDropdown({
                       <Check className={cn('h-4 w-4', isSelected ? 'opacity-100' : 'opacity-0')} />
                     </button>
                   </div>
+                );
+              })
+            ) : (
+              <p className="px-3 py-2 text-sm text-gray-400">{emptyMessage}</p>
+            )}
+          </div>
+
+          {scrollCueState.showTop && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 z-10 flex h-6 items-start justify-center bg-gradient-to-b from-white via-white/95 to-transparent"
+            >
+              <ChevronDown className="mt-0.5 h-3.5 w-3.5 rotate-180 text-gray-300" />
+            </div>
+          )}
+
+          {scrollCueState.showBottom && (
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex h-6 items-end justify-center bg-gradient-to-t from-white via-white/95 to-transparent"
+            >
+              <ChevronDown className="mb-0.5 h-3.5 w-3.5 text-gray-300" />
+            </div>
+          )}
+        </div>
+      </FloatingPanel>
+    </div>
+  );
+}
+
+export function MultiSelectDropdown({
+  id,
+  selectedValues,
+  options,
+  onChange,
+  defaultLabel,
+  selectionLabelSingular,
+  selectionLabelPlural,
+  ariaLabel,
+  label,
+  tooltip,
+  disabled,
+  searchable = false,
+  searchPlaceholder = 'Search…',
+  buttonIcon,
+  labelTone = 'default',
+  emptyMessage = 'No matching options.',
+  triggerClassName,
+  triggerStyle,
+  panelClassName,
+  matchTriggerWidth = true,
+  showActiveIndicator = false,
+}: MultiSelectDropdownProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listContainerRef = useRef<HTMLDivElement>(null);
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [scrollCueState, setScrollCueState] = useState({ showTop: false, showBottom: false });
+
+  const selectedValueSet = useMemo(() => new Set(selectedValues), [selectedValues]);
+  const selectedCount = selectedValues.length;
+  const orderedSelectedValues = useMemo(
+    () => options.map((option) => option.value).filter((value) => selectedValueSet.has(value)),
+    [options, selectedValueSet],
+  );
+  const selectedLabel = useMemo(() => {
+    if (selectedCount === 0) return defaultLabel;
+    if (selectedCount > 1) {
+      return `${selectedCount} ${selectedCount === 1 ? selectionLabelSingular : selectionLabelPlural} selected`;
+    }
+
+    const selectedValue = orderedSelectedValues[0] ?? selectedValues[0];
+    return options.find((option) => option.value === selectedValue)?.label ?? selectedValue;
+  }, [
+    defaultLabel,
+    options,
+    orderedSelectedValues,
+    selectedCount,
+    selectedValues,
+    selectionLabelPlural,
+    selectionLabelSingular,
+  ]);
+  const filteredOptions = useMemo(() => {
+    if (!searchable || !query.trim()) return options;
+
+    const normalizedQuery = query.trim().toLowerCase();
+    return options.filter((option) => option.label.toLowerCase().includes(normalizedQuery));
+  }, [options, query, searchable]);
+
+  const updateScrollCues = useCallback(() => {
+    const container = listContainerRef.current;
+    if (!container) {
+      setScrollCueState((current) => (
+        current.showTop || current.showBottom
+          ? { showTop: false, showBottom: false }
+          : current
+      ));
+      return;
+    }
+
+    const canScroll = container.scrollHeight - container.clientHeight > 1;
+    const showTop = canScroll && container.scrollTop > 1;
+    const showBottom = canScroll && container.scrollTop + container.clientHeight < container.scrollHeight - 1;
+
+    setScrollCueState((current) => (
+      current.showTop === showTop && current.showBottom === showBottom
+        ? current
+        : { showTop, showBottom }
+    ));
+  }, []);
+
+  useEffect(() => {
+    if (disabled) {
+      setIsOpen(false);
+    }
+  }, [disabled]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setQuery('');
+    }
+  }, [isOpen]);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setScrollCueState((current) => (
+        current.showTop || current.showBottom
+          ? { showTop: false, showBottom: false }
+          : current
+      ));
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(updateScrollCues);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [filteredOptions, isOpen, updateScrollCues]);
+
+  function toggleValue(value: string) {
+    const nextSelected = new Set(selectedValueSet);
+    if (nextSelected.has(value)) {
+      nextSelected.delete(value);
+    } else {
+      nextSelected.add(value);
+    }
+
+    onChange(options.map((option) => option.value).filter((optionValue) => nextSelected.has(optionValue)));
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      {label ? buildFieldLabel(id, label, tooltip, labelTone) : null}
+      <button
+        ref={triggerRef}
+        id={id}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-label={ariaLabel}
+        onClick={() => {
+          if (!disabled) setIsOpen((current) => !current);
+        }}
+        className={buildTriggerButtonClassName(disabled, triggerClassName)}
+        style={triggerStyle}
+      >
+        {buttonIcon}
+        <span className="min-w-0 flex-1 truncate text-left">
+          {selectedLabel}
+        </span>
+        {showActiveIndicator && selectedCount > 0 && (
+          <span
+            aria-hidden="true"
+            className="h-2 w-2 flex-shrink-0 rounded-full bg-brand-500"
+          />
+        )}
+        <ChevronDown className={cn('h-4 w-4 text-gray-400 transition', isOpen && 'rotate-180')} />
+      </button>
+
+      <FloatingPanel
+        anchorRef={triggerRef as MutableRefObject<HTMLElement | null>}
+        isOpen={isOpen}
+        onClose={() => setIsOpen(false)}
+        matchTriggerWidth={matchTriggerWidth}
+        className={panelClassName}
+      >
+        <div className="mb-2 flex items-center justify-between gap-3 border-b border-gray-100 px-1 pb-2">
+          <button
+            type="button"
+            onClick={() => onChange(options.map((option) => option.value))}
+            className="text-[11px] font-medium text-brand-700 transition hover:text-brand-800"
+          >
+            All
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange([])}
+            className="text-[11px] font-medium text-slate-500 transition hover:text-slate-700"
+          >
+            Clear
+          </button>
+        </div>
+
+        {searchable && (
+          <div className="relative mb-2">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400" />
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder={searchPlaceholder}
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-3 text-sm text-gray-900 outline-none transition focus:border-brand-300 focus:bg-white"
+            />
+          </div>
+        )}
+
+        <div className="relative">
+          <div
+            ref={listContainerRef}
+            className="max-h-64 overflow-auto"
+            onScroll={updateScrollCues}
+            role="listbox"
+            aria-multiselectable="true"
+          >
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((option) => {
+                const isSelected = selectedValueSet.has(option.value);
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    role="option"
+                    aria-selected={isSelected}
+                    onClick={() => toggleValue(option.value)}
+                    className={cn(
+                      'flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-sm transition',
+                      isSelected
+                        ? 'bg-brand-50 text-brand-700'
+                        : 'text-gray-700 hover:bg-gray-50',
+                    )}
+                  >
+                    <span className="min-w-0 flex-1 truncate text-left">{option.label}</span>
+                    <span
+                      className={cn(
+                        'flex h-4 w-4 items-center justify-center rounded border transition',
+                        isSelected
+                          ? 'border-brand-500 bg-brand-600 text-white'
+                          : 'border-gray-300 bg-white text-transparent',
+                      )}
+                    >
+                      <Check className="h-3 w-3" />
+                    </span>
+                  </button>
                 );
               })
             ) : (

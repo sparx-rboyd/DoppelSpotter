@@ -18,7 +18,7 @@ import { FindingCard } from '@/components/finding-card';
 import { BrandScanSourceFields } from '@/components/brand-scan-source-fields';
 import { BrandScanTuningFields } from '@/components/brand-scan-tuning-fields';
 import { ScanSourceIcon } from '@/components/scan-source-icon';
-import { SelectDropdown } from '@/components/ui/select-dropdown';
+import { MultiSelectDropdown } from '@/components/ui/select-dropdown';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Toast } from '@/components/ui/toast';
@@ -372,6 +372,20 @@ function parseFindingCategoryFilter(value?: string | null): FindingCategory | nu
   return null;
 }
 
+function parseFindingCategoryFilters(values: string[]) {
+  const seen = new Set<FindingCategory>();
+  const parsedValues: FindingCategory[] = [];
+
+  for (const value of values) {
+    const parsedValue = parseFindingCategoryFilter(value);
+    if (!parsedValue || seen.has(parsedValue)) continue;
+    seen.add(parsedValue);
+    parsedValues.push(parsedValue);
+  }
+
+  return parsedValues;
+}
+
 function compareFindingTaxonomyLabels(a: string, b: string) {
   const aIsOther = normalizeFindingsTaxonomyValue(a) === OTHER_FINDING_TAXONOMY_KEY;
   const bIsOther = normalizeFindingsTaxonomyValue(b) === OTHER_FINDING_TAXONOMY_KEY;
@@ -460,6 +474,45 @@ function parseFindingSourceFilter(value?: string | null): FindingSourceFilter | 
     : null;
 }
 
+function parseFindingSourceFilters(values: string[]) {
+  const seen = new Set<FindingSourceFilter>();
+  const parsedValues: FindingSourceFilter[] = [];
+
+  for (const value of values) {
+    const parsedValue = parseFindingSourceFilter(value);
+    if (!parsedValue || seen.has(parsedValue)) continue;
+    seen.add(parsedValue);
+    parsedValues.push(parsedValue);
+  }
+
+  return parsedValues;
+}
+
+function parseFindingThemeFilters(values: string[]) {
+  const seen = new Set<string>();
+  const parsedValues: string[] = [];
+
+  for (const value of values) {
+    const trimmedValue = value.replace(/\s+/g, ' ').trim();
+    const normalizedValue = normalizeFindingsTaxonomyValue(trimmedValue);
+    if (!normalizedValue || seen.has(normalizedValue)) continue;
+    seen.add(normalizedValue);
+    parsedValues.push(trimmedValue);
+  }
+
+  return parsedValues;
+}
+
+function replaceMultiValueQueryParam(params: URLSearchParams, key: string, values: string[]) {
+  params.delete(key);
+
+  for (const value of values) {
+    const trimmedValue = value.trim();
+    if (!trimmedValue) continue;
+    params.append(key, trimmedValue);
+  }
+}
+
 function scrollToScanResultSet(scanId: string, attempt = 0) {
   if (typeof window === 'undefined') return;
 
@@ -546,9 +599,9 @@ export default function BrandDetailPage() {
   const backHref = searchParams.get(RETURN_TO_QUERY_PARAM) === RETURN_TO_DASHBOARD_VALUE
     ? '/dashboard'
     : '/brands';
-  const initialFindingCategory = parseFindingCategoryFilter(searchParams.get(DRILLDOWN_CATEGORY_QUERY_PARAM));
-  const initialFindingSource = parseFindingSourceFilter(searchParams.get(DRILLDOWN_SOURCE_QUERY_PARAM));
-  const initialFindingTheme = searchParams.get(DRILLDOWN_THEME_QUERY_PARAM)?.trim() ?? '';
+  const initialFindingCategories = parseFindingCategoryFilters(searchParams.getAll(DRILLDOWN_CATEGORY_QUERY_PARAM));
+  const initialFindingSources = parseFindingSourceFilters(searchParams.getAll(DRILLDOWN_SOURCE_QUERY_PARAM));
+  const initialFindingThemes = parseFindingThemeFilters(searchParams.getAll(DRILLDOWN_THEME_QUERY_PARAM));
 
   const [brand, setBrand] = useState<BrandProfile | null>(null);
   usePageTitle(brand?.name ?? '');
@@ -611,9 +664,9 @@ export default function BrandDetailPage() {
     themes: [],
   });
   const [hasLoadedFindingTaxonomyOptions, setHasLoadedFindingTaxonomyOptions] = useState(false);
-  const [selectedFindingCategory, setSelectedFindingCategory] = useState<FindingCategory | null>(initialFindingCategory);
-  const [selectedFindingSource, setSelectedFindingSource] = useState<FindingSourceFilter | null>(initialFindingSource);
-  const [selectedFindingTheme, setSelectedFindingTheme] = useState(initialFindingTheme);
+  const [selectedFindingCategories, setSelectedFindingCategories] = useState<FindingCategory[]>(initialFindingCategories);
+  const [selectedFindingSources, setSelectedFindingSources] = useState<FindingSourceFilter[]>(initialFindingSources);
+  const [selectedFindingThemes, setSelectedFindingThemes] = useState<string[]>(initialFindingThemes);
   const [selectedFindingIds, setSelectedFindingIds] = useState<string[]>([]);
   const [isBulkActionPanelExpanded, setIsBulkActionPanelExpanded] = useState(false);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
@@ -625,7 +678,7 @@ export default function BrandDetailPage() {
   const [exportingPdfScanId, setExportingPdfScanId] = useState<string | null>(null);
   const [copiedScanLinkId, setCopiedScanLinkId] = useState<string | null>(null);
   const [isMobileSearchFiltersOpen, setIsMobileSearchFiltersOpen] = useState(() => (
-    Boolean(initialFindingCategory || initialFindingSource || initialFindingTheme)
+    initialFindingCategories.length > 0 || initialFindingSources.length > 0 || initialFindingThemes.length > 0
   ));
 
   const [isLookbackNudgeOpen, setIsLookbackNudgeOpen] = useState(false);
@@ -676,12 +729,30 @@ export default function BrandDetailPage() {
   const [displayedScanProgressPctBySource, setDisplayedScanProgressPctBySource] = useState<Partial<Record<FindingSource, number>>>({});
   const normalizedFindingsSearchInput = normalizeFindingsSearchText(findingsSearchQuery);
   const normalizedFindingsSearchQuery = normalizeFindingsSearchText(debouncedFindingsSearchQuery);
-  const normalizedSelectedFindingTheme = normalizeFindingsTaxonomyValue(selectedFindingTheme);
+  const selectedFindingCategorySet = useMemo(
+    () => new Set(selectedFindingCategories),
+    [selectedFindingCategories],
+  );
+  const selectedFindingSourceSet = useMemo(
+    () => new Set(selectedFindingSources),
+    [selectedFindingSources],
+  );
+  const normalizedSelectedFindingThemes = useMemo(
+    () => selectedFindingThemes.map((theme) => normalizeFindingsTaxonomyValue(theme)),
+    [selectedFindingThemes],
+  );
+  const normalizedSelectedFindingThemeSet = useMemo(
+    () => new Set(normalizedSelectedFindingThemes.filter(Boolean)),
+    [normalizedSelectedFindingThemes],
+  );
+  const singleSelectedFindingCategory = selectedFindingCategories.length === 1
+    ? selectedFindingCategories[0]
+    : null;
   const isFindingsSearchActive = normalizedFindingsSearchInput.length > 0;
   const shouldUseLocalTabFindingSearch = activeTab !== 'scans' && isFindingsSearchActive;
-  const hasActiveFindingCategoryFilter = selectedFindingCategory !== null;
-  const hasActiveFindingSourceFilter = selectedFindingSource !== null;
-  const hasActiveFindingThemeFilter = normalizedSelectedFindingTheme.length > 0;
+  const hasActiveFindingCategoryFilter = selectedFindingCategories.length > 0;
+  const hasActiveFindingSourceFilter = selectedFindingSources.length > 0;
+  const hasActiveFindingThemeFilter = normalizedSelectedFindingThemeSet.size > 0;
   const hasActiveNonSearchFindingFilters =
     hasActiveFindingCategoryFilter
     || hasActiveFindingSourceFilter
@@ -778,35 +849,23 @@ export default function BrandDetailPage() {
   }
 
   function updateDrilldownUrl(updates: {
-    category?: FindingCategory | null;
-    source?: FindingSourceFilter | null;
-    theme?: string | null;
+    categories?: FindingCategory[];
+    sources?: FindingSourceFilter[];
+    themes?: string[];
     hash?: string | null;
   }) {
     const params = new URLSearchParams(searchParams.toString());
 
-    if (updates.category !== undefined) {
-      if (updates.category) {
-        params.set(DRILLDOWN_CATEGORY_QUERY_PARAM, updates.category);
-      } else {
-        params.delete(DRILLDOWN_CATEGORY_QUERY_PARAM);
-      }
+    if (updates.categories !== undefined) {
+      replaceMultiValueQueryParam(params, DRILLDOWN_CATEGORY_QUERY_PARAM, updates.categories);
     }
 
-    if (updates.source !== undefined) {
-      if (updates.source) {
-        params.set(DRILLDOWN_SOURCE_QUERY_PARAM, updates.source);
-      } else {
-        params.delete(DRILLDOWN_SOURCE_QUERY_PARAM);
-      }
+    if (updates.sources !== undefined) {
+      replaceMultiValueQueryParam(params, DRILLDOWN_SOURCE_QUERY_PARAM, updates.sources);
     }
 
-    if (updates.theme !== undefined) {
-      if (updates.theme && updates.theme.trim()) {
-        params.set(DRILLDOWN_THEME_QUERY_PARAM, updates.theme.trim());
-      } else {
-        params.delete(DRILLDOWN_THEME_QUERY_PARAM);
-      }
+    if (updates.themes !== undefined) {
+      replaceMultiValueQueryParam(params, DRILLDOWN_THEME_QUERY_PARAM, updates.themes);
     }
 
     const queryString = params.toString();
@@ -816,21 +875,22 @@ export default function BrandDetailPage() {
     router.replace(`${pathname}${queryString ? `?${queryString}` : ''}${hash}`, { scroll: false });
   }
 
-  function handleFindingCategoryFilterChange(nextValue: string) {
-    const nextCategory = parseFindingCategoryFilter(nextValue);
-    setSelectedFindingCategory(nextCategory);
-    updateDrilldownUrl({ category: nextCategory });
+  function handleFindingCategoryFilterChange(nextValues: string[]) {
+    const nextCategories = parseFindingCategoryFilters(nextValues);
+    setSelectedFindingCategories(nextCategories);
+    updateDrilldownUrl({ categories: nextCategories });
   }
 
-  function handleFindingSourceFilterChange(nextValue: string) {
-    const nextSource = parseFindingSourceFilter(nextValue);
-    setSelectedFindingSource(nextSource);
-    updateDrilldownUrl({ source: nextSource });
+  function handleFindingSourceFilterChange(nextValues: string[]) {
+    const nextSources = parseFindingSourceFilters(nextValues);
+    setSelectedFindingSources(nextSources);
+    updateDrilldownUrl({ sources: nextSources });
   }
 
-  function handleFindingThemeFilterChange(nextValue: string) {
-    setSelectedFindingTheme(nextValue);
-    updateDrilldownUrl({ theme: nextValue || null });
+  function handleFindingThemeFilterChange(nextValues: string[]) {
+    const nextThemes = parseFindingThemeFilters(nextValues);
+    setSelectedFindingThemes(nextThemes);
+    updateDrilldownUrl({ themes: nextThemes });
   }
 
   function resetFindingsSearchAndFilters() {
@@ -840,13 +900,13 @@ export default function BrandDetailPage() {
     setSearchResultsNextCursor(null);
     setSearchResultsError('');
     setSearchResultsTruncated(false);
-    setSelectedFindingCategory(null);
-    setSelectedFindingSource(null);
-    setSelectedFindingTheme('');
+    setSelectedFindingCategories([]);
+    setSelectedFindingSources([]);
+    setSelectedFindingThemes([]);
     updateDrilldownUrl({
-      category: null,
-      source: null,
-      theme: null,
+      categories: [],
+      sources: [],
+      themes: [],
     });
   }
 
@@ -858,6 +918,20 @@ export default function BrandDetailPage() {
     return () => window.clearTimeout(timeoutId);
   }, [findingsSearchQuery]);
 
+  const appendActiveFindingFilterParams = useCallback((params: URLSearchParams) => {
+    for (const category of selectedFindingCategories) {
+      params.append('category', category);
+    }
+    for (const source of selectedFindingSources) {
+      params.append('source', source);
+    }
+    for (const theme of selectedFindingThemes) {
+      const trimmedTheme = theme.trim();
+      if (!trimmedTheme) continue;
+      params.append('theme', trimmedTheme);
+    }
+  }, [selectedFindingCategories, selectedFindingSources, selectedFindingThemes]);
+
   const fetchServerSearchResults = useCallback(async (options?: { append?: boolean; cursor?: string | null; signal?: AbortSignal }) => {
     const params = new URLSearchParams({
       q: debouncedFindingsSearchQuery.trim(),
@@ -868,15 +942,7 @@ export default function BrandDetailPage() {
     if (options?.cursor) {
       params.set('cursor', options.cursor);
     }
-    if (selectedFindingCategory) {
-      params.set('category', selectedFindingCategory);
-    }
-    if (selectedFindingSource) {
-      params.set('source', selectedFindingSource);
-    }
-    if (selectedFindingTheme.trim()) {
-      params.set('theme', selectedFindingTheme.trim());
-    }
+    appendActiveFindingFilterParams(params);
 
     const res = await fetch(`/api/brands/${brandId}/findings/search?${params.toString()}`, {
       credentials: 'same-origin',
@@ -910,11 +976,9 @@ export default function BrandDetailPage() {
     setSearchResultsError('');
   }, [
     activeTab,
+    appendActiveFindingFilterParams,
     brandId,
     debouncedFindingsSearchQuery,
-    selectedFindingCategory,
-    selectedFindingSource,
-    selectedFindingTheme,
   ]);
 
   async function loadMoreSearchResults() {
@@ -1070,14 +1134,14 @@ export default function BrandDetailPage() {
 
   const buildCrossScanTabQueryKey = useCallback(() => JSON.stringify({
     q: debouncedFindingsSearchQuery.trim(),
-    category: selectedFindingCategory ?? '',
-    source: selectedFindingSource ?? '',
-    theme: selectedFindingTheme.trim(),
+    categories: selectedFindingCategories,
+    sources: selectedFindingSources,
+    themes: selectedFindingThemes.map((theme) => theme.trim()),
   }), [
     debouncedFindingsSearchQuery,
-    selectedFindingCategory,
-    selectedFindingSource,
-    selectedFindingTheme,
+    selectedFindingCategories,
+    selectedFindingSources,
+    selectedFindingThemes,
   ]);
 
   const getCrossScanTabFindings = useCallback((tab: CrossScanTab) => {
@@ -1148,16 +1212,15 @@ export default function BrandDetailPage() {
       if (debouncedFindingsSearchQuery.trim()) {
         params.set('q', debouncedFindingsSearchQuery.trim());
       }
-      if (selectedFindingCategory) {
-        params.set('category', selectedFindingCategory);
-      }
-      if (selectedFindingSource) {
-        params.set('source', selectedFindingSource);
-      }
-      if (selectedFindingTheme.trim()) {
-        params.set('theme', selectedFindingTheme.trim());
-      }
-      if (tab === 'bookmarks' && !append && !debouncedFindingsSearchQuery.trim() && !selectedFindingCategory && !selectedFindingSource && !selectedFindingTheme.trim()) {
+      appendActiveFindingFilterParams(params);
+      if (
+        tab === 'bookmarks'
+        && !append
+        && !debouncedFindingsSearchQuery.trim()
+        && selectedFindingCategories.length === 0
+        && selectedFindingSources.length === 0
+        && selectedFindingThemes.length === 0
+      ) {
         params.set('includeCount', 'true');
       }
 
@@ -1218,14 +1281,15 @@ export default function BrandDetailPage() {
       }
     }
   }, [
+    appendActiveFindingFilterParams,
     brandId,
     buildCrossScanTabQueryKey,
     crossScanTabNextCursor,
     debouncedFindingsSearchQuery,
     getCrossScanTabFindings,
-    selectedFindingCategory,
-    selectedFindingSource,
-    selectedFindingTheme,
+    selectedFindingCategories.length,
+    selectedFindingSources.length,
+    selectedFindingThemes.length,
   ]);
 
   const refreshBookmarkedFindingsCount = useCallback(async () => {
@@ -1267,15 +1331,7 @@ export default function BrandDetailPage() {
       if (debouncedFindingsSearchQuery.trim()) {
         params.set('q', debouncedFindingsSearchQuery.trim());
       }
-      if (selectedFindingCategory) {
-        params.set('category', selectedFindingCategory);
-      }
-      if (selectedFindingSource) {
-        params.set('source', selectedFindingSource);
-      }
-      if (selectedFindingTheme.trim()) {
-        params.set('theme', selectedFindingTheme.trim());
-      }
+      appendActiveFindingFilterParams(params);
       return params;
     };
 
@@ -1307,11 +1363,9 @@ export default function BrandDetailPage() {
       }
     }
   }, [
+    appendActiveFindingFilterParams,
     brandId,
     debouncedFindingsSearchQuery,
-    selectedFindingCategory,
-    selectedFindingSource,
-    selectedFindingTheme,
   ]);
 
   const loadFindingTaxonomyOptions = useCallback(async (options?: { excludeScanId?: string | null }) => {
@@ -2277,19 +2331,19 @@ export default function BrandDetailPage() {
   }, [anchorTargetScanId, scans]);
 
   useEffect(() => {
-    if (!anchorTargetScanId || selectedFindingCategory !== 'non-hit') return;
+    if (!anchorTargetScanId || singleSelectedFindingCategory !== 'non-hit') return;
     if (!scans.some((scan) => scan.id === anchorTargetScanId)) return;
 
     void loadScanNonHits(anchorTargetScanId);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anchorTargetScanId, selectedFindingCategory, scans]);
+  }, [anchorTargetScanId, scans, singleSelectedFindingCategory]);
 
   useEffect(() => {
-    if (!anchorTargetScanId || !selectedFindingCategory) return;
+    if (!anchorTargetScanId || !singleSelectedFindingCategory) return;
     if (!scans.some((scan) => scan.id === anchorTargetScanId)) return;
 
-    scrollToScanCategorySection(anchorTargetScanId, selectedFindingCategory);
-  }, [anchorTargetScanId, scanFindings, scanNonHits, scans, selectedFindingCategory]);
+    scrollToScanCategorySection(anchorTargetScanId, singleSelectedFindingCategory);
+  }, [anchorTargetScanId, scanFindings, scanNonHits, scans, singleSelectedFindingCategory]);
 
   useEffect(() => {
     if (loading || scanning) return;
@@ -2383,9 +2437,9 @@ export default function BrandDetailPage() {
     debouncedFindingsSearchQuery,
     getCrossScanTabFindings,
     loadCrossScanTabFindings,
-    selectedFindingCategory,
-    selectedFindingSource,
-    selectedFindingTheme,
+    selectedFindingCategories,
+    selectedFindingSources,
+    selectedFindingThemes,
   ]);
 
   const availableFindingThemes = useMemo(() => collectDistinctFindingTaxonomyLabels([
@@ -2455,15 +2509,16 @@ export default function BrandDetailPage() {
   useEffect(() => {
     if (!hasLoadedFindingTaxonomyOptions) return;
     if (availableFindingThemes.length === 0) return;
-    if (
-      normalizedSelectedFindingTheme
-      && !availableFindingThemes.some(
-        (theme) => normalizeFindingsTaxonomyValue(theme) === normalizedSelectedFindingTheme,
-      )
-    ) {
-      setSelectedFindingTheme('');
-    }
-  }, [availableFindingThemes, hasLoadedFindingTaxonomyOptions, normalizedSelectedFindingTheme]);
+    const availableThemeKeySet = new Set(
+      availableFindingThemes.map((theme) => normalizeFindingsTaxonomyValue(theme)),
+    );
+    setSelectedFindingThemes((previousThemes) => {
+      const nextThemes = previousThemes.filter((theme) => (
+        availableThemeKeySet.has(normalizeFindingsTaxonomyValue(theme))
+      ));
+      return nextThemes.length === previousThemes.length ? previousThemes : nextThemes;
+    });
+  }, [availableFindingThemes, hasLoadedFindingTaxonomyOptions]);
 
   useEffect(() => {
     setSelectedFindingIds((prev) => {
@@ -3326,14 +3381,14 @@ export default function BrandDetailPage() {
   function matchesFindingFilters(finding: FindingSummary) {
     const matchesLocalSearch = !shouldUseLocalTabFindingSearch
       || buildFindingSearchText(finding).includes(normalizedFindingsSearchInput);
-    const matchesCategory = !selectedFindingCategory || (
-      selectedFindingCategory === 'non-hit'
+    const matchesCategory = selectedFindingCategorySet.size === 0 || selectedFindingCategories.some((category) => (
+      category === 'non-hit'
         ? finding.isFalsePositive === true
-        : finding.isFalsePositive !== true && finding.severity === selectedFindingCategory
-    );
-    const matchesSource = !selectedFindingSource || finding.source === selectedFindingSource;
+        : finding.isFalsePositive !== true && finding.severity === category
+    ));
+    const matchesSource = selectedFindingSourceSet.size === 0 || selectedFindingSourceSet.has(finding.source);
     const matchesTheme = !hasActiveFindingThemeFilter
-      || normalizeFindingsTaxonomyValue(finding.theme) === normalizedSelectedFindingTheme;
+      || normalizedSelectedFindingThemeSet.has(normalizeFindingsTaxonomyValue(finding.theme));
 
     return matchesLocalSearch && matchesCategory && matchesSource && matchesTheme;
   }
@@ -3359,19 +3414,14 @@ export default function BrandDetailPage() {
     : isFindingsSearchActive
       ? 'search'
       : 'filters';
-  const findingThemeOptions = [
-    { value: '', label: 'All themes' },
-    ...availableFindingThemes.map((theme) => ({ value: theme, label: theme })),
-  ];
+  const findingThemeOptions = availableFindingThemes.map((theme) => ({ value: theme, label: theme }));
   const findingCategoryOptions = [
-    { value: '', label: 'All severities' },
     { value: 'high', label: 'High' },
     { value: 'medium', label: 'Medium' },
     { value: 'low', label: 'Low' },
     { value: 'non-hit', label: 'Non-findings' },
   ];
   const findingSourceOptions = [
-    { value: '', label: 'All scan types' },
     ...sortScanSourcesByLabel(SCAN_SOURCE_ORDER).map((source) => ({
       value: source,
       label: getFindingSourceLabel(source),
@@ -3684,12 +3734,15 @@ export default function BrandDetailPage() {
                           )}
                         </div>
                         <div className="grid grid-cols-2 gap-2.5 sm:flex sm:flex-row sm:gap-3 lg:flex-shrink-0 lg:gap-3.5">
-                          <SelectDropdown
+                          <MultiSelectDropdown
                             id="findings-theme-filter"
                             ariaLabel="Filter findings by theme"
-                            value={selectedFindingTheme}
+                            selectedValues={selectedFindingThemes}
                             options={findingThemeOptions}
                             onChange={handleFindingThemeFilterChange}
+                            defaultLabel="All themes"
+                            selectionLabelSingular="theme"
+                            selectionLabelPlural="themes"
                             triggerClassName={cn(
                               'min-w-[10rem] border-white/20 lg:py-3',
                               hasActiveFindingThemeFilter && 'border-brand-200 bg-brand-50',
@@ -3697,15 +3750,17 @@ export default function BrandDetailPage() {
                             triggerStyle={{ color: '#6b7280' }}
                             matchTriggerWidth={false}
                             panelClassName="min-w-[16rem] max-w-[calc(100vw-1.5rem)]"
-                            dividerAfterValue=""
                             showActiveIndicator={hasActiveFindingThemeFilter}
                           />
-                          <SelectDropdown
+                          <MultiSelectDropdown
                             id="findings-severity-filter"
                             ariaLabel="Filter findings by severity"
-                            value={selectedFindingCategory ?? ''}
+                            selectedValues={selectedFindingCategories}
                             options={findingCategoryOptions}
                             onChange={handleFindingCategoryFilterChange}
+                            defaultLabel="All severities"
+                            selectionLabelSingular="severity"
+                            selectionLabelPlural="severities"
                             triggerClassName={cn(
                               'min-w-[10rem] border-white/20 lg:py-3',
                               hasActiveFindingCategoryFilter && 'border-brand-200 bg-brand-50',
@@ -3713,15 +3768,17 @@ export default function BrandDetailPage() {
                             triggerStyle={{ color: '#6b7280' }}
                             matchTriggerWidth={false}
                             panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
-                            dividerAfterValue=""
                             showActiveIndicator={hasActiveFindingCategoryFilter}
                           />
-                          <SelectDropdown
+                          <MultiSelectDropdown
                             id="findings-source-filter"
                             ariaLabel="Filter findings by scan type"
-                            value={selectedFindingSource ?? ''}
+                            selectedValues={selectedFindingSources}
                             options={findingSourceOptions}
                             onChange={handleFindingSourceFilterChange}
+                            defaultLabel="All scan types"
+                            selectionLabelSingular="scan type"
+                            selectionLabelPlural="scan types"
                             triggerClassName={cn(
                               'min-w-[10rem] border-white/20 lg:py-3',
                               hasActiveFindingSourceFilter && 'border-brand-200 bg-brand-50',
@@ -3729,7 +3786,6 @@ export default function BrandDetailPage() {
                             triggerStyle={{ color: '#6b7280' }}
                             matchTriggerWidth={false}
                             panelClassName="min-w-[14rem] max-w-[calc(100vw-1.5rem)]"
-                            dividerAfterValue=""
                             showActiveIndicator={hasActiveFindingSourceFilter}
                           />
                           {isAnyFindingFilterActive && (
@@ -4379,7 +4435,7 @@ export default function BrandDetailPage() {
                                                 forceExpanded={isAnyFindingFilterActive}
                                                 highlightQuery={activeHighlightQuery}
                                                 autoExpandToken={
-                                                  anchorTargetScanId === activeScan?.id && selectedFindingCategory === sev
+                                                  anchorTargetScanId === activeScan?.id && singleSelectedFindingCategory === sev
                                                     ? `live-${sev}`
                                                     : null
                                                 }
@@ -4851,7 +4907,7 @@ export default function BrandDetailPage() {
                                                   forceExpanded={isAnyFindingFilterActive}
                                                   highlightQuery={activeHighlightQuery}
                                                   autoExpandToken={
-                                                    anchorTargetScanId === scan.id && selectedFindingCategory === sev
+                                                    anchorTargetScanId === scan.id && singleSelectedFindingCategory === sev
                                                       ? `${scan.id}-${sev}`
                                                       : null
                                                   }
