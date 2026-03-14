@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
-import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
+import { FieldValue, type DocumentReference, type Transaction } from '@google-cloud/firestore';
 import { buildDeepSearchPreparedInput, fetchDatasetItems, startPreparedActorRun } from '@/lib/apify/client';
 import {
   buildActorRunInfoFromQueuedRun,
@@ -156,6 +156,45 @@ type ScanDocHandle = {
   ref: DocumentReference;
 };
 
+class ScanProcessingStoppedError extends Error {
+  constructor(
+    readonly scanId: string,
+    readonly reason: 'missing' | 'cancelled',
+  ) {
+    super(
+      reason === 'missing'
+        ? `Scan ${scanId} no longer exists`
+        : `Scan ${scanId} was cancelled while processing was still in flight`,
+    );
+    this.name = 'ScanProcessingStoppedError';
+  }
+}
+
+function isScanProcessingStoppedError(error: unknown): error is ScanProcessingStoppedError {
+  return error instanceof ScanProcessingStoppedError;
+}
+
+function isFirestoreNotFoundError(error: unknown): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === 5;
+}
+
+async function updateScanProcessingState(
+  scanDoc: ScanDocHandle,
+  updates: Record<string, unknown>,
+) {
+  try {
+    await scanDoc.ref.update(updates);
+  } catch (error) {
+    if (isFirestoreNotFoundError(error)) {
+      throw new ScanProcessingStoppedError(scanDoc.id, 'missing');
+    }
+    throw error;
+  }
+}
+
 const TRACKING_QUERY_PARAM_NAMES = new Set([
   'fbclid',
   'gclid',
@@ -290,6 +329,12 @@ export async function POST(request: NextRequest) {
         webhookUrl,
       });
     } catch (err) {
+      if (isScanProcessingStoppedError(err)) {
+        console.log(
+          `[webhook] Stopping succeeded-run processing for ${resource.id} because scan ${err.scanId} is ${err.reason === 'missing' ? 'gone' : 'cancelled'}`,
+        );
+        return NextResponse.json({ received: true });
+      }
       await recoverFromSucceededRunError({
         scanDoc,
         runId: resource.id,
@@ -541,7 +586,7 @@ async function handleSucceededRun({
   }
 
   // Phase 2 → Phase 3: signal that AI analysis is starting, and record total item count
-  await scanDoc.ref.update({
+  await updateScanProcessingState(scanDoc, {
     [`actorRuns.${runId}.status`]: 'analysing',
     [`actorRuns.${runId}.analysedCount`]: 0,
     [`actorRuns.${runId}.skippedDuplicateCount`]: 0,
@@ -1114,7 +1159,7 @@ async function analyseAndWriteGoogleBatch({
     : candidatesToAnalyse;
   const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
 
-  await scanDoc.ref.update({
+  await updateScanProcessingState(scanDoc, {
     [`actorRuns.${runId}.itemCount`]: verifiedCandidates.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
     [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
@@ -1159,7 +1204,7 @@ async function analyseAndWriteGoogleBatch({
           }),
         });
       } finally {
-        await scanDoc.ref.update({
+        await updateScanProcessingState(scanDoc, {
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
         });
       }
@@ -1271,7 +1316,7 @@ async function analyseAndWriteRedditBatch({
   );
   const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
 
-  await scanDoc.ref.update({
+  await updateScanProcessingState(scanDoc, {
     [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
     [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
@@ -1315,7 +1360,7 @@ async function analyseAndWriteRedditBatch({
           }),
         });
       } finally {
-        await scanDoc.ref.update({
+        await updateScanProcessingState(scanDoc, {
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
         });
       }
@@ -1433,7 +1478,7 @@ async function analyseAndWriteTikTokBatch({
   );
   const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
 
-  await scanDoc.ref.update({
+  await updateScanProcessingState(scanDoc, {
     [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
     [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
@@ -1477,7 +1522,7 @@ async function analyseAndWriteTikTokBatch({
           }),
         });
       } finally {
-        await scanDoc.ref.update({
+        await updateScanProcessingState(scanDoc, {
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
         });
       }
@@ -1585,7 +1630,7 @@ async function analyseAndWriteDiscordBatch({
   );
   const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
 
-  await scanDoc.ref.update({
+  await updateScanProcessingState(scanDoc, {
     [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
     [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
@@ -1629,7 +1674,7 @@ async function analyseAndWriteDiscordBatch({
           }),
         });
       } finally {
-        await scanDoc.ref.update({
+        await updateScanProcessingState(scanDoc, {
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
         });
       }
@@ -1726,7 +1771,7 @@ async function analyseAndWriteDomainRegistrationBatch({
   );
   const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
 
-  await scanDoc.ref.update({
+  await updateScanProcessingState(scanDoc, {
     [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
     [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
@@ -1770,7 +1815,7 @@ async function analyseAndWriteDomainRegistrationBatch({
           }),
         });
       } finally {
-        await scanDoc.ref.update({
+        await updateScanProcessingState(scanDoc, {
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
         });
       }
@@ -1872,7 +1917,7 @@ async function analyseAndWriteXBatch({
   );
   const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
 
-  await scanDoc.ref.update({
+  await updateScanProcessingState(scanDoc, {
     [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
     [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
@@ -1916,7 +1961,7 @@ async function analyseAndWriteXBatch({
           }),
         });
       } finally {
-        await scanDoc.ref.update({
+        await updateScanProcessingState(scanDoc, {
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
         });
       }
@@ -2042,7 +2087,7 @@ async function analyseAndWriteGitHubBatch({
   );
   const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
 
-  await scanDoc.ref.update({
+  await updateScanProcessingState(scanDoc, {
     [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
     [`actorRuns.${runId}.analysedCount`]: 0,
     [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
@@ -2086,7 +2131,7 @@ async function analyseAndWriteGitHubBatch({
           }),
         });
       } finally {
-        await scanDoc.ref.update({
+        await updateScanProcessingState(scanDoc, {
           [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
         });
       }
@@ -2240,6 +2285,30 @@ type FindingDelta = {
   findingCount: number;
   counts: { high: number; medium: number; low: number; nonHit: number };
 };
+
+function emptyFindingDelta(): FindingDelta {
+  return {
+    findingCount: 0,
+    counts: { high: 0, medium: 0, low: 0, nonHit: 0 },
+  };
+}
+
+async function loadProcessableScanInTransaction(
+  tx: Transaction,
+  scanDoc: ScanDocHandle,
+): Promise<Scan | null> {
+  const freshScanSnap = await tx.get(scanDoc.ref);
+  if (!freshScanSnap.exists) {
+    return null;
+  }
+
+  const freshScan = freshScanSnap.data() as Scan;
+  if (freshScan.status === 'cancelled') {
+    return null;
+  }
+
+  return freshScan;
+}
 
 type ScanFindingTotals = {
   findingCount: number;
@@ -3981,6 +4050,11 @@ async function upsertGoogleFinding({
   const findingRef = db.collection('findings').doc(buildGoogleFindingId(scanId, candidate.normalizedUrl));
 
   return db.runTransaction(async (tx) => {
+    const freshScan = await loadProcessableScanInTransaction(tx, scanDoc);
+    if (!freshScan) {
+      return emptyFindingDelta();
+    }
+
     const existingSnap = await tx.get(findingRef);
     const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
     const preferredOutcome = choosePreferredGoogleOutcome(existing, outcome);
@@ -4004,8 +4078,8 @@ async function upsertGoogleFinding({
     if (!existing) {
       const finding: Omit<Finding, 'id'> = {
         scanId,
-        brandId: scan.brandId,
-        userId: scan.userId,
+        brandId: freshScan.brandId,
+        userId: freshScan.userId,
         source: preferredSource,
         actorId,
         canonicalId: candidate.normalizedUrl,
@@ -4109,6 +4183,11 @@ async function upsertRedditFinding({
   const findingRef = db.collection('findings').doc(buildRedditFindingId(scanId, candidate.postId));
 
   return db.runTransaction(async (tx) => {
+    const freshScan = await loadProcessableScanInTransaction(tx, scanDoc);
+    if (!freshScan) {
+      return emptyFindingDelta();
+    }
+
     const existingSnap = await tx.get(findingRef);
     const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
     const preferredOutcome = choosePreferredRedditOutcome(existing, outcome);
@@ -4132,8 +4211,8 @@ async function upsertRedditFinding({
     if (!existing) {
       const finding: Omit<Finding, 'id'> = {
         scanId,
-        brandId: scan.brandId,
-        userId: scan.userId,
+        brandId: freshScan.brandId,
+        userId: freshScan.userId,
         source: preferredSource,
         actorId,
         canonicalId: candidate.postId,
@@ -4241,6 +4320,11 @@ async function upsertTikTokFinding({
   const findingRef = db.collection('findings').doc(buildTikTokFindingId(scanId, candidate.videoId));
 
   return db.runTransaction(async (tx) => {
+    const freshScan = await loadProcessableScanInTransaction(tx, scanDoc);
+    if (!freshScan) {
+      return emptyFindingDelta();
+    }
+
     const existingSnap = await tx.get(findingRef);
     const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
     const preferredOutcome = choosePreferredTikTokOutcome(existing, outcome);
@@ -4266,8 +4350,8 @@ async function upsertTikTokFinding({
     if (!existing) {
       const finding: Omit<Finding, 'id'> = {
         scanId,
-        brandId: scan.brandId,
-        userId: scan.userId,
+        brandId: freshScan.brandId,
+        userId: freshScan.userId,
         source: preferredSource,
         actorId,
         canonicalId: candidate.videoId,
@@ -4371,6 +4455,11 @@ async function upsertDiscordFinding({
   const findingRef = db.collection('findings').doc(buildDiscordFindingId(scanId, candidate.serverId));
 
   return db.runTransaction(async (tx) => {
+    const freshScan = await loadProcessableScanInTransaction(tx, scanDoc);
+    if (!freshScan) {
+      return emptyFindingDelta();
+    }
+
     const existingSnap = await tx.get(findingRef);
     const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
     const preferredOutcome = choosePreferredDiscordOutcome(existing, outcome);
@@ -4394,8 +4483,8 @@ async function upsertDiscordFinding({
     if (!existing) {
       const finding: Omit<Finding, 'id'> = {
         scanId,
-        brandId: scan.brandId,
-        userId: scan.userId,
+        brandId: freshScan.brandId,
+        userId: freshScan.userId,
         source: preferredSource,
         actorId,
         canonicalId: candidate.serverId,
@@ -4499,6 +4588,11 @@ async function upsertDomainRegistrationFinding({
   const findingRef = db.collection('findings').doc(buildDomainRegistrationFindingId(scanId, candidate.domain));
 
   return db.runTransaction(async (tx) => {
+    const freshScan = await loadProcessableScanInTransaction(tx, scanDoc);
+    if (!freshScan) {
+      return emptyFindingDelta();
+    }
+
     const existingSnap = await tx.get(findingRef);
     const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
     const preferredOutcome = choosePreferredDomainRegistrationOutcome(existing, outcome);
@@ -4522,8 +4616,8 @@ async function upsertDomainRegistrationFinding({
     if (!existing) {
       const finding: Omit<Finding, 'id'> = {
         scanId,
-        brandId: scan.brandId,
-        userId: scan.userId,
+        brandId: freshScan.brandId,
+        userId: freshScan.userId,
         source: preferredSource,
         actorId,
         canonicalId: candidate.domain.toLowerCase(),
@@ -4627,6 +4721,11 @@ async function upsertXFinding({
   const findingRef = db.collection('findings').doc(buildXFindingId(scanId, candidate.tweetId));
 
   return db.runTransaction(async (tx) => {
+    const freshScan = await loadProcessableScanInTransaction(tx, scanDoc);
+    if (!freshScan) {
+      return emptyFindingDelta();
+    }
+
     const existingSnap = await tx.get(findingRef);
     const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
     const preferredOutcome = choosePreferredXOutcome(existing, outcome);
@@ -4651,8 +4750,8 @@ async function upsertXFinding({
     if (!existing) {
       const finding: Omit<Finding, 'id'> = {
         scanId,
-        brandId: scan.brandId,
-        userId: scan.userId,
+        brandId: freshScan.brandId,
+        userId: freshScan.userId,
         source: preferredSource,
         actorId,
         canonicalId: candidate.tweetId,
@@ -4764,6 +4863,11 @@ async function upsertGitHubFinding({
   const findingRef = db.collection('findings').doc(buildGitHubFindingId(scanId, candidate.fullName));
 
   return db.runTransaction(async (tx) => {
+    const freshScan = await loadProcessableScanInTransaction(tx, scanDoc);
+    if (!freshScan) {
+      return emptyFindingDelta();
+    }
+
     const existingSnap = await tx.get(findingRef);
     const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
     const preferredOutcome = choosePreferredGitHubOutcome(existing, outcome);
@@ -4787,8 +4891,8 @@ async function upsertGitHubFinding({
     if (!existing) {
       const finding: Omit<Finding, 'id'> = {
         scanId,
-        brandId: scan.brandId,
-        userId: scan.userId,
+        brandId: freshScan.brandId,
+        userId: freshScan.userId,
         source: preferredSource,
         actorId,
         canonicalId: candidate.fullName.toLowerCase(),
@@ -4875,8 +4979,11 @@ async function reserveSuggestedSearches({
   maxSuggestedSearches: number;
 }): Promise<string[]> {
   return db.runTransaction(async (tx) => {
-    const freshSnap = await tx.get(scanDoc.ref);
-    const fresh = freshSnap.data() as Scan;
+    const fresh = await loadProcessableScanInTransaction(tx, scanDoc);
+    if (!fresh) {
+      return [];
+    }
+
     const run = fresh.actorRuns?.[runId] as (ActorRunInfo & { deepSearchSuggestionsProcessed?: boolean }) | undefined;
     if (!run || run.deepSearchSuggestionsProcessed) {
       return [];
@@ -4967,7 +5074,7 @@ async function triggerDeepSearches({
 
   if (queuedActorRuns.length === 0) return;
 
-  await scanDoc.ref.update({
+  await updateScanProcessingState(scanDoc, {
     queuedActorRuns: FieldValue.arrayUnion(...queuedActorRuns),
   });
   await drainQueuedActorRunsIfCapacity(scanDoc, webhookUrl);
@@ -7558,6 +7665,11 @@ async function markActorRunComplete(
 ) {
   const result = await db.runTransaction<MarkActorRunCompleteResult>(async (tx) => {
     const freshSnap = await tx.get(scanDoc.ref);
+    if (!freshSnap.exists) {
+      console.log(`[webhook] markActorRunComplete: scan ${scanDoc.id} no longer exists — skipping`);
+      return { needsSummary: false };
+    }
+
     const fresh = freshSnap.data() as Scan;
 
     // If the scan was cancelled (e.g. user cancelled while this run was being processed),
