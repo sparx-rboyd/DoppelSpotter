@@ -116,6 +116,15 @@ export interface ScanSummaryOutput {
   summary: string;
 }
 
+export interface ThemeNormalizationMapping {
+  provisionalTheme: string;
+  canonicalTheme: string;
+}
+
+export interface ThemeNormalizationOutput {
+  mappings: ThemeNormalizationMapping[];
+}
+
 /**
  * Compact stored debug payload for Google findings.
  */
@@ -874,6 +883,48 @@ export function parseScanSummaryOutput(raw: string): ScanSummaryOutput | null {
     return {
       summary: parsed.summary.trim(),
     };
+  } catch {
+    return null;
+  }
+}
+
+export function parseThemeNormalizationOutput(
+  raw: string,
+  validProvisionalThemes: Set<string>,
+): ThemeNormalizationOutput | null {
+  try {
+    const stripped = stripJsonFences(raw);
+    const parsed = JSON.parse(stripped);
+    if (!Array.isArray(parsed.mappings) || parsed.mappings.length === 0) {
+      return null;
+    }
+
+    const seenThemes = new Set<string>();
+    const mappings: ThemeNormalizationMapping[] = parsed.mappings
+      .filter(
+        (item: unknown): item is Record<string, unknown> =>
+          typeof item === 'object' && item !== null,
+      )
+      .map((item: Record<string, unknown>) => {
+        const provisionalTheme = typeof item.provisionalTheme === 'string'
+          ? item.provisionalTheme.trim()
+          : '';
+        const canonicalTheme = normalizeFindingTaxonomyLabel(item.canonicalTheme);
+        return { provisionalTheme, canonicalTheme };
+      })
+      .filter(
+        (item): item is ThemeNormalizationMapping =>
+          item.provisionalTheme.length > 0
+          && validProvisionalThemes.has(item.provisionalTheme)
+          && !seenThemes.has(item.provisionalTheme)
+          && typeof item.canonicalTheme === 'string',
+      )
+      .map((item) => {
+        seenThemes.add(item.provisionalTheme);
+        return item;
+      });
+
+    return mappings.length > 0 ? { mappings } : null;
   } catch {
     return null;
   }

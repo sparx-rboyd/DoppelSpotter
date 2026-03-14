@@ -14,6 +14,7 @@ import {
 } from '@/lib/apify/live-run-cap';
 import { chatCompletion } from '@/lib/analysis/openrouter';
 import { resolveBrandAnalysisSeverityDefinitions } from '@/lib/analysis-severity';
+import { normalizeAndPersistScanThemes } from '@/lib/analysis/theme-normalization';
 import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-hints';
 import {
   DISCORD_CLASSIFICATION_SYSTEM_PROMPT,
@@ -4085,7 +4086,7 @@ async function upsertGoogleFinding({
         canonicalId: candidate.normalizedUrl,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
-        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        ...(preferredOutcome.theme ? { provisionalTheme: preferredOutcome.theme } : {}),
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.normalizedUrl,
@@ -4113,7 +4114,8 @@ async function upsertGoogleFinding({
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
-      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      theme: existing.theme ?? FieldValue.delete(),
+      provisionalTheme: preferredOutcome.theme ?? existing.provisionalTheme ?? existing.theme ?? FieldValue.delete(),
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.normalizedUrl,
@@ -4218,7 +4220,7 @@ async function upsertRedditFinding({
         canonicalId: candidate.postId,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
-        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        ...(preferredOutcome.theme ? { provisionalTheme: preferredOutcome.theme } : {}),
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.url,
@@ -4246,7 +4248,8 @@ async function upsertRedditFinding({
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
-      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      theme: existing.theme ?? FieldValue.delete(),
+      provisionalTheme: preferredOutcome.theme ?? existing.provisionalTheme ?? existing.theme ?? FieldValue.delete(),
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.url,
@@ -4357,7 +4360,7 @@ async function upsertTikTokFinding({
         canonicalId: candidate.videoId,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
-        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        ...(preferredOutcome.theme ? { provisionalTheme: preferredOutcome.theme } : {}),
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.url,
@@ -4385,7 +4388,8 @@ async function upsertTikTokFinding({
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
-      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      theme: existing.theme ?? FieldValue.delete(),
+      provisionalTheme: preferredOutcome.theme ?? existing.provisionalTheme ?? existing.theme ?? FieldValue.delete(),
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.url,
@@ -4490,7 +4494,7 @@ async function upsertDiscordFinding({
         canonicalId: candidate.serverId,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
-        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        ...(preferredOutcome.theme ? { provisionalTheme: preferredOutcome.theme } : {}),
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.inviteUrl,
@@ -4518,7 +4522,8 @@ async function upsertDiscordFinding({
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
-      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      theme: existing.theme ?? FieldValue.delete(),
+      provisionalTheme: preferredOutcome.theme ?? existing.provisionalTheme ?? existing.theme ?? FieldValue.delete(),
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.inviteUrl,
@@ -4623,7 +4628,7 @@ async function upsertDomainRegistrationFinding({
         canonicalId: candidate.domain.toLowerCase(),
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
-        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        ...(preferredOutcome.theme ? { provisionalTheme: preferredOutcome.theme } : {}),
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.url,
@@ -4651,7 +4656,8 @@ async function upsertDomainRegistrationFinding({
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
-      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      theme: existing.theme ?? FieldValue.delete(),
+      provisionalTheme: preferredOutcome.theme ?? existing.provisionalTheme ?? existing.theme ?? FieldValue.delete(),
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.url,
@@ -4757,7 +4763,7 @@ async function upsertXFinding({
         canonicalId: candidate.tweetId,
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
-        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        ...(preferredOutcome.theme ? { provisionalTheme: preferredOutcome.theme } : {}),
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.url,
@@ -4789,7 +4795,8 @@ async function upsertXFinding({
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
-      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      theme: existing.theme ?? FieldValue.delete(),
+      provisionalTheme: preferredOutcome.theme ?? existing.provisionalTheme ?? existing.theme ?? FieldValue.delete(),
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.url,
@@ -4898,7 +4905,7 @@ async function upsertGitHubFinding({
         canonicalId: candidate.fullName.toLowerCase(),
         severity: preferredOutcome.severity,
         title: preferredOutcome.title,
-        ...(preferredOutcome.theme ? { theme: preferredOutcome.theme } : {}),
+        ...(preferredOutcome.theme ? { provisionalTheme: preferredOutcome.theme } : {}),
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.url,
@@ -4926,7 +4933,8 @@ async function upsertGitHubFinding({
       severity: preferredOutcome.severity,
       title: preferredOutcome.title,
       platform: FieldValue.delete(),
-      theme: preferredOutcome.theme ?? existing.theme ?? FieldValue.delete(),
+      theme: existing.theme ?? FieldValue.delete(),
+      provisionalTheme: preferredOutcome.theme ?? existing.provisionalTheme ?? existing.theme ?? FieldValue.delete(),
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.url,
@@ -6286,7 +6294,7 @@ function choosePreferredGoogleOutcome(existing: Finding | null, next: GoogleFind
   const existingOutcome: GoogleFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
-    theme: existing.theme,
+    theme: existing.provisionalTheme ?? existing.theme,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,
     llmAnalysisPrompt: existing.llmAnalysisPrompt,
@@ -6317,7 +6325,7 @@ function choosePreferredRedditOutcome(existing: Finding | null, next: RedditFind
   const existingOutcome: RedditFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
-    theme: existing.theme,
+    theme: existing.provisionalTheme ?? existing.theme,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,
     llmAnalysisPrompt: existing.llmAnalysisPrompt,
@@ -6348,7 +6356,7 @@ function choosePreferredTikTokOutcome(existing: Finding | null, next: TikTokFind
   const existingOutcome: TikTokFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
-    theme: existing.theme,
+    theme: existing.provisionalTheme ?? existing.theme,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,
     llmAnalysisPrompt: existing.llmAnalysisPrompt,
@@ -6379,7 +6387,7 @@ function choosePreferredDiscordOutcome(existing: Finding | null, next: DiscordFi
   const existingOutcome: DiscordFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
-    theme: existing.theme,
+    theme: existing.provisionalTheme ?? existing.theme,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,
     llmAnalysisPrompt: existing.llmAnalysisPrompt,
@@ -6413,7 +6421,7 @@ function choosePreferredDomainRegistrationOutcome(
   const existingOutcome: DomainRegistrationFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
-    theme: existing.theme,
+    theme: existing.provisionalTheme ?? existing.theme,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,
     llmAnalysisPrompt: existing.llmAnalysisPrompt,
@@ -6445,7 +6453,7 @@ function choosePreferredXOutcome(existing: Finding | null, next: XFindingOutcome
   const existingOutcome: XFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
-    theme: existing.theme,
+    theme: existing.provisionalTheme ?? existing.theme,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,
     matchBasis: existing.xMatchBasis ?? existingRawData?.analysis.matchBasis ?? 'none',
@@ -6477,7 +6485,7 @@ function choosePreferredGitHubOutcome(existing: Finding | null, next: GitHubFind
   const existingOutcome: GitHubFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
-    theme: existing.theme,
+    theme: existing.provisionalTheme ?? existing.theme,
     analysis: existing.llmAnalysis,
     isFalsePositive: existing.isFalsePositive === true,
     llmAnalysisPrompt: existing.llmAnalysisPrompt,
@@ -6788,6 +6796,19 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
 
   const fresh = scanFromSnapshot(freshSnap);
   if (fresh.status !== 'summarising') return;
+
+  try {
+    const brandDoc = await db.collection('brands').doc(fresh.brandId).get();
+    const brandName = brandDoc.exists ? (brandDoc.data() as BrandProfile).name : undefined;
+    await normalizeAndPersistScanThemes({
+      scanId: fresh.id,
+      brandId: fresh.brandId,
+      userId: fresh.userId,
+      brandName,
+    });
+  } catch (err) {
+    console.error(`[webhook] Theme normalization failed for scan ${fresh.id}:`, err);
+  }
 
   let summaryResult: BuiltScanAiSummaryResult;
   try {

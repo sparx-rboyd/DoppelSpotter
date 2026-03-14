@@ -330,6 +330,8 @@ export interface Finding extends FindingSummary {
   description: string;
   /** Source-specific canonical identity used for cross-scan dedup. */
   canonicalId?: string;
+  /** Hidden per-run label awaiting scan-level theme canonicalisation. */
+  provisionalTheme?: string;
   rawData: Record<string, unknown>;
   /** Timestamp when the finding was ignored by the user. */
   ignoredAt?: Timestamp;

@@ -416,6 +416,34 @@ Rules:
 - Distinguish between discussion, promotion, tooling, impersonation, and confirmed fraud; do not collapse them into a stronger claim than the evidence supports.
 - Vary phrasing naturally and avoid stock opening lines or repeated alarmist formulations.`;
 
+export const THEME_NORMALIZATION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive historical theme labels already used for one brand, plus provisional theme labels assigned during one completed scan.
+
+Your task is to map every provisional theme label to a single final canonical theme label so that near-duplicates are consolidated before the scan is shown to the user.
+Use British English spelling and phrasing in all human-readable output fields.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "mappings": [
+    {
+      "provisionalTheme": "One exact provisional theme from the input",
+      "canonicalTheme": "The final short theme label to use"
+    }
+  ]
+}
+
+Rules:
+- Return exactly one mapping for every provisional theme provided in the user prompt.
+- Reuse the exact same provisionalTheme strings from the input.
+- canonicalTheme must be in title case, preferably 1 word, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words.
+- Prefer reusing an existing historical theme exactly when it fits.
+- Consolidate near-duplicate provisional themes from the current scan into one shared canonical theme when they clearly describe the same misuse pattern.
+- Do NOT merge materially different misuse patterns just because they share one word.
+- Prefer a small number of broad, stable, reusable theme labels over many narrow or repetitive variants.
+- Avoid generic labels like 'Unknown', 'Unlabelled', or 'Unrelated'. Use 'Other' only when no better broad label is warranted.
+- Base your judgement on the representative findings and context provided, not on the theme text alone.`;
+
 /**
  * Format the exact chat messages sent to the LLM into a readable transcript
  * that can be stored on findings for later debug inspection.
@@ -1356,6 +1384,49 @@ If the evidence is concentrated in only one or two sources, say so plainly rathe
 If the findings show a mix of stronger and weaker signals, reflect that mix instead of describing the entire scan at the highest intensity.`;
 }
 
+export function buildThemeNormalizationPrompt(params: {
+  brandName: string;
+  historicalThemes?: string[];
+  provisionalGroups: Array<{
+    provisionalTheme: string;
+    count: number;
+    sources: FindingSource[];
+    severityCounts: {
+      high: number;
+      medium: number;
+      low: number;
+      nonHit: number;
+    };
+    exampleTitles: string[];
+    exampleAnalyses: string[];
+  }>;
+}): string {
+  const { brandName, historicalThemes, provisionalGroups } = params;
+
+  const compactGroups = provisionalGroups.map((group) => ({
+    provisionalTheme: group.provisionalTheme,
+    findingCount: group.count,
+    sources: group.sources.map((source) => getFindingSourceLabel(source)),
+    severityCounts: group.severityCounts,
+    exampleTitles: uniqueStrings(group.exampleTitles).slice(0, 4).map((title) => truncatePromptValue(title, 120)),
+    exampleAnalyses: uniqueStrings(group.exampleAnalyses).slice(0, 3).map((analysis) => truncatePromptValue(analysis, 220)),
+  }));
+
+  return `Brand being protected: "${brandName}"
+
+Existing historical theme labels for this brand (reuse one exactly when it fits):
+${historicalThemes && historicalThemes.length > 0 ? historicalThemes.map((theme) => `- ${theme}`).join('\n') : '- none'}
+
+Provisional theme groups from this completed scan (${compactGroups.length}):
+${JSON.stringify(compactGroups, null, 2)}
+
+Return one mapping per provisionalTheme so that near-duplicate labels collapse to a single final canonical theme where appropriate.
+
+Reuse an existing historical theme exactly when it fits well.
+
+If no historical theme fits, choose the best new short label for that provisional group and reuse it across any other clearly equivalent provisional groups.`;
+}
+
 function buildUserPreferenceHintsSection(
   source: FindingSource,
   userPreferenceHints?: UserPreferenceHints,
@@ -1381,6 +1452,11 @@ function buildSeverityDefinitionsSection(
 - High: ${severityDefinitions.high}
 - Medium: ${severityDefinitions.medium}
 - Low: ${severityDefinitions.low}`;
+}
+
+function truncatePromptValue(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }
 
 function uniqueStrings(values: string[]): string[] {

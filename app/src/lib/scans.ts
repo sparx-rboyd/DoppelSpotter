@@ -1,4 +1,5 @@
 import { FieldValue, type DocumentReference, type DocumentSnapshot, type QueryDocumentSnapshot, type Transaction } from '@google-cloud/firestore';
+import { promoteProvisionalThemesForScan } from './analysis/theme-normalization';
 import { db } from './firestore';
 import { rebuildAndPersistDashboardBreakdownsForScanIds } from './dashboard-aggregates';
 import type { BrandProfile, Scan, ScanStatus } from './types';
@@ -176,6 +177,16 @@ export async function recoverStuckSummarisingScan(scanRef: DocumentReference): P
   });
 
   if (recovered && recoveredScanId && recoveredBrandId && recoveredUserId) {
+    try {
+      await promoteProvisionalThemesForScan({
+        scanId: recoveredScanId,
+        brandId: recoveredBrandId,
+        userId: recoveredUserId,
+      });
+    } catch (error) {
+      console.error(`[scan] Failed to promote provisional themes for recovered scan ${recoveredScanId}:`, error);
+    }
+
     try {
       await rebuildAndPersistDashboardBreakdownsForScanIds({
         brandId: recoveredBrandId,
