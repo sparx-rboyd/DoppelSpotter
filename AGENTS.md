@@ -39,8 +39,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │   └── src/
 │       ├── app/                  # Pages + API routes (App Router)
 │       │   └── api/
-│       │       ├── auth/         # login, logout, me, forgot/reset password, change-password (signup disabled — use add-user CLI)
-│       │       │                 # delete-account removes the user and all owned Firestore data
+│       │       ├── auth/         # login, logout, me, forgot/reset password, change-password, delete-account (signup disabled — use add-user CLI)
 │       │       ├── brands/       # CRUD + findings + scans per brand
 │       │       ├── dashboard/    # Dashboard bootstrap, persisted selection, and analytics metrics
 │       │       ├── findings/     # Cross-brand findings query
@@ -52,8 +51,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │           ├── apify/
 │           │   ├── actors.ts     # Logical scanner registry (Google + Reddit + TikTok + Discord + GitHub + X) + Apify actor lookup helpers
 │           │   └── client.ts     # Apify client: source-specific actor input builders, run start helpers, dataset fetch
-│           ├── account-deletion.ts # Account-wide cleanup helper: cancel active runs, delete owned data
-│           ├── async-deletions.ts  # Resumable lease-based deletion passes for scans, brand history, and full brands
+│           ├── async-deletions.ts  # Resumable lease-based deletion passes for scans, brand history, brands, and full accounts
 │           ├── deletion-tasks.ts   # Cloud Tasks client: typed deletion payloads, enqueue helpers, inline-drain fallback
 │           ├── internal-google-oidc.ts # Reusable Google OIDC token verifier for internal service-to-service routes
 │           ├── dashboard.ts      # Dashboard metrics helpers: terminal-scan totals + source/theme rollups from stored scan summaries
@@ -195,7 +193,7 @@ POST /api/internal/scheduled-scans/dispatch
 POST /api/internal/deletions/drain
  └─ validates a Google-signed OIDC bearer token from Cloud Tasks
  └─ checks both the token audience (worker route URL) and the caller email against `DELETION_TASKS_SERVICE_ACCOUNT_EMAIL`
- └─ accepts a typed deletion payload for `scan`, `brand-history`, or `brand`
+ └─ accepts a typed deletion payload for `scan`, `brand-history`, `brand`, or `account`
  └─ calls the matching bounded drain helper from `app/src/lib/async-deletions.ts`
  └─ if more work remains, enqueues exactly one follow-up Cloud Task instead of relying on later user traffic
 
@@ -258,6 +256,12 @@ DELETE /api/brands/[brandId]
  └─ returns 409 if any scan for the brand is still pending/running/summarising
  └─ marks `brands.brandDeletion = { status: 'queued', ... }`, returns 202 immediately, and enqueues a Cloud Tasks deletion worker (falls back to inline draining only when Cloud Tasks is not configured or enqueueing fails)
  └─ brand list + dashboard bootstrap hide deleting brands immediately so they do not reappear on reload
+
+DELETE /api/auth/delete-account
+ └─ verifies ownership via the auth cookie; allows re-entry while `users.accountDeletion` is active so repeated clicks can re-enqueue background work
+ └─ marks `users.accountDeletion = { status: 'queued', ... }`, clears the auth cookie, returns 202 immediately, and enqueues a Cloud Tasks deletion worker (falls back to inline draining only when Cloud Tasks is not configured or enqueueing fails)
+ └─ account deletion drains in bounded passes: cancel active scans, best-effort abort pending Apify runs, delete owned findings/scans/brands, scrub invite-code usage, then delete the user document
+ └─ `requireAuth()` rejects authenticated requests for accounts with active `users.accountDeletion`, clears the stale auth cookie, and therefore prevents partially deleted accounts from continuing to mutate data
 
 GET /api/brands/[brandId]/findings?scanId=xxx
  └─ optional scanId param filters findings to a single scan (used for lazy loading in the UI)
@@ -669,7 +673,7 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 
 | Collection | Key Fields |
 |---|---|
-| `users` | id, email, passwordHash, **sessionVersion?**, **lastSeenAt?**, **passwordChangedAt?**, **dashboardPreferences?** (`selectedBrandId?`), **emailVerified?**, **emailVerificationVersion?**, **emailVerifiedAt?**, createdAt |
+| `users` | id, email, passwordHash, **sessionVersion?**, **lastSeenAt?**, **passwordChangedAt?**, **accountDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`, `pendingRunAborts?`), **dashboardPreferences?** (`selectedBrandId?`), **emailVerified?**, **emailVerificationVersion?**, **emailVerifiedAt?**, createdAt |
 | `inviteCodes` | id (`sha256(code)`), codeHash, createdAt, **usedAt?**, **usedByEmail?**, **usedByUserId?** |
 | `authRateLimits` | id (`<scope>:<sha256(client-identifier)>`), scope, keyHash, attemptCount, windowStartedAt, lastAttemptAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **lookbackPeriod?** (`1year`\|`1month`\|`1week`\|`since_last_scan`, default `1year`), **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `apple_app_store`, `google_play`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), **lookbackNudgeDismissed?**, createdAt, updatedAt |
@@ -718,6 +722,14 @@ Authenticated users can open the top-right user menu to change their password. T
 - increments `users.sessionVersion`, stamps `users.passwordChangedAt`, and reissues the current browser's JWT
 - causes older cookies with a stale `sessionVersion` to be rejected by both `requireAuth()`-protected API routes and `GET /api/auth/me`
 - broadcasts an auth-sync event across tabs so other open tabs refresh their session state promptly after sign-in, sign-out, or password changes
+
+Authenticated users can also delete their account from Settings. The account-deletion flow:
+
+- starts from `DELETE /api/auth/delete-account`
+- marks `users.accountDeletion = { status: 'queued', ... }`, clears the auth cookie immediately, and returns `202 Accepted`
+- enqueues a Cloud Tasks deletion worker using the same infrastructure as scan/brand deletion, falling back to inline draining only when Cloud Tasks is unavailable
+- drains deletion in bounded passes: cancel in-progress scans, best-effort abort pending Apify runs, delete owned findings/scans/brands, scrub invite-code usage, then delete the user document
+- treats `users.accountDeletion` as a hard auth stop inside `requireAuth()`, so partially deleted accounts cannot continue making authenticated requests if they still hold an old cookie
 
 Unauthenticated users can also reset a forgotten password. The reset flow:
 

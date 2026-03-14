@@ -12,6 +12,8 @@ export interface UserRecord {
   lastSeenAt?: Timestamp;
   /** Timestamp when the password was last changed. */
   passwordChangedAt?: Timestamp;
+  /** Async account deletion job state, if this user and all owned data are being removed. */
+  accountDeletion?: AsyncDeletionState;
   /** Optional per-user dashboard state persisted across devices. */
   dashboardPreferences?: DashboardPreferences;
   /** Optional per-user UI preferences persisted across devices. */
@@ -128,6 +130,8 @@ export interface AsyncDeletionState {
   lastHeartbeatAt?: Timestamp;
   /** Lease expiry used to avoid duplicate workers processing the same deletion. */
   leaseExpiresAt?: Timestamp;
+  /** Optional worker-owned scratch field used by account deletion to track pending Apify run aborts between passes. */
+  pendingRunAborts?: string[];
 }
 
 // ─── Brand Profile ─────────────────────────────────────────────────────────

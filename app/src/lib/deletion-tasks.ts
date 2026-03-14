@@ -9,6 +9,10 @@ const cloudTasksClient = new CloudTasksClient();
 
 export type DeletionTaskPayload =
   | {
+      kind: 'account';
+      userId: string;
+    }
+  | {
       kind: 'scan';
       brandId: string;
       scanId: string;
@@ -42,15 +46,22 @@ export function isDeletionTaskPayload(value: unknown): value is DeletionTaskPayl
   if (!value || typeof value !== 'object') return false;
 
   const candidate = value as Partial<DeletionTaskPayload>;
-  if (typeof candidate.brandId !== 'string' || typeof candidate.userId !== 'string') {
+  if (typeof candidate.userId !== 'string') {
     return false;
   }
 
-  if (candidate.kind === 'scan') {
-    return typeof candidate.scanId === 'string';
+  if (candidate.kind === 'account') {
+    return true;
   }
 
-  return candidate.kind === 'brand' || candidate.kind === 'brand-history';
+  if (candidate.kind === 'scan') {
+    return typeof candidate.brandId === 'string' && typeof candidate.scanId === 'string';
+  }
+
+  return (
+    (candidate.kind === 'brand' || candidate.kind === 'brand-history')
+    && typeof candidate.brandId === 'string'
+  );
 }
 
 export async function enqueueDeletionTask(params: {

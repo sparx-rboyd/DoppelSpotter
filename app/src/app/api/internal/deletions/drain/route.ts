@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import {
+  drainAccountDeletion,
   drainBrandDeletion,
   drainBrandHistoryDeletion,
   drainScanDeletion,
@@ -36,20 +37,25 @@ export async function POST(request: NextRequest) {
   }
 
   const payload = body;
-  const result = payload.kind === 'scan'
-    ? await drainScanDeletion({
+  const result = payload.kind === 'account'
+    ? await drainAccountDeletion({
+        userId: payload.userId,
+        budgetMs: DELETION_TASK_WORKER_BUDGET_MS,
+      })
+    : payload.kind === 'scan'
+      ? await drainScanDeletion({
         brandId: payload.brandId,
         scanId: payload.scanId,
         userId: payload.userId,
         budgetMs: DELETION_TASK_WORKER_BUDGET_MS,
       })
-    : payload.kind === 'brand-history'
-      ? await drainBrandHistoryDeletion({
+      : payload.kind === 'brand-history'
+        ? await drainBrandHistoryDeletion({
           brandId: payload.brandId,
           userId: payload.userId,
           budgetMs: DELETION_TASK_WORKER_BUDGET_MS,
         })
-      : await drainBrandDeletion({
+        : await drainBrandDeletion({
           brandId: payload.brandId,
           userId: payload.userId,
           budgetMs: DELETION_TASK_WORKER_BUDGET_MS,
