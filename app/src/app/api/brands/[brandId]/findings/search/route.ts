@@ -129,6 +129,10 @@ function parseSearchScope(value?: string | null): FindingSearchScope {
   return 'scans';
 }
 
+function parseIncludeCount(value?: string | null) {
+  return value === '1' || value === 'true';
+}
+
 function encodeCursor(cursor: SearchCursor) {
   return Buffer.from(JSON.stringify(cursor), 'utf8').toString('base64url');
 }
@@ -277,6 +281,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   const scanId = request.nextUrl.searchParams.get('scanId')?.trim() ?? '';
   const scope = parseSearchScope(request.nextUrl.searchParams.get('tab'));
   const resultLimit = parseResultLimit(request.nextUrl.searchParams.get('limit'));
+  const includeCount = parseIncludeCount(request.nextUrl.searchParams.get('includeCount'));
   const parsedCursor = decodeCursor(request.nextUrl.searchParams.get('cursor'));
 
   const brandDoc = await db.collection('brands').doc(brandId).get();
@@ -291,6 +296,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         nextCursor: null,
         hasMore: false,
         truncated: false,
+        ...(includeCount ? { totalCount: 0 } : {}),
       },
     });
   }
@@ -301,6 +307,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         nextCursor: null,
         hasMore: false,
         truncated: false,
+        ...(includeCount ? { totalCount: 0 } : {}),
       },
     });
   }
@@ -313,6 +320,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         nextCursor: null,
         hasMore: false,
         truncated: false,
+        ...(includeCount ? { totalCount: 0 } : {}),
       },
     });
   }
@@ -324,6 +332,7 @@ export async function GET(request: NextRequest, { params }: Params) {
         nextCursor: null,
         hasMore: false,
         truncated: false,
+        ...(includeCount ? { totalCount: 0 } : {}),
       },
     });
   }
@@ -365,11 +374,12 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const collectedMatches: FindingSummary[] = [];
   const collectedMatchCursors: SearchCursor[] = [];
+  let matchedCount = 0;
   let lastScannedCursor = parsedCursor;
   let scannedFindings = 0;
   let exhausted = false;
 
-  while (collectedMatches.length < resultLimit + 1 && scannedFindings < MAX_SCANNED_FINDINGS) {
+  while ((includeCount || collectedMatches.length < resultLimit + 1) && scannedFindings < MAX_SCANNED_FINDINGS) {
     let pageQuery = orderedQuery.limit(SEARCH_SCAN_BATCH_SIZE);
     if (lastScannedCursor) {
       pageQuery = pageQuery.startAfter(
@@ -405,9 +415,12 @@ export async function GET(request: NextRequest, { params }: Params) {
         normalizedThemeSet,
         scope,
       })) {
-        collectedMatches.push(finding);
-        collectedMatchCursors.push(lastScannedCursor);
-        if (collectedMatches.length >= resultLimit + 1) {
+        matchedCount++;
+        if (collectedMatches.length < resultLimit + 1) {
+          collectedMatches.push(finding);
+          collectedMatchCursors.push(lastScannedCursor);
+        }
+        if (!includeCount && collectedMatches.length >= resultLimit + 1) {
           break;
         }
       }
@@ -449,6 +462,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     ? encodeCursor(visibleMatchCursors[visibleMatchCursors.length - 1])
     : null;
   const truncated = !hasMore && !exhausted && scannedFindings >= MAX_SCANNED_FINDINGS;
+  const totalCount = includeCount && exhausted ? matchedCount : undefined;
   const scanContextById = await loadScanContextById(
     Array.from(new Set(visibleMatches.map((finding) => finding.scanId))),
   );
@@ -469,6 +483,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       nextCursor,
       hasMore,
       truncated,
+      ...(totalCount !== undefined ? { totalCount } : {}),
     },
   });
 }

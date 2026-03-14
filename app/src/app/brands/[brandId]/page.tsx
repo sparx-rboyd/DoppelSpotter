@@ -9,6 +9,7 @@ import { createPortal } from 'react-dom';
 import {
   ArrowLeft, Play, AlertCircle, AlertTriangle, Info, Shield, Search, Loader2,
   ChevronDown, ChevronRight, Settings, Trash2, X, EyeOff, Bookmark, Link2, Check, RotateCcw,
+  ArrowUp,
   Sparkles, Crosshair, MessageSquare,
 } from 'lucide-react';
 import Link from 'next/link';
@@ -66,6 +67,7 @@ const RETURN_TO_DASHBOARD_VALUE = 'dashboard';
 const FINDING_SEARCH_MIN_QUERY_LENGTH = 2;
 const FINDING_SEARCH_DEBOUNCE_MS = 250;
 const FINDING_SEARCH_RESULTS_PAGE_SIZE = 50;
+const BACK_TO_TOP_VISIBILITY_OFFSET_PX = 640;
 
 function hasActiveHistoryDeletion(brand?: Pick<BrandProfile, 'historyDeletion'> | null) {
   const status = brand?.historyDeletion?.status;
@@ -656,6 +658,7 @@ export default function BrandDetailPage() {
   const [debouncedFindingsSearchQuery, setDebouncedFindingsSearchQuery] = useState('');
   const [serverSearchLoading, setServerSearchLoading] = useState(false);
   const [searchResults, setSearchResults] = useState<FindingSearchResult[]>([]);
+  const [searchResultsTotalCount, setSearchResultsTotalCount] = useState<number | null>(null);
   const [searchResultsNextCursor, setSearchResultsNextCursor] = useState<string | null>(null);
   const [searchResultsError, setSearchResultsError] = useState('');
   const [searchResultsTruncated, setSearchResultsTruncated] = useState(false);
@@ -672,6 +675,7 @@ export default function BrandDetailPage() {
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
   const [isBulkReclassifyDialogOpen, setIsBulkReclassifyDialogOpen] = useState(false);
   const [selectedBulkReclassificationCategory, setSelectedBulkReclassificationCategory] = useState<FindingCategory | null>(null);
+  const [showBackToTopLink, setShowBackToTopLink] = useState(false);
   const [confirmDeleteScanId, setConfirmDeleteScanId] = useState<string | null>(null);
   const [deletingScanId, setDeletingScanId] = useState<string | null>(null);
   const [exportingCsvScanId, setExportingCsvScanId] = useState<string | null>(null);
@@ -790,6 +794,30 @@ export default function BrandDetailPage() {
   }, [isAnyFindingFilterActive]);
 
   useEffect(() => {
+    let frameId: number | null = null;
+
+    function updateBackToTopVisibility() {
+      frameId = null;
+      setShowBackToTopLink(window.scrollY > BACK_TO_TOP_VISIBILITY_OFFSET_PX);
+    }
+
+    function handleScroll() {
+      if (frameId !== null) return;
+      frameId = window.requestAnimationFrame(updateBackToTopVisibility);
+    }
+
+    updateBackToTopVisibility();
+    window.addEventListener('scroll', handleScroll, { passive: true });
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll);
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isRunScanMenuOpen) return undefined;
 
     function handlePointerDown(event: MouseEvent) {
@@ -897,6 +925,7 @@ export default function BrandDetailPage() {
     setFindingsSearchQuery('');
     setDebouncedFindingsSearchQuery('');
     setSearchResults([]);
+    setSearchResultsTotalCount(null);
     setSearchResultsNextCursor(null);
     setSearchResultsError('');
     setSearchResultsTruncated(false);
@@ -939,6 +968,9 @@ export default function BrandDetailPage() {
       tab: activeTab,
     });
 
+    if (!options?.append) {
+      params.set('includeCount', '1');
+    }
     if (options?.cursor) {
       params.set('cursor', options.cursor);
     }
@@ -959,6 +991,7 @@ export default function BrandDetailPage() {
       nextCursor?: string | null;
       hasMore?: boolean;
       truncated?: boolean;
+      totalCount?: number;
     };
     const nextResults = Array.isArray(responseData.results) ? responseData.results : [];
 
@@ -971,6 +1004,9 @@ export default function BrandDetailPage() {
       const appended = nextResults.filter((result) => !seen.has(result.id));
       return appended.length > 0 ? [...prev, ...appended] : prev;
     });
+    if (!options?.append) {
+      setSearchResultsTotalCount(typeof responseData.totalCount === 'number' ? responseData.totalCount : null);
+    }
     setSearchResultsNextCursor(responseData.hasMore ? (responseData.nextCursor ?? null) : null);
     setSearchResultsTruncated(responseData.truncated === true);
     setSearchResultsError('');
@@ -2364,6 +2400,7 @@ export default function BrandDetailPage() {
       setLoadingMoreSearchResults(false);
       if (activeTab === 'scans' || !isFindingsSearchActive) {
         setSearchResults([]);
+        setSearchResultsTotalCount(null);
         setSearchResultsNextCursor(null);
         setSearchResultsError('');
         setSearchResultsTruncated(false);
@@ -2377,6 +2414,7 @@ export default function BrandDetailPage() {
       setServerSearchLoading(false);
       setLoadingMoreSearchResults(false);
       setSearchResults([]);
+      setSearchResultsTotalCount(null);
       setSearchResultsNextCursor(null);
       setSearchResultsError('');
       setSearchResultsTruncated(false);
@@ -2397,6 +2435,7 @@ export default function BrandDetailPage() {
       }
 
       setSearchResults([]);
+      setSearchResultsTotalCount(null);
       setSearchResultsNextCursor(null);
       setSearchResultsTruncated(false);
       setSearchResultsError(err instanceof Error ? err.message : 'Failed to search findings');
@@ -3386,7 +3425,8 @@ export default function BrandDetailPage() {
         ? finding.isFalsePositive === true
         : finding.isFalsePositive !== true && finding.severity === category
     ));
-    const matchesSource = selectedFindingSourceSet.size === 0 || selectedFindingSourceSet.has(finding.source);
+    const matchesSource = selectedFindingSourceSet.size === 0
+      || (finding.source !== 'unknown' && selectedFindingSourceSet.has(finding.source));
     const matchesTheme = !hasActiveFindingThemeFilter
       || normalizedSelectedFindingThemeSet.has(normalizeFindingsTaxonomyValue(finding.theme));
 
@@ -3461,6 +3501,9 @@ export default function BrandDetailPage() {
   const isSearchResultsMode = shouldUseServerFindingSearch;
   const isSearchQueryTooShort = isSearchResultsMode && !canRunServerFindingSearch;
   const searchResultsCountLabel = `${formatInteger(searchResults.length)} result${searchResults.length !== 1 ? 's' : ''}`;
+  const searchResultsStatusText = searchResultsTotalCount !== null && searchResultsTotalCount > searchResults.length
+    ? `Showing ${formatInteger(searchResults.length)} of ${formatInteger(searchResultsTotalCount)} results that match the current ${activeFindingsFilterLabel}.`
+    : `Showing ${searchResultsCountLabel} that match the current ${activeFindingsFilterLabel}.`;
   const scansToRender = isAnyFindingFilterActive
     ? scans.filter((scan) => {
         const hits = filterFindings(scanFindings[scan.id]) ?? [];
@@ -3487,7 +3530,7 @@ export default function BrandDetailPage() {
   return (
     <AuthGuard>
       <Navbar />
-      <main className="min-h-screen bg-gray-50 pt-16 lg:pt-[4.5rem]">
+      <main id="brand-detail-top" className="min-h-screen bg-gray-50 pt-16 lg:pt-[4.5rem]">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8 lg:py-10 xl:max-w-[88rem]">
 
           {/* Back link */}
@@ -3815,7 +3858,7 @@ export default function BrandDetailPage() {
                                         ? 'Searching findings across all result sets...'
                                     : searchResultsError
                                       ? searchResultsError
-                                      : `Showing ${searchResultsCountLabel} that match the current ${activeFindingsFilterLabel}.`
+                                      : searchResultsStatusText
                               )
                               : (
                                     activeCrossScanTabLoading
@@ -3950,25 +3993,6 @@ export default function BrandDetailPage() {
                           </div>
                         ) : (
                           <>
-                            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 lg:px-5 lg:py-4">
-                              <div className="min-w-0">
-                                <p className="text-sm font-medium text-gray-700">
-                                  Search results
-                                  <span className="ml-2 text-xs font-normal text-gray-500">
-                                    {searchResultsCountLabel}
-                                  </span>
-                                </p>
-                                <p className="mt-1 text-xs text-gray-500">
-                                  Matching findings visible in the current tab.
-                                </p>
-                              </div>
-                              {searchResultsTruncated && (
-                                <span className="text-xs text-amber-700">
-                                  Refine your query to search more precisely.
-                                </span>
-                              )}
-                            </div>
-
                             <div className="space-y-4 lg:space-y-5">
                               {searchResults.map((result) => (
                                 <div key={result.id} className="space-y-3 rounded-xl border border-gray-200 bg-white p-4 lg:space-y-4 lg:p-5">
@@ -5043,6 +5067,20 @@ export default function BrandDetailPage() {
             </>
           )}
         </div>
+
+        {showBackToTopLink && selectedFindings.length === 0 && (
+          <a
+            href="#brand-detail-top"
+            onClick={(event) => {
+              event.preventDefault();
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="fixed bottom-5 right-4 z-30 inline-flex items-center gap-1.5 rounded-full border border-gray-200/90 bg-white/95 px-3 py-1.5 text-xs font-medium text-gray-500 shadow-sm backdrop-blur transition hover:border-gray-300 hover:text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 sm:bottom-6 sm:right-6"
+          >
+            <ArrowUp className="h-3.5 w-3.5" />
+            Back to top
+          </a>
+        )}
 
         {selectedFindings.length > 0 && (
           <div className="fixed inset-x-0 bottom-6 z-40 flex justify-center px-4 pointer-events-none">
