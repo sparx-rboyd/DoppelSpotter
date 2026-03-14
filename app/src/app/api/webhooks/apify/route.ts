@@ -135,6 +135,7 @@ const GITHUB_ANALYSIS_CHUNK_SIZE = 10;
 const GITHUB_ANALYSIS_CONCURRENCY = 6;
 const X_ANALYSIS_CHUNK_SIZE = 10;
 const X_ANALYSIS_CONCURRENCY = 6;
+const FINDING_UPSERT_CONCURRENCY = 15;
 const MAX_GOOGLE_CONTEXT_SOURCE_QUERIES = 5;
 const GOOGLE_FINDING_ID_PREFIX = 'google';
 const GOOGLE_RAW_DATA_VERSION = 3;
@@ -1181,8 +1182,10 @@ async function analyseAndWriteGoogleBatch({
     });
   }
 
-  for (const { candidate, outcome } of outcomes.values()) {
-    const delta = await upsertGoogleFinding({
+  const deltas = await mapWithConcurrency(
+    [...outcomes.values()],
+    FINDING_UPSERT_CONCURRENCY,
+    async ({ candidate, outcome }) => upsertGoogleFinding({
       scanDoc,
       scan,
       source,
@@ -1195,8 +1198,10 @@ async function analyseAndWriteGoogleBatch({
       runContext: normalizedRun.runContext,
       outcome,
       scannerConfig,
-    });
+    }),
+  );
 
+  for (const delta of deltas) {
     findingCount += delta.findingCount;
     counts.high += delta.counts.high;
     counts.medium += delta.counts.medium;
@@ -1333,8 +1338,10 @@ async function analyseAndWriteRedditBatch({
     });
   }
 
-  for (const { candidate, outcome } of outcomes.values()) {
-    const delta = await upsertRedditFinding({
+  const deltas = await mapWithConcurrency(
+    [...outcomes.values()],
+    FINDING_UPSERT_CONCURRENCY,
+    async ({ candidate, outcome }) => upsertRedditFinding({
       scanDoc,
       scan,
       source,
@@ -1347,8 +1354,10 @@ async function analyseAndWriteRedditBatch({
       runContext: normalizedRun.runContext,
       outcome,
       scannerConfig,
-    });
+    }),
+  );
 
+  for (const delta of deltas) {
     findingCount += delta.findingCount;
     counts.high += delta.counts.high;
     counts.medium += delta.counts.medium;
@@ -1491,8 +1500,10 @@ async function analyseAndWriteTikTokBatch({
     });
   }
 
-  for (const { candidate, outcome } of outcomes.values()) {
-    const delta = await upsertTikTokFinding({
+  const deltas = await mapWithConcurrency(
+    [...outcomes.values()],
+    FINDING_UPSERT_CONCURRENCY,
+    async ({ candidate, outcome }) => upsertTikTokFinding({
       scanDoc,
       scan,
       source,
@@ -1507,8 +1518,10 @@ async function analyseAndWriteTikTokBatch({
       runContext: normalizedRun.runContext,
       outcome,
       scannerConfig,
-    });
+    }),
+  );
 
+  for (const delta of deltas) {
     findingCount += delta.findingCount;
     counts.high += delta.counts.high;
     counts.medium += delta.counts.medium;
@@ -1630,8 +1643,10 @@ async function analyseAndWriteDiscordBatch({
     }
   }
 
-  for (const { candidate, outcome } of outcomes.values()) {
-    const delta = await upsertDiscordFinding({
+  const deltas = await mapWithConcurrency(
+    [...outcomes.values()],
+    FINDING_UPSERT_CONCURRENCY,
+    async ({ candidate, outcome }) => upsertDiscordFinding({
       scanDoc,
       scan,
       source,
@@ -1644,8 +1659,10 @@ async function analyseAndWriteDiscordBatch({
       runContext: normalizedRun.runContext,
       outcome,
       scannerConfig,
-    });
+    }),
+  );
 
+  for (const delta of deltas) {
     findingCount += delta.findingCount;
     counts.high += delta.counts.high;
     counts.medium += delta.counts.medium;
@@ -1767,8 +1784,10 @@ async function analyseAndWriteDomainRegistrationBatch({
     }
   }
 
-  for (const { candidate, outcome } of outcomes.values()) {
-    const delta = await upsertDomainRegistrationFinding({
+  const deltas = await mapWithConcurrency(
+    [...outcomes.values()],
+    FINDING_UPSERT_CONCURRENCY,
+    async ({ candidate, outcome }) => upsertDomainRegistrationFinding({
       scanDoc,
       scan,
       source,
@@ -1781,8 +1800,10 @@ async function analyseAndWriteDomainRegistrationBatch({
       runContext: normalizedRun.runContext,
       outcome,
       scannerConfig,
-    });
+    }),
+  );
 
+  for (const delta of deltas) {
     findingCount += delta.findingCount;
     counts.high += delta.counts.high;
     counts.medium += delta.counts.medium;
@@ -1919,6 +1940,10 @@ async function analyseAndWriteXBatch({
   }
 
   const seenRealAccountKeys = new Set(previousAccountKeys ?? []);
+  const outcomesToWrite: Array<{
+    candidate: XTweetCandidate;
+    outcome: XFindingOutcome;
+  }> = [];
   for (const { candidate, outcome } of outcomes.values()) {
     const accountKey = buildXAccountKey({
       authorId: candidate.author.id,
@@ -1928,7 +1953,17 @@ async function analyseAndWriteXBatch({
       continue;
     }
 
-    const delta = await upsertXFinding({
+    outcomesToWrite.push({ candidate, outcome });
+
+    if (!outcome.isFalsePositive && accountKey) {
+      seenRealAccountKeys.add(accountKey);
+    }
+  }
+
+  const deltas = await mapWithConcurrency(
+    outcomesToWrite,
+    FINDING_UPSERT_CONCURRENCY,
+    async ({ candidate, outcome }) => upsertXFinding({
       scanDoc,
       scan,
       source,
@@ -1941,17 +1976,15 @@ async function analyseAndWriteXBatch({
       runContext: normalizedRun.runContext,
       outcome,
       scannerConfig,
-    });
+    }),
+  );
 
+  for (const delta of deltas) {
     findingCount += delta.findingCount;
     counts.high += delta.counts.high;
     counts.medium += delta.counts.medium;
     counts.low += delta.counts.low;
     counts.nonHit += delta.counts.nonHit;
-
-    if (!outcome.isFalsePositive && accountKey) {
-      seenRealAccountKeys.add(accountKey);
-    }
   }
 
   return { findingCount, suggestedSearches, counts, skippedDuplicateCount };
@@ -2067,8 +2100,10 @@ async function analyseAndWriteGitHubBatch({
     }
   }
 
-  for (const { candidate, outcome } of outcomes.values()) {
-    const delta = await upsertGitHubFinding({
+  const deltas = await mapWithConcurrency(
+    [...outcomes.values()],
+    FINDING_UPSERT_CONCURRENCY,
+    async ({ candidate, outcome }) => upsertGitHubFinding({
       scanDoc,
       scan,
       source,
@@ -2081,8 +2116,10 @@ async function analyseAndWriteGitHubBatch({
       runContext: normalizedRun.runContext,
       outcome,
       scannerConfig,
-    });
+    }),
+  );
 
+  for (const delta of deltas) {
     findingCount += delta.findingCount;
     counts.high += delta.counts.high;
     counts.medium += delta.counts.medium;
