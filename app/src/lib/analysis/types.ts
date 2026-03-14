@@ -972,8 +972,20 @@ export function parseThemeNormalizationOutputWithDiagnostics(
         continue;
       }
 
+      if (!canonicalTheme) {
+        diagnostics.issues.push({
+          provisionalTheme: provisionalTheme || undefined,
+          canonicalTheme: typeof item.canonicalTheme === 'string' ? item.canonicalTheme.trim() : undefined,
+          reasons: ['invalid_canonical_theme_after_validation'],
+        });
+        continue;
+      }
+
       seenThemes.add(provisionalTheme);
-      mappings.push({ provisionalTheme, canonicalTheme });
+      mappings.push({
+        provisionalTheme,
+        canonicalTheme,
+      });
     }
 
     diagnostics.acceptedMappingCount = mappings.length;
