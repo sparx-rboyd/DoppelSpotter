@@ -125,6 +125,19 @@ export interface ThemeNormalizationOutput {
   mappings: ThemeNormalizationMapping[];
 }
 
+export interface ThemeNormalizationParseIssue {
+  provisionalTheme?: string;
+  canonicalTheme?: string;
+  reasons: string[];
+}
+
+export interface ThemeNormalizationParseDiagnostics {
+  rawMappingCount: number;
+  acceptedMappingCount: number;
+  missingProvisionalThemes: string[];
+  issues: ThemeNormalizationParseIssue[];
+}
+
 /**
  * Compact stored debug payload for Google findings.
  */
@@ -892,41 +905,91 @@ export function parseThemeNormalizationOutput(
   raw: string,
   validProvisionalThemes: Set<string>,
 ): ThemeNormalizationOutput | null {
+  return parseThemeNormalizationOutputWithDiagnostics(raw, validProvisionalThemes).output;
+}
+
+export function parseThemeNormalizationOutputWithDiagnostics(
+  raw: string,
+  validProvisionalThemes: Set<string>,
+): {
+  output: ThemeNormalizationOutput | null;
+  diagnostics: ThemeNormalizationParseDiagnostics;
+} {
+  const diagnostics: ThemeNormalizationParseDiagnostics = {
+    rawMappingCount: 0,
+    acceptedMappingCount: 0,
+    missingProvisionalThemes: [],
+    issues: [],
+  };
+
   try {
     const stripped = stripJsonFences(raw);
     const parsed = JSON.parse(stripped);
     if (!Array.isArray(parsed.mappings) || parsed.mappings.length === 0) {
-      return null;
+      diagnostics.issues.push({
+        reasons: ['missing_or_empty_mappings_array'],
+      });
+      diagnostics.missingProvisionalThemes = [...validProvisionalThemes];
+      return { output: null, diagnostics };
     }
 
     const seenThemes = new Set<string>();
-    const mappings: ThemeNormalizationMapping[] = parsed.mappings
-      .filter(
-        (item: unknown): item is Record<string, unknown> =>
-          typeof item === 'object' && item !== null,
-      )
-      .map((item: Record<string, unknown>) => {
-        const provisionalTheme = typeof item.provisionalTheme === 'string'
-          ? item.provisionalTheme.trim()
-          : '';
-        const canonicalTheme = normalizeFindingTaxonomyLabel(item.canonicalTheme);
-        return { provisionalTheme, canonicalTheme };
-      })
-      .filter(
-        (item: { provisionalTheme: string; canonicalTheme: string | undefined }): item is ThemeNormalizationMapping =>
-          item.provisionalTheme.length > 0
-          && validProvisionalThemes.has(item.provisionalTheme)
-          && !seenThemes.has(item.provisionalTheme)
-          && typeof item.canonicalTheme === 'string',
-      )
-      .map((item: ThemeNormalizationMapping) => {
-        seenThemes.add(item.provisionalTheme);
-        return item;
-      });
+    diagnostics.rawMappingCount = parsed.mappings.length;
+    const mappings: ThemeNormalizationMapping[] = [];
 
-    return mappings.length > 0 ? { mappings } : null;
-  } catch {
-    return null;
+    for (const item of parsed.mappings) {
+      if (typeof item !== 'object' || item === null) {
+        diagnostics.issues.push({ reasons: ['mapping_not_object'] });
+        continue;
+      }
+
+      const provisionalTheme = typeof item.provisionalTheme === 'string'
+        ? item.provisionalTheme.trim()
+        : '';
+      const canonicalTheme = normalizeFindingTaxonomyLabel(item.canonicalTheme);
+      const reasons: string[] = [];
+
+      if (!provisionalTheme) {
+        reasons.push('missing_provisional_theme');
+      } else if (!validProvisionalThemes.has(provisionalTheme)) {
+        reasons.push('unknown_provisional_theme');
+      }
+
+      if (provisionalTheme && seenThemes.has(provisionalTheme)) {
+        reasons.push('duplicate_provisional_theme');
+      }
+
+      if (typeof canonicalTheme !== 'string') {
+        reasons.push('invalid_canonical_theme');
+      }
+
+      if (reasons.length > 0) {
+        diagnostics.issues.push({
+          provisionalTheme: provisionalTheme || undefined,
+          canonicalTheme: typeof item.canonicalTheme === 'string' ? item.canonicalTheme.trim() : undefined,
+          reasons,
+        });
+        continue;
+      }
+
+      seenThemes.add(provisionalTheme);
+      mappings.push({ provisionalTheme, canonicalTheme });
+    }
+
+    diagnostics.acceptedMappingCount = mappings.length;
+    diagnostics.missingProvisionalThemes = [...validProvisionalThemes].filter((theme) => !seenThemes.has(theme));
+
+    return {
+      output: mappings.length > 0 ? { mappings } : null,
+      diagnostics,
+    };
+  } catch (error) {
+    diagnostics.issues.push({
+      reasons: ['json_parse_failed'],
+      canonicalTheme: error instanceof Error ? error.message : undefined,
+    });
+    diagnostics.missingProvisionalThemes = [...validProvisionalThemes];
+    return { output: null, diagnostics };
   }
 }
 

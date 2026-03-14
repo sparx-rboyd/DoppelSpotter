@@ -11,7 +11,7 @@ import {
   THEME_NORMALIZATION_SYSTEM_PROMPT,
   buildThemeNormalizationPrompt,
 } from './prompts';
-import { parseThemeNormalizationOutput } from './types';
+import { parseThemeNormalizationOutputWithDiagnostics } from './types';
 
 type ThemeNormalizationGroup = {
   provisionalTheme: string;
@@ -38,7 +38,10 @@ type ScanFindingSnapshot = QueryDocumentSnapshot;
 
 export async function normalizeAndPersistScanThemes(params: ScanThemeNormalizationParams): Promise<void> {
   const pendingFindings = await loadPendingThemeFindings(params);
-  if (pendingFindings.length === 0) return;
+  if (pendingFindings.length === 0) {
+    console.info(`[theme-normalization] Scan ${params.scanId}: no findings with provisional themes to normalize`);
+    return;
+  }
 
   const historicalThemes = (
     await loadBrandFindingTaxonomy({
@@ -48,21 +51,32 @@ export async function normalizeAndPersistScanThemes(params: ScanThemeNormalizati
     })
   ).themes;
   const provisionalGroups = buildThemeNormalizationGroups(pendingFindings);
-  if (provisionalGroups.length === 0) return;
+  if (provisionalGroups.length === 0) {
+    console.info(`[theme-normalization] Scan ${params.scanId}: no provisional theme groups remained after normalization pre-filtering`);
+    return;
+  }
 
   const brandName = params.brandName ?? await loadBrandName(params.brandId);
+  console.info(
+    `[theme-normalization] Scan ${params.scanId}: starting normalization for ${pendingFindings.length} findings across ${provisionalGroups.length} provisional groups` +
+    ` (historical themes: ${historicalThemes.length}). Provisional themes: ${provisionalGroups.map((group) => group.provisionalTheme).join(', ')}`,
+  );
   const mappingByKey = await buildThemeNormalizationMap({
+    scanId: params.scanId,
     brandName,
     historicalThemes,
     provisionalGroups,
   });
 
-  await applyThemeMappingToFindings(pendingFindings, mappingByKey);
+  await applyThemeMappingToFindings(params.scanId, pendingFindings, mappingByKey);
 }
 
 export async function promoteProvisionalThemesForScan(params: Omit<ScanThemeNormalizationParams, 'brandName'>): Promise<void> {
   const pendingFindings = await loadPendingThemeFindings(params);
-  if (pendingFindings.length === 0) return;
+  if (pendingFindings.length === 0) {
+    console.info(`[theme-normalization] Scan ${params.scanId}: no provisional themes to promote during recovery`);
+    return;
+  }
 
   const fallbackMap = new Map<string, string>();
   for (const doc of pendingFindings) {
@@ -75,7 +89,10 @@ export async function promoteProvisionalThemesForScan(params: Omit<ScanThemeNorm
     );
   }
 
-  await applyThemeMappingToFindings(pendingFindings, fallbackMap);
+  console.warn(
+    `[theme-normalization] Scan ${params.scanId}: promoting ${fallbackMap.size} provisional themes directly during recovery without LLM canonicalisation`,
+  );
+  await applyThemeMappingToFindings(params.scanId, pendingFindings, fallbackMap);
 }
 
 async function loadPendingThemeFindings(
@@ -159,11 +176,12 @@ function buildThemeNormalizationGroups(findings: ScanFindingSnapshot[]): ThemeNo
 }
 
 async function buildThemeNormalizationMap(params: {
+  scanId: string;
   brandName: string;
   historicalThemes: string[];
   provisionalGroups: ThemeNormalizationGroup[];
 }): Promise<Map<string, string>> {
-  const { brandName, historicalThemes, provisionalGroups } = params;
+  const { scanId, brandName, historicalThemes, provisionalGroups } = params;
   const provisionalThemes = provisionalGroups.map((group) => group.provisionalTheme);
   const fallbackMap = new Map<string, string>(
     provisionalThemes.map((theme) => [
@@ -191,9 +209,24 @@ async function buildThemeNormalizationMap(params: {
       { role: 'user', content: prompt },
     ], { temperature: 0.1 });
 
-    const parsed = parseThemeNormalizationOutput(raw, new Set(provisionalThemes));
+    console.info(
+      `[theme-normalization] Scan ${scanId}: raw LLM response preview: ${truncateForLog(raw, 1200)}`,
+    );
+
+    const { output: parsed, diagnostics } = parseThemeNormalizationOutputWithDiagnostics(raw, new Set(provisionalThemes));
+    console.info(
+      `[theme-normalization] Scan ${scanId}: parser accepted ${diagnostics.acceptedMappingCount}/${diagnostics.rawMappingCount} raw mappings;` +
+      ` missing provisional themes: ${diagnostics.missingProvisionalThemes.length > 0 ? diagnostics.missingProvisionalThemes.join(', ') : 'none'}`,
+    );
+    if (diagnostics.issues.length > 0) {
+      console.warn(
+        `[theme-normalization] Scan ${scanId}: parser issues: ${JSON.stringify(diagnostics.issues.slice(0, 10))}` +
+        `${diagnostics.issues.length > 10 ? ` (and ${diagnostics.issues.length - 10} more)` : ''}`,
+      );
+    }
+
     if (!parsed) {
-      throw new Error(`Failed to parse theme normalization output: ${raw.slice(0, 200)}`);
+      throw new Error(`Failed to parse theme normalization output: ${truncateForLog(raw, 200)}`);
     }
 
     const resolvedMap = new Map(fallbackMap);
@@ -203,17 +236,35 @@ async function buildThemeNormalizationMap(params: {
         resolveCanonicalThemeLabel(mapping.canonicalTheme, historicalThemes, provisionalThemes),
       );
     }
+
+    const changedMappings = provisionalThemes.filter((theme) => {
+      const resolved = resolvedMap.get(normalizeThemeKey(theme));
+      return typeof resolved === 'string' && normalizeThemeKey(resolved) !== normalizeThemeKey(theme);
+    });
+    console.info(
+      `[theme-normalization] Scan ${scanId}: resolved mappings: ${formatMappingSummary(resolvedMap)}`,
+    );
+    console.info(
+      `[theme-normalization] Scan ${scanId}: ${changedMappings.length}/${provisionalThemes.length} provisional themes mapped to a different canonical label`,
+    );
     return resolvedMap;
   } catch (error) {
-    console.error('[theme-normalization] Failed to canonicalise provisional themes:', error);
+    console.error(`[theme-normalization] Scan ${scanId}: failed to canonicalise provisional themes; falling back to identity map`, error);
+    console.info(
+      `[theme-normalization] Scan ${scanId}: fallback mappings: ${formatMappingSummary(fallbackMap)}`,
+    );
     return fallbackMap;
   }
 }
 
 async function applyThemeMappingToFindings(
+  scanId: string,
   findings: ScanFindingSnapshot[],
   mappingByKey: Map<string, string>,
 ): Promise<void> {
+  let changedFindingCount = 0;
+  let unchangedFindingCount = 0;
+
   await runWriteBatchInChunks(findings, (batch, doc) => {
     const provisionalTheme = normalizeFindingTaxonomyLabel(doc.get('provisionalTheme'));
     if (!provisionalTheme) {
@@ -224,12 +275,21 @@ async function applyThemeMappingToFindings(
     const existingTheme = normalizeFindingTaxonomyLabel(doc.get('theme'));
     const mappedTheme = mappingByKey.get(normalizeThemeKey(provisionalTheme));
     const finalTheme = mappedTheme ?? existingTheme ?? provisionalTheme;
+    if (normalizeThemeKey(finalTheme) === normalizeThemeKey(provisionalTheme)) {
+      unchangedFindingCount++;
+    } else {
+      changedFindingCount++;
+    }
 
     batch.update(doc.ref, {
       theme: finalTheme,
       provisionalTheme: FieldValue.delete(),
     });
   });
+
+  console.info(
+    `[theme-normalization] Scan ${scanId}: applied final themes to ${findings.length} findings (${changedFindingCount} changed, ${unchangedFindingCount} unchanged)`,
+  );
 }
 
 function resolveCanonicalThemeLabel(
@@ -285,4 +345,16 @@ function dedupeFindingSources(values: FindingSource[]): FindingSource[] {
   }
 
   return deduped;
+}
+
+function formatMappingSummary(mappingByKey: Map<string, string>): string {
+  const entries = [...mappingByKey.entries()]
+    .map(([key, value]) => `${key} -> ${value}`)
+    .sort((left, right) => left.localeCompare(right, 'en', { sensitivity: 'base' }));
+  return entries.length > 0 ? entries.join('; ') : 'none';
+}
+
+function truncateForLog(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
 }

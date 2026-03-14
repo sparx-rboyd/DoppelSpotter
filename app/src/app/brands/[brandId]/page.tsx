@@ -2481,17 +2481,23 @@ export default function BrandDetailPage() {
     selectedFindingThemes,
   ]);
 
-  const availableFindingThemes = useMemo(() => collectDistinctFindingTaxonomyLabels([
-    ...findingTaxonomyOptions.themes,
-    ...allBookmarkedFindings.map((finding) => finding.theme),
-    ...allAddressedFindings.map((finding) => finding.theme),
-    ...allIgnoredFindings.map((finding) => finding.theme),
-    ...liveScanFindings.map((finding) => finding.theme),
-    ...liveScanNonHits.map((finding) => finding.theme),
-    ...Object.values(scanFindings).flat().map((finding) => finding.theme),
-    ...Object.values(scanNonHits).flat().map((finding) => finding.theme),
-    ...Object.values(scanIgnored).flat().map((finding) => finding.theme),
-  ]), [
+  const availableFindingThemes = useMemo(() => {
+    if (hasLoadedFindingTaxonomyOptions) {
+      return collectDistinctFindingTaxonomyLabels(findingTaxonomyOptions.themes);
+    }
+
+    return collectDistinctFindingTaxonomyLabels([
+      ...allBookmarkedFindings.map((finding) => finding.theme),
+      ...allAddressedFindings.map((finding) => finding.theme),
+      ...allIgnoredFindings.map((finding) => finding.theme),
+      ...liveScanFindings.map((finding) => finding.theme),
+      ...liveScanNonHits.map((finding) => finding.theme),
+      ...Object.values(scanFindings).flat().map((finding) => finding.theme),
+      ...Object.values(scanNonHits).flat().map((finding) => finding.theme),
+      ...Object.values(scanIgnored).flat().map((finding) => finding.theme),
+    ]);
+  }, [
+    hasLoadedFindingTaxonomyOptions,
     findingTaxonomyOptions.themes,
     allBookmarkedFindings,
     allAddressedFindings,
@@ -2955,7 +2961,15 @@ export default function BrandDetailPage() {
       setIgnoredFindingsTruncated(false);
       setFindingTaxonomyOptions({ themes: [] });
       setExpandedScanIds([]);
+      setScanning(false);
+      setCancelling(false);
+      setOptimisticActiveScanSettings(null);
+      setActiveScanId(null);
       setActiveScan(null);
+      setLiveScanFindings([]);
+      setLiveScanNonHits([]);
+      setShowLiveScanNonHits(false);
+      clearStoredScanId(brandId);
       await refreshBrandProfile().catch(() => {
         // Non-critical
       });
