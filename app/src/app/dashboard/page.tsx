@@ -503,7 +503,7 @@ export default function DashboardPage() {
             <DashboardCtaCard
               eyebrow="Get started"
               title="Create your first brand to get started"
-              description="Add the brand you want DoppelSpotter to monitor, then run scans to build up analytics, scan-type insights, and theme insights."
+              description="Add the brands you want DoppelSpotter to monitor, then run scans to surface your first actionable findings."
               href="/brands/new"
               actionLabel="Create your first brand"
               icon={Shield}
