@@ -1,16 +1,100 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { usePageTitle } from '@/lib/use-page-title';
 import Link from 'next/link';
-import { Plus, Shield, ChevronRight } from 'lucide-react';
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, ChevronRight, ListOrdered, Plus, Shield } from 'lucide-react';
 import { AuthGuard } from '@/components/auth-guard';
 import { Navbar } from '@/components/navbar';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { SelectDropdown, type SelectDropdownOption } from '@/components/ui/select-dropdown';
 import { formatScheduledRunAtShort } from '@/lib/scan-schedules';
 import type { BrandSummary } from '@/lib/types';
-import { formatDate, formatInteger } from '@/lib/utils';
+import { cn, formatDate, formatInteger } from '@/lib/utils';
+
+type BrandSortField = 'last_scan_date' | 'date_created' | 'alphabetical';
+type SortDirection = 'asc' | 'desc';
+
+const BRAND_SORT_OPTIONS: SelectDropdownOption[] = [
+  { value: 'last_scan_date', label: 'Last scan date' },
+  { value: 'date_created', label: 'Date created' },
+  { value: 'alphabetical', label: 'Alphabetically' },
+];
+
+function getComparableDateMs(
+  value: BrandSummary['lastScanStartedAt'] | BrandSummary['createdAt'] | Date | string | number | undefined,
+): number | null {
+  if (!value) return null;
+
+  if (typeof value === 'string' || typeof value === 'number') {
+    const parsed = new Date(value).getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if (value instanceof Date) {
+    const parsed = value.getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if (typeof (value as { toDate?: unknown }).toDate === 'function') {
+    const parsed = (value as { toDate(): Date }).toDate().getTime();
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  if ('_seconds' in value && typeof value._seconds === 'number') {
+    return value._seconds * 1000;
+  }
+
+  if ('seconds' in value && typeof value.seconds === 'number') {
+    return value.seconds * 1000;
+  }
+
+  return null;
+}
+
+function compareOptionalDates(
+  a: BrandSummary['lastScanStartedAt'] | BrandSummary['createdAt'] | undefined,
+  b: BrandSummary['lastScanStartedAt'] | BrandSummary['createdAt'] | undefined,
+  direction: SortDirection,
+): number {
+  const aMs = getComparableDateMs(a);
+  const bMs = getComparableDateMs(b);
+
+  if (aMs === null && bMs === null) return 0;
+  if (aMs === null) return 1;
+  if (bMs === null) return -1;
+
+  const difference = aMs - bMs;
+  return direction === 'asc' ? difference : -difference;
+}
+
+function sortBrands(brands: BrandSummary[], field: BrandSortField, direction: SortDirection): BrandSummary[] {
+  return [...brands].sort((a, b) => {
+    if (field === 'alphabetical') {
+      const nameComparison = a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      if (nameComparison !== 0) {
+        return direction === 'asc' ? nameComparison : -nameComparison;
+      }
+    }
+
+    if (field === 'date_created') {
+      const createdAtComparison = compareOptionalDates(a.createdAt, b.createdAt, direction);
+      if (createdAtComparison !== 0) {
+        return createdAtComparison;
+      }
+    }
+
+    if (field === 'last_scan_date') {
+      const lastScanComparison = compareOptionalDates(a.lastScanStartedAt, b.lastScanStartedAt, direction);
+      if (lastScanComparison !== 0) {
+        return lastScanComparison;
+      }
+    }
+
+    return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+  });
+}
 
 function getScanStatusLabel(brand: BrandSummary): string {
   if (brand.isScanInProgress) return 'Scan in progress';
@@ -32,6 +116,8 @@ export default function BrandsPage() {
   const [brands, setBrands] = useState<BrandSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [sortField, setSortField] = useState<BrandSortField>('last_scan_date');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   useEffect(() => {
     async function fetchBrands() {
@@ -50,6 +136,11 @@ export default function BrandsPage() {
     }
     fetchBrands();
   }, []);
+
+  const sortedBrands = useMemo(
+    () => sortBrands(brands, sortField, sortDirection),
+    [brands, sortDirection, sortField],
+  );
 
   return (
     <AuthGuard>
@@ -103,7 +194,38 @@ export default function BrandsPage() {
 
           {!loading && brands.length > 0 && (
             <div className="flex flex-col gap-4 lg:gap-5">
-              {brands.map((brand) => (
+              <div className="flex justify-end">
+                <div className="flex max-w-full items-center justify-end gap-2">
+                  <div className="w-56 max-w-[calc(100vw-6rem)] sm:min-w-56 sm:max-w-none">
+                    <SelectDropdown
+                      id="brands-sort-field"
+                      ariaLabel="Sort brands by"
+                      value={sortField}
+                      options={BRAND_SORT_OPTIONS}
+                      onChange={(value) => setSortField(value as BrandSortField)}
+                      buttonIcon={<ListOrdered className="h-4 w-4 text-brand-600" />}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'))}
+                    aria-label={`Sort ${sortDirection === 'asc' ? 'ascending' : 'descending'}`}
+                    title={sortDirection === 'asc' ? 'Ascending' : 'Descending'}
+                    className={cn(
+                      'inline-flex h-[38px] w-[38px] items-center justify-center rounded-md border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 lg:h-[46px] lg:w-[46px]',
+                      'bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900',
+                    )}
+                  >
+                    {sortDirection === 'asc' ? (
+                      <ArrowUpNarrowWide className="h-4 w-4" />
+                    ) : (
+                      <ArrowDownWideNarrow className="h-4 w-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {sortedBrands.map((brand) => (
                 <Link key={brand.id} href={`/brands/${brand.id}`}>
                   <Card className="hover:border-brand-300 transition cursor-pointer">
                     <CardContent className="flex items-center gap-4 py-4 lg:gap-5 lg:py-5">
