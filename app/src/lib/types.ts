@@ -301,6 +301,8 @@ export interface FindingSummary {
   theme?: string;
   llmAnalysis: string;
   url?: string;
+  /** Denormalized recent-domain-registration date for domain findings. */
+  registrationDate?: string;
   /** Denormalized X account id for account-level dedupe and UI subtext. */
   xAuthorId?: string;
   /** Denormalized X handle without the leading @. */

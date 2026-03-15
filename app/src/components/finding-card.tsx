@@ -110,6 +110,67 @@ function formatXHandleLabel(handle?: string) {
   return trimmedHandle.startsWith('@') ? trimmedHandle : `@${trimmedHandle}`;
 }
 
+function ordinalSuffix(value: number) {
+  const remainder100 = value % 100;
+  if (remainder100 >= 11 && remainder100 <= 13) {
+    return 'th';
+  }
+
+  switch (value % 10) {
+    case 1:
+      return 'st';
+    case 2:
+      return 'nd';
+    case 3:
+      return 'rd';
+    default:
+      return 'th';
+  }
+}
+
+function formatDomainRegistrationDate(value?: string) {
+  const trimmedValue = value?.trim();
+  if (!trimmedValue) return null;
+
+  const match = trimmedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return `Registered on ${trimmedValue}`;
+  }
+
+  const [, year, month, day] = match;
+  const utcDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (Number.isNaN(utcDate.getTime())) {
+    return `Registered on ${trimmedValue}`;
+  }
+
+  const monthLabel = utcDate.toLocaleString('en-GB', {
+    month: 'long',
+    timeZone: 'UTC',
+  });
+
+  const dayNumber = Number(day);
+  return `Registered on ${dayNumber}${ordinalSuffix(dayNumber)} ${monthLabel} ${year}`;
+}
+
+function buildSecondaryLabel(finding: FindingSummary) {
+  if (finding.source === 'domains') {
+    const domainLabel = extractDomainLabel(finding.url);
+    const registrationLabel = formatDomainRegistrationDate(finding.registrationDate);
+
+    if (domainLabel && registrationLabel) {
+      return `${domainLabel} | ${registrationLabel}`;
+    }
+
+    return domainLabel ?? registrationLabel;
+  }
+
+  if (finding.source === 'x') {
+    return formatXHandleLabel(finding.xAuthorHandle);
+  }
+
+  return null;
+}
+
 function truncateMiddle(value: string, maxLength = 44, headLength = 18, tailLength = 23) {
   if (value.length <= maxLength) {
     return value;
@@ -399,11 +460,7 @@ export function FindingCard({
     && highlightQuery?.trim()
     && finding.url.toLowerCase().includes(highlightQuery.trim().toLowerCase()),
   );
-  const secondaryLabel = finding.source === 'domains'
-    ? extractDomainLabel(finding.url)
-    : finding.source === 'x'
-      ? formatXHandleLabel(finding.xAuthorHandle)
-      : null;
+  const secondaryLabel = buildSecondaryLabel(finding);
   const truncatedSecondaryLabel = secondaryLabel ? truncateMiddle(secondaryLabel) : null;
   const isSecondaryLabelTruncated = Boolean(
     secondaryLabel

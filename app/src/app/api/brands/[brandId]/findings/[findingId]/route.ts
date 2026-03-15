@@ -91,6 +91,7 @@ function buildFindingSummary(
     theme: sourceFinding.theme,
     llmAnalysis: sourceFinding.llmAnalysis,
     url: sourceFinding.url,
+    registrationDate: sourceFinding.registrationDate,
     xAuthorId: sourceFinding.xAuthorId,
     xAuthorHandle: sourceFinding.xAuthorHandle,
     xAuthorUrl: sourceFinding.xAuthorUrl,

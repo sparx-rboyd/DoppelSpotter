@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { usePageTitle } from '@/lib/use-page-title';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -120,7 +120,7 @@ function formatDebugRawResponse(raw?: string) {
   }
 }
 
-export default function DashboardPage() {
+function DashboardPageContent() {
   usePageTitle('Dashboard');
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -685,7 +685,7 @@ export default function DashboardPage() {
               )}
 
               {!metricsLoading && metrics && !metrics.hasTerminalScans && (
-                selectedBrand.isHistoryDeletionInProgress ? null : metrics.activeScan ? (
+                metrics.activeScan ? (
                   <DashboardCtaCard
                     eyebrow="First scan in progress"
                     title="Your first scan is underway"
@@ -1101,5 +1101,13 @@ export default function DashboardPage() {
         document.body,
       )}
     </AuthGuard>
+  );
+}
+
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <DashboardPageContent />
+    </Suspense>
   );
 }

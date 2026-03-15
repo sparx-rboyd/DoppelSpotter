@@ -4509,6 +4509,7 @@ async function upsertDomainRegistrationFinding({
         description: preferredOutcome.analysis,
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.url,
+        ...(candidate.registrationDate ? { registrationDate: candidate.registrationDate } : {}),
         rawData: mergedRawData,
         isFalsePositive: preferredOutcome.isFalsePositive,
         ...(preferredOutcome.isFalsePositive && {
@@ -4538,6 +4539,7 @@ async function upsertDomainRegistrationFinding({
       description: preferredOutcome.analysis,
       llmAnalysis: preferredOutcome.analysis,
       url: candidate.url,
+      registrationDate: candidate.registrationDate ?? existing.registrationDate ?? FieldValue.delete(),
       rawData: mergedRawData,
       isFalsePositive: preferredOutcome.isFalsePositive,
     };

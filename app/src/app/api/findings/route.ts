@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
       'theme',
       'llmAnalysis',
       'url',
+      'registrationDate',
       'xAuthorId',
       'xAuthorHandle',
       'xAuthorUrl',

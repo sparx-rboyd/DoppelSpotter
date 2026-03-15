@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePageTitle } from '@/lib/use-page-title';
 import Image from 'next/image';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
@@ -615,7 +615,7 @@ function BulkActionButton({
 // Main page
 // ---------------------------------------------------------------------------
 
-export default function BrandDetailPage() {
+function BrandDetailPageContent() {
   const { brandId } = useParams<{ brandId: string }>();
   const pathname = usePathname();
   const router = useRouter();
@@ -5772,5 +5772,13 @@ export default function BrandDetailPage() {
         )}
       </main>
     </AuthGuard>
+  );
+}
+
+export default function BrandDetailPage() {
+  return (
+    <Suspense fallback={null}>
+      <BrandDetailPageContent />
+    </Suspense>
   );
 }

@@ -419,6 +419,7 @@ export async function GET(request: NextRequest, { params }: Params) {
       'theme',
       'llmAnalysis',
       'url',
+      'registrationDate',
       'xAuthorId',
       'xAuthorHandle',
       'xAuthorUrl',
