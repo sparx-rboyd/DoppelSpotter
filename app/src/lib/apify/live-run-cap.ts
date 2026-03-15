@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { ActorConfig } from '@/lib/apify/actors';
 import type { ActorRunInfo, QueuedActorRunInfo, Scan } from '@/lib/types';
 import type { PreparedActorInput } from './client';
@@ -25,6 +26,7 @@ export function buildQueuedActorRunInfo(
     scannerId: actorConfig.id,
     actorId: actorConfig.actorId,
     source: actorConfig.source,
+    launchId: randomUUID(),
     searchDepth,
     input: preparedInput.input,
     searchQuery: preparedInput.query,

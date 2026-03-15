@@ -617,6 +617,7 @@ export default function BrandDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const showDebug = searchParams.get('debug') === 'true';
+  const forceThrottlePanel = showDebug && searchParams.get('force_throttle_panel') === 'true';
   const backHref = searchParams.get(RETURN_TO_QUERY_PARAM) === RETURN_TO_DASHBOARD_VALUE
     ? '/dashboard'
     : '/brands';
@@ -2969,13 +2970,17 @@ export default function BrandDetailPage() {
       }
 
       const json = await res.json();
+      const scan = json.data.scan as Scan | undefined;
       const scanId: string = json.data.scanId;
-
-      setExpandedScanIds([]);
-      setActiveScanId(scanId);
-      setStoredScanId(brandId, scanId);
       setIsCustomScanDialogOpen(false);
-      startPolling(scanId);
+      if (scan) {
+        attachToActiveScan(scan, { collapseExpandedScans: true });
+      } else {
+        setExpandedScanIds([]);
+        setActiveScanId(scanId);
+        setStoredScanId(brandId, scanId);
+        startPolling(scanId);
+      }
     } catch (err) {
       setScanning(false);
       setOptimisticActiveScanSettings(null);
@@ -3501,6 +3506,8 @@ export default function BrandDetailPage() {
     : progressSourcesWithFallback[0];
   const activeProgressPct = displayedScanProgressPctBySource[activeProgressSource] ?? rawScanProgressPctBySource[activeProgressSource] ?? 0;
   const activeProgressSourceState = getProgressSourceState(activeProgressSource);
+  const activeApifyThrottleLaunchCount = activeScan?.apifyThrottle?.activeLaunchIds?.length ?? 0;
+  const showApifyThrottlePanel = scanning && (forceThrottlePanel || activeApifyThrottleLaunchCount > 0);
 
   function getDisplayedProgressPctForSource(source: FindingSource): number {
     return displayedScanProgressPctBySource[source] ?? rawScanProgressPctBySource[source] ?? 0;
@@ -4490,6 +4497,16 @@ export default function BrandDetailPage() {
                                           </Button>
                                         )}
                                       </div>
+                                      {showApifyThrottlePanel && (
+                                        <div className="mt-2 rounded-xl border border-brand-100 bg-brand-50/80 px-4 py-3 text-sm text-brand-700">
+                                          <div className="flex items-start gap-3">
+                                            <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-600" />
+                                            <p>
+                                              Lots of users are performing scans right now, so this scan may take a little longer than usual.
+                                            </p>
+                                          </div>
+                                        </div>
+                                      )}
                                       <div className="mt-4 pl-0 sm:pl-7 lg:mt-5">
                                         <div className="mb-5 flex flex-wrap items-center gap-2.5 lg:mb-6">
                                           {progressSourcesWithFallback.map((source) => {
@@ -4581,15 +4598,16 @@ export default function BrandDetailPage() {
                                   </div>
                                 </div>
                                 <div className="border-t border-brand-100 bg-brand-50/30 px-2 py-3 sm:px-6 sm:py-5 lg:px-7 lg:py-6">
-                                  {visibleLiveScanFindings.length === 0 && visibleLiveScanNonHits.length === 0 ? (
-                                    <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
-                                      <Loader2 className="w-4 h-4 animate-spin" />
-                                      <span className="text-sm">
-                                        {isAnyFindingFilterActive ? `No findings match the current ${activeFindingsFilterLabel} yet…` : 'Waiting for first results…'}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <div className="space-y-4 lg:space-y-5">
+                                  <div className="space-y-4 lg:space-y-5">
+                                    {visibleLiveScanFindings.length === 0 && visibleLiveScanNonHits.length === 0 ? (
+                                      <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
+                                        <Loader2 className="w-4 h-4 animate-spin" />
+                                        <span className="text-sm">
+                                          {isAnyFindingFilterActive ? `No findings match the current ${activeFindingsFilterLabel} yet…` : 'Waiting for first results…'}
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <div className="space-y-4 lg:space-y-5">
                                       {visibleLiveScanFindings.length === 0 ? (
                                         !isAnyFindingFilterActive && (
                                           <div className="flex flex-col items-center justify-center gap-2 py-6">
@@ -4673,8 +4691,9 @@ export default function BrandDetailPage() {
                                           )}
                                         </div>
                                       )}
-                                    </div>
-                                  )}
+                                      </div>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                             );

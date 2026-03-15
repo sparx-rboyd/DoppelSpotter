@@ -1,7 +1,6 @@
 import { FieldValue, type DocumentReference } from '@google-cloud/firestore';
 import { db } from './firestore';
 import type {
-  ActorRunInfo,
   BrandProfile,
   EffectiveScanSettings,
   QueuedActorRunInfo,
@@ -11,11 +10,14 @@ import type {
 import type { ActorConfig } from './apify/actors';
 import { resolveBrandAnalysisSeverityDefinitions } from './analysis-severity';
 import {
-  buildActorRunInfoFromQueuedRun,
-  buildPreparedActorInputFromQueuedRun,
   buildQueuedActorRunInfo,
-  getApifyMaxLiveRunsPerScan,
+  hasQueuedActorLaunchWork,
 } from './apify/live-run-cap';
+import {
+  clearScanApifyThrottleState,
+  drainQueuedActorRunsIfCapacity,
+  type ScanDocHandle,
+} from './apify/launch-queue';
 import { isBrandDeletionActive, isBrandHistoryDeletionActive } from './async-deletions';
 import { getEffectiveScanSettings } from './brands';
 import { DASHBOARD_SCAN_BREAKDOWNS_VERSION } from './dashboard';
@@ -48,7 +50,6 @@ type ScheduledStartOptions = {
 
 type StartScanForBrandParams = {
   brandId: string;
-  requestHeaders: Headers;
   ownerUserId?: string;
   scheduled?: ScheduledStartOptions;
   customSettings?: ScanSettingsInput;
@@ -62,6 +63,7 @@ export type StartScanForBrandResult =
       scanId: string;
       status: 'running';
       actorCount: number;
+      scan: Scan;
     }
   | {
       outcome: 'skipped';
@@ -79,8 +81,7 @@ type PreparedScanStart = {
 
 export async function startScanForBrand(params: StartScanForBrandParams): Promise<StartScanForBrandResult> {
   const { getTargetActorConfigs } = await import('@/lib/apify/actors');
-  const { buildActorInputs, startPreparedActorRun } = await import('@/lib/apify/client');
-  const { prepareUserPreferenceHintsForScan } = await import('@/lib/analysis/user-preference-hints');
+  const { buildActorInputs } = await import('@/lib/apify/client');
   const brandRef = db.collection('brands').doc(params.brandId);
   const scanRef = db.collection('scans').doc();
   const now = params.scheduled?.dispatchedAt ?? new Date();
@@ -244,150 +245,146 @@ export async function startScanForBrand(params: StartScanForBrandParams): Promis
   }
 
   const readyScan = preparedScan as PreparedScanStart;
-  const webhookUrl = `${buildAppUrl(params.requestHeaders)}/api/webhooks/apify`;
-  const targetSources = Array.from(new Set(readyScan.targetActors.map((actor) => actor.source)));
-
-  const actorStartPromise = (async () => {
-    const launchCandidates: Array<{ actorConfig: ActorConfig; queuedRun: QueuedActorRunInfo }> = [];
-
-    for (const actorConfig of readyScan.targetActors) {
-      try {
-        const preparedInputs = buildActorInputs(
-          actorConfig,
-          readyScan.brand,
-          readyScan.effectiveSettings,
-        );
-        for (const preparedInput of preparedInputs) {
-          launchCandidates.push({
-            actorConfig,
-            queuedRun: buildQueuedActorRunInfo(actorConfig, preparedInput, 0),
-          });
-        }
-      } catch (error) {
-        console.error(`[scan] Failed to prepare scanner ${actorConfig.id}:`, error);
-      }
-    }
-
-    const startedRuns: Array<{ runId: string; info: ActorRunInfo }> = [];
-    const queuedActorRuns: QueuedActorRunInfo[] = [];
-    let failedCount = 0;
-    const maxLiveRuns = getApifyMaxLiveRunsPerScan();
-
-    for (const candidate of launchCandidates) {
-      if (startedRuns.length >= maxLiveRuns) {
-        queuedActorRuns.push(candidate.queuedRun);
-        continue;
-      }
-
-      try {
-        const startedRun = await startPreparedActorRun(
-          candidate.actorConfig,
-          buildPreparedActorInputFromQueuedRun(candidate.queuedRun),
-          readyScan.effectiveSettings,
-          webhookUrl,
-        );
-        startedRuns.push({
-          runId: startedRun.runId,
-          info: buildActorRunInfoFromQueuedRun(candidate.queuedRun, startedRun),
-        });
-      } catch (error) {
-        failedCount += 1;
-        console.error(
-          `[apify] Failed to start ${candidate.queuedRun.scannerId} run for query "${candidate.queuedRun.displayQuery}":`,
-          error,
-        );
-      }
-    }
-
-    if (startedRuns.length === 0) {
-      if (failedCount > 0) {
-        console.error('[scan] Failed to start any initial actor runs');
-      }
-      return { successCount: 0 };
-    }
-
-    const updates: Record<string, unknown> = {
-      actorRunIds: FieldValue.arrayUnion(...startedRuns.map((run) => run.runId)),
-    };
-
-    for (const startedRun of startedRuns) {
-      updates[`actorRuns.${startedRun.runId}`] = startedRun.info;
-    }
-
-    if (queuedActorRuns.length > 0) {
-      updates.queuedActorRuns = queuedActorRuns;
-    }
-
-    await readyScan.scanRef.update(updates);
-
-    if (queuedActorRuns.length > 0) {
-      console.log(
-        `[scan] Queued ${queuedActorRuns.length} actor run(s) behind live-run cap ${maxLiveRuns} for scan ${readyScan.scanRef.id}`,
-      );
-    }
-    if (failedCount > 0) {
-      console.error(
-        `[scan] Started ${startedRuns.length} initial actor run(s); ${failedCount} run start(s) failed`,
-      );
-    } else {
-      console.log(
-        `[scan] Started ${startedRuns.length} initial actor run(s): ${startedRuns.map((run) => run.runId).join(', ')}`,
-      );
-    }
-
-    const successCount = startedRuns.length;
-    return { successCount };
-  })();
-
-  const preferenceHintsPromise = (async () => {
-    await prepareUserPreferenceHintsForScan({
-      scanRef: readyScan.scanRef,
-      brandId: params.brandId,
-      brandName: readyScan.brand.name,
-      userId: readyScan.brand.userId,
-      targetSources,
-    });
-
+  const queuedActorRuns: QueuedActorRunInfo[] = [];
+  for (const actorConfig of readyScan.targetActors) {
     try {
-      await replayDeferredSucceededCallbacks({
-        scanRef: readyScan.scanRef,
-        webhookUrl,
-      });
+      const preparedInputs = buildActorInputs(
+        actorConfig,
+        readyScan.brand,
+        readyScan.effectiveSettings,
+      );
+      for (const preparedInput of preparedInputs) {
+        queuedActorRuns.push(buildQueuedActorRunInfo(actorConfig, preparedInput, 0));
+      }
     } catch (error) {
-      console.error(`[scan] Failed to drain deferred succeeded runs for scan ${readyScan.scanRef.id}:`, error);
+      console.error(`[scan] Failed to prepare scanner ${actorConfig.id}:`, error);
     }
-  })();
+  }
 
-  const [{ successCount }] = await Promise.all([actorStartPromise, preferenceHintsPromise]);
-
-  if (successCount === 0) {
+  if (queuedActorRuns.length === 0) {
     await readyScan.scanRef.update({
       status: 'failed',
-      errorMessage: 'All actor runs failed to start',
+      errorMessage: 'Failed to prepare any actor runs',
       completedAt: FieldValue.serverTimestamp(),
     });
     await clearBrandActiveScanIfMatches(readyScan.brandRef, readyScan.scanRef.id);
-    throw new ScanStartError('Failed to start any actor runs', 500);
+    throw new ScanStartError('Failed to prepare any actor runs', 500);
   }
 
-  await db.runTransaction(async (tx) => {
-    const freshSnap = await tx.get(readyScan.scanRef);
-    if (!freshSnap.exists) return;
-
-    const fresh = scanFromSnapshot(freshSnap);
-    if (fresh.status !== 'pending') return;
-
-    tx.update(readyScan.scanRef, {
-      status: 'running',
-    });
+  await readyScan.scanRef.update({
+    status: 'running',
+    queuedActorRuns,
   });
+
+  const startedScanSnap = await readyScan.scanRef.get();
+  if (!startedScanSnap.exists) {
+    throw new ScanStartError('Scan disappeared before startup could begin', 500);
+  }
+  const startedScan = scanFromSnapshot(startedScanSnap);
 
   return {
     outcome: 'started',
     scanId: readyScan.scanRef.id,
     status: 'running',
-    actorCount: successCount,
+    actorCount: queuedActorRuns.length,
+    scan: startedScan,
   };
+}
+
+export async function kickoffReservedScan(params: {
+  scanId: string;
+  webhookUrl: string;
+}): Promise<void> {
+  const { scanId, webhookUrl } = params;
+  const { getTargetActorConfigs } = await import('@/lib/apify/actors');
+  const { prepareUserPreferenceHintsForScan } = await import('@/lib/analysis/user-preference-hints');
+  const scanRef = db.collection('scans').doc(scanId);
+  const initialScanSnap = await scanRef.get();
+  if (!initialScanSnap.exists) return;
+
+  const initialScan = scanFromSnapshot(initialScanSnap);
+  if (
+    initialScan.status === 'cancelled'
+    || initialScan.status === 'failed'
+    || initialScan.status === 'completed'
+    || initialScan.status === 'summarising'
+  ) {
+    return;
+  }
+
+  const brandRef = db.collection('brands').doc(initialScan.brandId);
+  const brandSnap = await brandRef.get();
+  if (!brandSnap.exists) {
+    await scanRef.update({
+      status: 'failed',
+      errorMessage: 'Brand not found while starting scan',
+      completedAt: FieldValue.serverTimestamp(),
+    });
+    await clearBrandActiveScanIfMatches(brandRef, scanId);
+    return;
+  }
+
+  const brand = brandSnap.data() as BrandProfile;
+  const targetSources = Array.from(
+    new Set(
+      getTargetActorConfigs(initialScan.effectiveSettings?.scanSources)
+        .map((actor) => actor.source),
+    ),
+  );
+  const scanDoc: ScanDocHandle = { id: scanId, ref: scanRef };
+
+  const preferenceHintsPromise = (async () => {
+    await prepareUserPreferenceHintsForScan({
+      scanRef,
+      brandId: initialScan.brandId,
+      brandName: brand.name,
+      userId: initialScan.userId,
+      targetSources,
+    });
+
+    try {
+      await replayDeferredSucceededCallbacks({
+        scanRef,
+        webhookUrl,
+      });
+    } catch (error) {
+      console.error(`[scan] Failed to drain deferred succeeded runs for scan ${scanId}:`, error);
+    }
+  })();
+
+  const [launchedCount] = await Promise.all([
+    drainQueuedActorRunsIfCapacity(scanDoc, webhookUrl),
+    preferenceHintsPromise,
+  ]);
+
+  const freshScanSnap = await scanRef.get();
+  if (!freshScanSnap.exists) return;
+
+  const freshScan = scanFromSnapshot(freshScanSnap);
+  if (
+    freshScan.status === 'cancelled'
+    || freshScan.status === 'failed'
+    || freshScan.status === 'completed'
+    || freshScan.status === 'summarising'
+  ) {
+    return;
+  }
+
+  if ((freshScan.actorRunIds?.length ?? 0) > 0 || hasQueuedActorLaunchWork(freshScan)) {
+    if (launchedCount > 0) {
+      console.log(`[scan] Started ${launchedCount} initial actor run(s) for scan ${scanId}`);
+    }
+    return;
+  }
+
+  await clearScanApifyThrottleState(scanRef);
+  await scanRef.update({
+    status: 'failed',
+    errorMessage: 'All actor runs failed to start',
+    completedAt: FieldValue.serverTimestamp(),
+  });
+  await clearBrandActiveScanIfMatches(brandRef, scanId);
+  console.error(`[scan] Failed to start any initial actor runs for scan ${scanId}`);
 }
 
 class ScheduledScanSkipError extends Error {

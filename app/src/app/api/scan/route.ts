@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { after, NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { FieldValue } from '@google-cloud/firestore';
@@ -21,9 +21,12 @@ import {
 } from '@/lib/scans';
 import {
   ActiveScanConflictError,
+  buildAppUrl,
+  kickoffReservedScan,
   ScanStartError,
   startScanForBrand,
 } from '@/lib/scan-runner';
+import { hasQueuedActorLaunchWork } from '@/lib/apify/live-run-cap';
 
 // POST /api/scan — trigger all enabled scan sources for a brand
 export async function POST(request: NextRequest) {
@@ -64,7 +67,6 @@ export async function POST(request: NextRequest) {
     const result = await startScanForBrand({
       brandId,
       ownerUserId: uid,
-      requestHeaders: request.headers,
       customSettings,
     });
 
@@ -72,8 +74,20 @@ export async function POST(request: NextRequest) {
       return errorResponse('Failed to prepare scan', 500);
     }
 
+    const webhookUrl = `${buildAppUrl(request.headers)}/api/webhooks/apify`;
+    after(async () => {
+      try {
+        await kickoffReservedScan({
+          scanId: result.scanId,
+          webhookUrl,
+        });
+      } catch (error) {
+        console.error(`[scan] Background kickoff failed for scan ${result.scanId}:`, error);
+      }
+    });
+
     return NextResponse.json(
-      { data: { scanId: result.scanId, status: result.status, actorCount: result.actorCount } },
+      { data: { scanId: result.scanId, status: result.status, actorCount: result.actorCount, scan: result.scan } },
       { status: 202 },
     );
   } catch (error) {
@@ -129,6 +143,25 @@ export async function GET(request: NextRequest) {
         scan = refreshedScanDoc.data() as Omit<Scan, 'id'>;
       }
     }
+  }
+
+  if (
+    (scan.status === 'pending' || scan.status === 'running')
+    && (scan.actorRunIds?.length ?? 0) === 0
+    && Object.keys(scan.launchingActorRuns ?? {}).length === 0
+    && hasQueuedActorLaunchWork(scan)
+  ) {
+    const webhookUrl = `${buildAppUrl(request.headers)}/api/webhooks/apify`;
+    after(async () => {
+      try {
+        await kickoffReservedScan({
+          scanId,
+          webhookUrl,
+        });
+      } catch (error) {
+        console.error(`[scan] Recovery kickoff failed for scan ${scanId}:`, error);
+      }
+    });
   }
 
   return NextResponse.json({ data: { id: scanDoc.id, ...scan } });

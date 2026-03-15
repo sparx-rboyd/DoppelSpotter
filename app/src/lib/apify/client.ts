@@ -56,6 +56,19 @@ export type PreparedActorInput = {
   displayQueries?: string[];
 };
 
+export type ActorStartRetryHooks = {
+  onBackoffStart?: (params: {
+    label: string;
+    reason: '429 resource limit' | '402 actor-memory-limit-exceeded';
+    attempt: number;
+    maxAttempts: number;
+    delayMs: number;
+  }) => Promise<void> | void;
+  onBackoffEnd?: (params: {
+    label: string;
+  }) => Promise<void> | void;
+};
+
 type ActorRunBrandContext = Pick<BrandProfile, 'name' | 'keywords'>;
 
 const GITHUB_MIN_RESULTS_PER_KEYWORD = 10;
@@ -79,10 +92,20 @@ const ACTOR_START_BACKOFF_BASE_MS = 3_000;
  * Apify can also return 402 `actor-memory-limit-exceeded` when account RAM is
  * temporarily exhausted by other in-flight runs.
  */
-async function withActorStartRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+async function withActorStartRetry<T>(
+  fn: () => Promise<T>,
+  label: string,
+  retryHooks?: ActorStartRetryHooks,
+): Promise<T> {
+  let backoffActive = false;
+
   for (let attempt = 0; attempt < ACTOR_START_MAX_ATTEMPTS; attempt++) {
     try {
-      return await fn();
+      const result = await fn();
+      if (backoffActive) {
+        await retryHooks?.onBackoffEnd?.({ label });
+      }
+      return result;
     } catch (err) {
       const isRateLimited = err instanceof ApifyApiError && err.statusCode === 429;
       const isMemoryLimitExceeded = err instanceof ApifyApiError
@@ -93,14 +116,30 @@ async function withActorStartRetry<T>(fn: () => Promise<T>, label: string): Prom
       if (isCapacityError && hasAttemptsLeft) {
         const delayMs = ACTOR_START_BACKOFF_BASE_MS * 2 ** attempt;
         const reason = isRateLimited ? '429 resource limit' : '402 actor-memory-limit-exceeded';
+        if (!backoffActive) {
+          backoffActive = true;
+          await retryHooks?.onBackoffStart?.({
+            label,
+            reason,
+            attempt: attempt + 1,
+            maxAttempts: ACTOR_START_MAX_ATTEMPTS,
+            delayMs,
+          });
+        }
         console.warn(
           `[apify] ${label} hit temporary capacity limit (${reason}), retrying in ${delayMs}ms (attempt ${attempt + 1}/${ACTOR_START_MAX_ATTEMPTS})`,
         );
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         continue;
       }
+      if (backoffActive) {
+        await retryHooks?.onBackoffEnd?.({ label });
+      }
       throw err;
     }
+  }
+  if (backoffActive) {
+    await retryHooks?.onBackoffEnd?.({ label });
   }
   throw new Error('[apify] withActorStartRetry: exceeded max attempts without resolving');
 }
@@ -256,6 +295,7 @@ export async function startPreparedActorRun(
   preparedInput: PreparedActorInput,
   settings: EffectiveScanSettings,
   webhookUrl: string,
+  retryHooks?: ActorStartRetryHooks,
 ): Promise<{ runId: string; query: string; queries?: string[]; displayQuery: string; displayQueries?: string[] }> {
   const client = getClient();
   const {
@@ -269,6 +309,7 @@ export async function startPreparedActorRun(
   const run = await withActorStartRetry(
     () => client.actor(actor.actorId).start(input, startOptions),
     `${actor.id} query "${displayQuery}"`,
+    retryHooks,
   );
   return { runId: run.id, query, queries, displayQuery, displayQueries };
 }

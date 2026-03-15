@@ -1,7 +1,7 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { after, NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { verifyGoogleOidcRequest } from '@/lib/internal-google-oidc';
-import { ScanStartError, startScanForBrand } from '@/lib/scan-runner';
+import { buildAppUrl, kickoffReservedScan, ScanStartError, startScanForBrand } from '@/lib/scan-runner';
 
 const MAX_DUE_BRANDS_PER_DISPATCH = 20;
 
@@ -34,16 +34,26 @@ export async function POST(request: NextRequest) {
     failed: 0,
     hasMoreDueBrands: dueBrandsSnapshot.size === MAX_DUE_BRANDS_PER_DISPATCH,
   };
+  const webhookUrl = `${buildAppUrl(request.headers)}/api/webhooks/apify`;
 
   for (const brandDoc of dueBrandsSnapshot.docs) {
     try {
       const result = await startScanForBrand({
         brandId: brandDoc.id,
-        requestHeaders: request.headers,
         scheduled: { dispatchedAt },
       });
 
       if (result.outcome === 'started') {
+        after(async () => {
+          try {
+            await kickoffReservedScan({
+              scanId: result.scanId,
+              webhookUrl,
+            });
+          } catch (error) {
+            console.error(`[scheduled-scans] Background kickoff failed for brand ${brandDoc.id}:`, error);
+          }
+        });
         summary.started++;
         continue;
       }

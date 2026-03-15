@@ -1,18 +1,15 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { FieldValue, type DocumentReference, type Transaction } from '@google-cloud/firestore';
-import { buildDeepSearchPreparedInput, fetchDatasetItems, startPreparedActorRun } from '@/lib/apify/client';
+import { buildDeepSearchPreparedInput, fetchDatasetItems } from '@/lib/apify/client';
 import { chatCompletion } from '@/lib/analysis/openrouter';
 import {
-  buildActorRunInfoFromQueuedRun,
-  buildPreparedActorInputFromQueuedRun,
   buildQueuedActorRunInfo,
-  getApifyMaxLiveRunsPerScan,
-  getLiveActorRunCount,
   hasQueuedActorLaunchWork,
   isActorRunInFlight,
 } from '@/lib/apify/live-run-cap';
+import { drainQueuedActorRunsIfCapacity } from '@/lib/apify/launch-queue';
 import { resolveBrandAnalysisSeverityDefinitions } from '@/lib/analysis-severity';
 import { normalizeAndPersistScanThemes } from '@/lib/analysis/theme-normalization';
 import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-hints';
@@ -87,7 +84,6 @@ import type {
   BrandProfile,
   Finding,
   GoogleScannerId,
-  QueuedActorRunInfo,
   Scan,
   XFindingMatchBasis,
 } from '@/lib/types';
@@ -2319,126 +2315,6 @@ type ScanFindingTotals = {
   addressedCount: number;
   skippedCount: number;
 };
-
-async function reserveQueuedActorRunsForLaunch(
-  scanRef: DocumentReference,
-): Promise<Array<{ reservationId: string; queuedRun: QueuedActorRunInfo }>> {
-  return db.runTransaction(async (tx) => {
-    const freshSnap = await tx.get(scanRef);
-    if (!freshSnap.exists) return [];
-
-    const fresh = freshSnap.data() as Scan;
-    if (fresh.status === 'cancelled' || fresh.status === 'failed' || fresh.status === 'completed') {
-      return [];
-    }
-
-    const queuedRuns = fresh.queuedActorRuns ?? [];
-    if (queuedRuns.length === 0) {
-      return [];
-    }
-
-    const availableSlots = getApifyMaxLiveRunsPerScan() - getLiveActorRunCount(fresh);
-    if (availableSlots <= 0) {
-      return [];
-    }
-
-    const selectedRuns = queuedRuns.slice(0, availableSlots);
-    if (selectedRuns.length === 0) {
-      return [];
-    }
-
-    const reservations = selectedRuns.map((queuedRun) => ({
-      reservationId: randomUUID(),
-      queuedRun,
-    }));
-    const updates: Record<string, unknown> = {
-      queuedActorRuns: queuedRuns.slice(selectedRuns.length),
-    };
-    for (const reservation of reservations) {
-      updates[`launchingActorRuns.${reservation.reservationId}`] = reservation.queuedRun;
-    }
-
-    tx.update(scanRef, updates);
-    return reservations;
-  });
-}
-
-async function settleQueuedActorLaunchReservation(
-  scanRef: DocumentReference,
-  reservationId: string,
-  result?: {
-    runId: string;
-    info: ActorRunInfo;
-  },
-) {
-  const updates: Record<string, unknown> = {
-    [`launchingActorRuns.${reservationId}`]: FieldValue.delete(),
-  };
-
-  if (result) {
-    updates.actorRunIds = FieldValue.arrayUnion(result.runId);
-    updates[`actorRuns.${result.runId}`] = result.info;
-  }
-
-  await scanRef.update(updates);
-}
-
-async function launchQueuedActorRunsIfCapacity(params: {
-  scanDoc: ScanDocHandle;
-  effectiveSettings: NonNullable<Scan['effectiveSettings']>;
-  webhookUrl: string;
-}): Promise<number> {
-  const { scanDoc, effectiveSettings, webhookUrl } = params;
-  let launchedCount = 0;
-
-  while (true) {
-    const reservations = await reserveQueuedActorRunsForLaunch(scanDoc.ref);
-    if (reservations.length === 0) {
-      return launchedCount;
-    }
-
-    for (const reservation of reservations) {
-      try {
-        const startedRun = await startPreparedActorRun(
-          getScannerConfigById(reservation.queuedRun.scannerId),
-          buildPreparedActorInputFromQueuedRun(reservation.queuedRun),
-          effectiveSettings,
-          webhookUrl,
-        );
-        await settleQueuedActorLaunchReservation(scanDoc.ref, reservation.reservationId, {
-          runId: startedRun.runId,
-          info: buildActorRunInfoFromQueuedRun(reservation.queuedRun, startedRun),
-        });
-        launchedCount += 1;
-      } catch (error) {
-        console.error(`[webhook] Failed to start queued actor run "${reservation.queuedRun.displayQuery}":`, error);
-        await settleQueuedActorLaunchReservation(scanDoc.ref, reservation.reservationId);
-      }
-    }
-  }
-}
-
-async function drainQueuedActorRunsIfCapacity(
-  scanDoc: ScanDocHandle,
-  webhookUrl: string,
-): Promise<number> {
-  const freshScanSnap = await scanDoc.ref.get();
-  if (!freshScanSnap.exists) {
-    return 0;
-  }
-
-  const freshScan = scanFromSnapshot(freshScanSnap);
-  if (!freshScan.effectiveSettings) {
-    console.warn(`[webhook] Cannot launch queued actor runs for scan ${scanDoc.id} because effectiveSettings are missing`);
-    return 0;
-  }
-
-  return launchQueuedActorRunsIfCapacity({
-    scanDoc,
-    effectiveSettings: freshScan.effectiveSettings,
-    webhookUrl,
-  });
-}
 
 async function finalizeIdleScanIfNoRemainingWork(scanDoc: ScanDocHandle): Promise<void> {
   const result = await db.runTransaction<MarkActorRunCompleteResult>(async (tx) => {

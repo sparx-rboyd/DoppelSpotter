@@ -1,4 +1,4 @@
-import { NextResponse, type NextRequest } from 'next/server';
+import { after, NextResponse, type NextRequest } from 'next/server';
 import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import {
@@ -14,6 +14,8 @@ import {
   recoverStuckSummarisingScan,
   scanFromSnapshot,
 } from '@/lib/scans';
+import { hasQueuedActorLaunchWork } from '@/lib/apify/live-run-cap';
+import { buildAppUrl, kickoffReservedScan } from '@/lib/scan-runner';
 
 type Params = { params: Promise<{ brandId: string }> };
 
@@ -80,6 +82,25 @@ export async function GET(request: NextRequest, { params }: Params) {
   ) {
     await clearBrandActiveScanIfMatches(brandRef, brand.activeScanId);
     return NextResponse.json({ data: null });
+  }
+
+  if (
+    (scan.status === 'pending' || scan.status === 'running')
+    && (scan.actorRunIds?.length ?? 0) === 0
+    && Object.keys(scan.launchingActorRuns ?? {}).length === 0
+    && hasQueuedActorLaunchWork(scan)
+  ) {
+    const webhookUrl = `${buildAppUrl(request.headers)}/api/webhooks/apify`;
+    after(async () => {
+      try {
+        await kickoffReservedScan({
+          scanId: scan.id,
+          webhookUrl,
+        });
+      } catch (error) {
+        console.error(`[scan] Recovery kickoff failed for scan ${scan.id}:`, error);
+      }
+    });
   }
 
   return NextResponse.json({ data: scan });

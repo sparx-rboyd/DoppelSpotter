@@ -439,6 +439,8 @@ export interface QueuedActorRunInfo {
   scannerId: ScannerId;
   actorId: string;
   source: FindingSource;
+  /** Stable identifier for this queued launch attempt, used for UI throttle state tracking. */
+  launchId: string;
   /**
    * 0 = initial scan run; 1 = AI-requested deep follow-up.
    * Deep searches are never spawned from depth > 0 (loop guard).
@@ -454,6 +456,11 @@ export interface QueuedActorRunInfo {
   displayQuery: string;
   /** Explicit user-visible queries for batched runs, when a single actor run covers multiple terms. */
   displayQueries?: string[];
+}
+
+export interface ApifyThrottleState {
+  /** Launch ids currently backing off after temporary Apify capacity rejections. */
+  activeLaunchIds?: string[];
 }
 
 export interface Scan {
@@ -477,6 +484,8 @@ export interface Scan {
   queuedActorRuns?: QueuedActorRunInfo[];
   /** Queued launches claimed for start but not yet assigned a real Apify run ID. */
   launchingActorRuns?: Record<string, QueuedActorRunInfo>;
+  /** Temporary Apify capacity backoff state surfaced in the live scan UI. */
+  apifyThrottle?: ApifyThrottleState;
   /** How many actor runs have completed (succeeded or failed) — used to detect scan completion */
   completedRunCount?: number;
   /** Total persisted non-false-positive findings, including ignored and addressed items. */
