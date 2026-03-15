@@ -35,7 +35,7 @@ Why this is a strong hackathon submission:
 ## At A Glance
 
 - `13 logical scan surfaces` across web, social, communities, code, domains, and app stores.
-- `5 underlying Apify actors` powering the monitoring pipeline.
+- `7 underlying Apify actors` powering the monitoring pipeline.
 - `AI triage` for severity scoring, theme labelling, false-positive suppression, scan summaries, and deep-search follow-ups.
 - `User review workflow` with ignore, address, bookmark, notes, search, and filtering.
 - `Operational outputs` including dashboard analytics, CSV export, PDF reports, and optional scan-summary emails.
@@ -57,7 +57,9 @@ DoppelSpotter is designed for a simple user journey:
 
 | Surface | Logical scanners | Backing actor |
 | --- | --- | --- |
-| Web and specialist Google scans | Web, Reddit, TikTok, YouTube, Facebook, Instagram, Telegram, Apple App Store, Google Play | `apify/google-search-scraper` |
+| Web and specialist Google scans | Web, YouTube, Facebook, Instagram, Telegram, Apple App Store, Google Play | `apify/google-search-scraper` |
+| Public Reddit posts | Reddit | `fatihtahta/reddit-scraper-search-fast` |
+| Public TikTok videos | TikTok | `apidojo/tiktok-scraper` |
 | Recent domain registrations | Domain registrations | `doppelspotter/recent-domain-registrations` |
 | Public communities | Discord servers | `louisdeconinck/discord-server-scraper` |
 | Code platforms | GitHub repos | `ryanclinton/github-repo-search` |
@@ -297,6 +299,8 @@ npm run type-check
 npm run add-user -- --email user@example.com --password secret123
 npm run add-invite-code
 npm run backfill-scan-counts
+npm run backfill-finding-canonical-ids
+npm run backfill-scan-dashboard-breakdowns
 npm run audit-orphaned-firestore-docs
 npm run repair-orphaned-firestore-docs
 ```

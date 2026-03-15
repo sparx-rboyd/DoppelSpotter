@@ -1454,7 +1454,9 @@ function buildSeverityDefinitionsSection(
   return `Severity definitions for this brand:
 - High: ${severityDefinitions.high}
 - Medium: ${severityDefinitions.medium}
-- Low: ${severityDefinitions.low}`;
+- Low: ${severityDefinitions.low}
+
+Do not classify due to mere association via search results - the brand (or its keywords) or a very similar variation must be mentioned in the source to qualify for classification.`;
 }
 
 function truncatePromptValue(value: string, maxLength: number): string {
