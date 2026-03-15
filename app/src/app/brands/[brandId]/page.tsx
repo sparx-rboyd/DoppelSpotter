@@ -87,7 +87,14 @@ type FindingSearchResult = FindingSummary & {
   scanStatus?: Scan['status'];
 };
 
-type ScanDebugData = Pick<Scan, 'id' | 'aiSummary' | 'scanSummaryRawLlmResponse'>;
+type ScanSummaryPreview = {
+  summary: string;
+  rawLlmResponse?: string;
+};
+
+type ScanDebugData = Pick<Scan, 'id' | 'aiSummary' | 'scanSummaryRawLlmResponse'> & {
+  regeneratedSummaryPreview?: ScanSummaryPreview | null;
+};
 
 // ---------------------------------------------------------------------------
 // localStorage helpers — persist active scan ID across page reloads
@@ -280,14 +287,14 @@ function SeverityGroup({
   );
 }
 
-function ScanSummaryPanel({ summary }: { summary: string }) {
+function ScanSummaryPanel({ summary, label = 'AI summary' }: { summary: string; label?: string }) {
   return (
     <div className="rounded-xl border border-brand-100 border-l-2 border-l-brand-500 bg-brand-50/70 px-4 py-4 lg:px-5 lg:py-5">
       <div className="flex items-start gap-3">
         <Sparkles className="mt-0.5 h-4 w-4 flex-shrink-0 text-brand-500" />
         <div className="min-w-0">
           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-brand-700/80">
-            AI summary
+            {label}
           </p>
           <p className="mt-1 text-sm leading-6 text-gray-700 lg:text-[15px] lg:leading-7">
             {summary}
@@ -360,6 +367,18 @@ function ScanDebugExpandableSection({
 
 function normalizeFindingsSearchText(value: string) {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function formatDebugRawResponse(raw?: string) {
+  if (!raw) {
+    return '(not available — this scan may have used a non-LLM fallback, predate raw-response capture, or have failed before the response was stored)';
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
 }
 
 function normalizeFindingsTaxonomyValue(value?: string) {
@@ -611,6 +630,10 @@ export default function BrandDetailPage() {
   const [scanDebugById, setScanDebugById] = useState<Record<string, ScanDebugData | null>>({});
   const [scanDebugLoadingIds, setScanDebugLoadingIds] = useState<string[]>([]);
   const [scanDebugErrors, setScanDebugErrors] = useState<Record<string, string>>({});
+  const [scanSummaryRegeneratingIds, setScanSummaryRegeneratingIds] = useState<string[]>([]);
+  const [scanSummarySavingIds, setScanSummarySavingIds] = useState<string[]>([]);
+  const [scanSummaryActionErrors, setScanSummaryActionErrors] = useState<Record<string, string>>({});
+  const [debugSummaryToastMessage, setDebugSummaryToastMessage] = useState('');
   const [expandedScanIds, setExpandedScanIds] = useState<string[]>([]);
   const [anchorTargetScanId, setAnchorTargetScanId] = useState<string | null>(() => (
     typeof window === 'undefined' ? null : getScanResultSetIdFromUrl(window.location.href)
@@ -1065,12 +1088,18 @@ export default function BrandDetailPage() {
     setScanDebugLoadingIds((prev) => [...prev, scanId]);
     setScanDebugErrors((prev) => ({ ...prev, [scanId]: '' }));
     try {
-      const res = await fetch(`/api/brands/${brandId}/scans/${scanId}`, {
+      const res = await fetch(`/api/brands/${brandId}/scans/${scanId}?debug=true`, {
         credentials: 'same-origin',
       });
       if (!res.ok) throw new Error('Failed to load debug data');
       const json = await res.json();
-      setScanDebugById((prev) => ({ ...prev, [scanId]: (json.data as ScanDebugData | null) ?? null }));
+      setScanDebugById((prev) => ({
+        ...prev,
+        [scanId]: {
+          ...((json.data as ScanDebugData | null) ?? { id: scanId }),
+          regeneratedSummaryPreview: prev[scanId]?.regeneratedSummaryPreview ?? null,
+        },
+      }));
     } catch (err) {
       setScanDebugErrors((prev) => ({
         ...prev,
@@ -1078,6 +1107,119 @@ export default function BrandDetailPage() {
       }));
     } finally {
       setScanDebugLoadingIds((prev) => prev.filter((id) => id !== scanId));
+    }
+  }
+
+  async function regenerateScanSummary(scanId: string) {
+    setScanSummaryRegeneratingIds((prev) => [...prev, scanId]);
+    setScanSummaryActionErrors((prev) => ({ ...prev, [scanId]: '' }));
+
+    try {
+      const res = await fetch(`/api/brands/${brandId}/scans/${scanId}?debug=true`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? 'Failed to regenerate scan summary');
+      }
+
+      const json = await res.json().catch(() => ({}));
+      const data = (json.data ?? {}) as {
+        regeneratedSummary?: string;
+        regeneratedScanSummaryRawLlmResponse?: string;
+      };
+      const fallbackSummary = scans.find((candidate) => candidate.id === scanId)?.aiSummary;
+
+      setScanDebugById((prev) => ({
+        ...prev,
+        [scanId]: {
+          id: scanId,
+          aiSummary: prev[scanId]?.aiSummary ?? fallbackSummary,
+          scanSummaryRawLlmResponse: prev[scanId]?.scanSummaryRawLlmResponse,
+          regeneratedSummaryPreview: {
+            summary: data.regeneratedSummary ?? '',
+            rawLlmResponse: data.regeneratedScanSummaryRawLlmResponse,
+          },
+        },
+      }));
+    } catch (err) {
+      setScanSummaryActionErrors((prev) => ({
+        ...prev,
+        [scanId]: err instanceof Error ? err.message : 'Failed to regenerate scan summary',
+      }));
+    } finally {
+      setScanSummaryRegeneratingIds((prev) => prev.filter((id) => id !== scanId));
+    }
+  }
+
+  function discardRegeneratedScanSummaryPreview(scanId: string) {
+    setScanSummaryActionErrors((prev) => ({ ...prev, [scanId]: '' }));
+    setScanDebugById((prev) => {
+      const existing = prev[scanId];
+      if (!existing) return prev;
+      return {
+        ...prev,
+        [scanId]: {
+          ...existing,
+          regeneratedSummaryPreview: null,
+        },
+      };
+    });
+  }
+
+  async function saveRegeneratedScanSummary(scanId: string) {
+    const preview = scanDebugById[scanId]?.regeneratedSummaryPreview;
+    if (!preview?.summary) return;
+
+    setScanSummarySavingIds((prev) => [...prev, scanId]);
+    setScanSummaryActionErrors((prev) => ({ ...prev, [scanId]: '' }));
+
+    try {
+      const res = await fetch(`/api/brands/${brandId}/scans/${scanId}?debug=true`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({
+          summary: preview.summary,
+          rawLlmResponse: preview.rawLlmResponse,
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.error ?? 'Failed to save regenerated scan summary');
+      }
+
+      const json = await res.json().catch(() => ({}));
+      const data = (json.data ?? {}) as Pick<Scan, 'aiSummary' | 'scanSummaryRawLlmResponse'>;
+      const nextSummary = data.aiSummary ?? preview.summary;
+      const nextRaw = data.scanSummaryRawLlmResponse ?? preview.rawLlmResponse;
+
+      setScans((prev) => prev.map((scan) => (
+        scan.id === scanId
+          ? {
+              ...scan,
+              aiSummary: nextSummary,
+            }
+          : scan
+      )));
+      setScanDebugById((prev) => ({
+        ...prev,
+        [scanId]: {
+          id: scanId,
+          aiSummary: nextSummary,
+          scanSummaryRawLlmResponse: nextRaw,
+          regeneratedSummaryPreview: null,
+        },
+      }));
+      setDebugSummaryToastMessage('Regenerated scan summary saved.');
+    } catch (err) {
+      setScanSummaryActionErrors((prev) => ({
+        ...prev,
+        [scanId]: err instanceof Error ? err.message : 'Failed to save regenerated scan summary',
+      }));
+    } finally {
+      setScanSummarySavingIds((prev) => prev.filter((id) => id !== scanId));
     }
   }
 
@@ -4887,31 +5029,78 @@ export default function BrandDetailPage() {
                                       </div>
                                     ) : (
                                       <>
-                                        {scan.aiSummary && !isAnyFindingFilterActive && (
+                                        {(scan.aiSummary || showDebug) && !isAnyFindingFilterActive && (
                                           <div className="mb-4 space-y-1.5 lg:mb-5 lg:space-y-2">
-                                            <ScanSummaryPanel summary={scan.aiSummary} />
+                                            {scan.aiSummary ? (
+                                              <ScanSummaryPanel summary={scan.aiSummary} />
+                                            ) : (
+                                              <div className="rounded-xl border border-dashed border-gray-200 bg-white px-4 py-4 text-sm text-gray-500 lg:px-5 lg:py-5">
+                                                No stored AI summary is currently saved for this scan.
+                                              </div>
+                                            )}
                                             {showDebug && (
-                                              <ScanDebugExpandableSection
-                                                icon={MessageSquare}
-                                                label="Raw AI response"
-                                                onOpen={() => void ensureScanDebugData(scan.id)}
-                                                loading={scanDebugLoadingIds.includes(scan.id)}
-                                                error={scanDebugErrors[scan.id]}
-                                              >
-                                                {scanDebugById[scan.id]?.scanSummaryRawLlmResponse
-                                                  ? (() => {
-                                                      try {
-                                                        return JSON.stringify(
-                                                          JSON.parse(scanDebugById[scan.id]?.scanSummaryRawLlmResponse ?? ''),
-                                                          null,
-                                                          2,
-                                                        );
-                                                      } catch {
-                                                        return scanDebugById[scan.id]?.scanSummaryRawLlmResponse;
-                                                      }
-                                                    })()
-                                                  : '(not available — this scan may have used a non-LLM fallback, predate raw-response capture, or have failed before the response was stored)'}
-                                              </ScanDebugExpandableSection>
+                                              <>
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                  <Button
+                                                    type="button"
+                                                    variant="secondary"
+                                                    size="sm"
+                                                    onClick={() => void regenerateScanSummary(scan.id)}
+                                                    loading={scanSummaryRegeneratingIds.includes(scan.id)}
+                                                    disabled={scanSummarySavingIds.includes(scan.id)}
+                                                  >
+                                                    Regenerate summary
+                                                  </Button>
+                                                  <Button
+                                                    type="button"
+                                                    size="sm"
+                                                    onClick={() => void saveRegeneratedScanSummary(scan.id)}
+                                                    loading={scanSummarySavingIds.includes(scan.id)}
+                                                    disabled={!scanDebugById[scan.id]?.regeneratedSummaryPreview?.summary || scanSummaryRegeneratingIds.includes(scan.id)}
+                                                  >
+                                                    Save regenerated summary
+                                                  </Button>
+                                                  {scanDebugById[scan.id]?.regeneratedSummaryPreview && (
+                                                    <Button
+                                                      type="button"
+                                                      variant="ghost"
+                                                      size="sm"
+                                                      onClick={() => discardRegeneratedScanSummaryPreview(scan.id)}
+                                                      disabled={scanSummaryRegeneratingIds.includes(scan.id) || scanSummarySavingIds.includes(scan.id)}
+                                                    >
+                                                      Discard preview
+                                                    </Button>
+                                                  )}
+                                                </div>
+                                                {scanSummaryActionErrors[scan.id] && (
+                                                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
+                                                    {scanSummaryActionErrors[scan.id]}
+                                                  </div>
+                                                )}
+                                                {scanDebugById[scan.id]?.regeneratedSummaryPreview?.summary && (
+                                                  <ScanSummaryPanel
+                                                    summary={scanDebugById[scan.id]?.regeneratedSummaryPreview?.summary ?? ''}
+                                                    label="Regenerated preview"
+                                                  />
+                                                )}
+                                                <ScanDebugExpandableSection
+                                                  icon={MessageSquare}
+                                                  label="Raw AI response"
+                                                  onOpen={() => void ensureScanDebugData(scan.id)}
+                                                  loading={scanDebugLoadingIds.includes(scan.id)}
+                                                  error={scanDebugErrors[scan.id]}
+                                                >
+                                                  {formatDebugRawResponse(scanDebugById[scan.id]?.scanSummaryRawLlmResponse)}
+                                                </ScanDebugExpandableSection>
+                                                {scanDebugById[scan.id]?.regeneratedSummaryPreview && (
+                                                  <ScanDebugExpandableSection
+                                                    icon={RotateCcw}
+                                                    label="Regenerated raw AI response"
+                                                  >
+                                                    {formatDebugRawResponse(scanDebugById[scan.id]?.regeneratedSummaryPreview?.rawLlmResponse)}
+                                                  </ScanDebugExpandableSection>
+                                                )}
+                                              </>
                                             )}
                                           </div>
                                         )}
@@ -5313,6 +5502,13 @@ export default function BrandDetailPage() {
           <Toast
             message={lookbackNudgeSuccessMessage}
             onClose={() => setLookbackNudgeSuccessMessage('')}
+          />
+        )}
+
+        {debugSummaryToastMessage && (
+          <Toast
+            message={debugSummaryToastMessage}
+            onClose={() => setDebugSummaryToastMessage('')}
           />
         )}
 

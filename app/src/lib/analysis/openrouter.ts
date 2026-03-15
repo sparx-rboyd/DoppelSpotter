@@ -33,7 +33,7 @@ export interface ChatCompletionOptions {
 
 /**
  * Send a chat completion request to OpenRouter.
- * Uses the model specified in OPENROUTER_MODEL env var (default: anthropic/claude-3.5-haiku).
+ * Uses the model specified in OPENROUTER_MODEL env var (default: deepseek/deepseek-v3.2).
  */
 export async function chatCompletion(
   messages: ChatMessage[],
@@ -42,8 +42,8 @@ export async function chatCompletion(
   const apiKey = process.env.OPENROUTER_API_KEY;
   if (!apiKey) throw new Error('OPENROUTER_API_KEY is not set');
 
-  const model = process.env.OPENROUTER_MODEL ?? 'anthropic/claude-3.5-haiku';
-  const temperature = options.temperature ?? 0.2;
+  const model = process.env.OPENROUTER_MODEL ?? 'deepseek/deepseek-v3.2';
+  const temperature = options.temperature ?? 0.8;
 
   const res = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: 'POST',

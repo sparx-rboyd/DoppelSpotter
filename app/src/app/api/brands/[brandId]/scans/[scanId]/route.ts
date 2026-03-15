@@ -3,29 +3,64 @@ import { db } from '@/lib/firestore';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import { drainScanDeletion, isBrandDeletionActive, isBrandHistoryDeletionActive, isScanDeletionActive, markScanDeletionQueued } from '@/lib/async-deletions';
 import { scheduleDeletionTaskOrRunInline } from '@/lib/deletion-tasks';
-import type { BrandProfile, Scan } from '@/lib/types';
+import { scanFromSnapshot } from '@/lib/scans';
+import { buildScanAiSummary, saveScanAiSummary } from '@/lib/scan-summary';
+import type { BrandProfile } from '@/lib/types';
 
 type Params = { params: Promise<{ brandId: string; scanId: string }> };
+
+async function getOwnedBrandAndScan(request: NextRequest, params: Params['params']) {
+  const { uid, error } = await requireAuth(request);
+  if (error) {
+    return { error };
+  }
+
+  const { brandId, scanId } = await params;
+  const brandDoc = await db.collection('brands').doc(brandId).get();
+  if (!brandDoc.exists) {
+    return { error: errorResponse('Brand not found', 404) };
+  }
+
+  const brand = brandDoc.data() as BrandProfile;
+  if (brand.userId !== uid) {
+    return { error: errorResponse('Forbidden', 403) };
+  }
+
+  const scanDoc = await db.collection('scans').doc(scanId).get();
+  if (!scanDoc.exists) {
+    return { error: errorResponse('Scan not found', 404) };
+  }
+
+  const scan = scanFromSnapshot(scanDoc);
+  if (scan.userId !== uid) {
+    return { error: errorResponse('Forbidden', 403) };
+  }
+  if (scan.brandId !== brandId) {
+    return { error: errorResponse('Scan does not belong to this brand', 400) };
+  }
+
+  return {
+    uid,
+    brandId,
+    scanId,
+    brand,
+    brandDoc,
+    scan,
+    scanDoc,
+  };
+}
+
+function ensureDebugMode(request: NextRequest) {
+  if (request.nextUrl.searchParams.get('debug') === 'true') return null;
+  return errorResponse('Debug summary regeneration is only available when debug=true', 404);
+}
 
 // GET /api/brands/[brandId]/scans/[scanId]
 // Returns scan-level debug fields used by the brand page when ?debug=true.
 export async function GET(request: NextRequest, { params }: Params) {
-  const { uid, error } = await requireAuth(request);
-  if (error) return error;
-
-  const { brandId, scanId } = await params;
-  void request;
-
-  const brandDoc = await db.collection('brands').doc(brandId).get();
-  if (!brandDoc.exists) return errorResponse('Brand not found', 404);
-  if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
-
-  const scanDoc = await db.collection('scans').doc(scanId).get();
-  if (!scanDoc.exists) return errorResponse('Scan not found', 404);
-
-  const scan = scanDoc.data() as Scan;
-  if (scan.userId !== uid) return errorResponse('Forbidden', 403);
-  if (scan.brandId !== brandId) return errorResponse('Scan does not belong to this brand', 400);
+  const owned = await getOwnedBrandAndScan(request, params);
+  if ('error' in owned) return owned.error;
+  const { scan, scanDoc } = owned;
 
   return NextResponse.json({
     data: {
@@ -36,27 +71,74 @@ export async function GET(request: NextRequest, { params }: Params) {
   });
 }
 
+// POST /api/brands/[brandId]/scans/[scanId]?debug=true
+// Regenerates a scan summary preview without persisting it.
+export async function POST(request: NextRequest, { params }: Params) {
+  const debugError = ensureDebugMode(request);
+  if (debugError) return debugError;
+
+  const owned = await getOwnedBrandAndScan(request, params);
+  if ('error' in owned) return owned.error;
+
+  const summaryResult = await buildScanAiSummary(owned.scan);
+  return NextResponse.json({
+    data: {
+      id: owned.scanDoc.id,
+      regeneratedSummary: summaryResult.summary,
+      regeneratedScanSummaryRawLlmResponse: summaryResult.rawLlmResponse,
+    },
+  });
+}
+
+// PATCH /api/brands/[brandId]/scans/[scanId]?debug=true
+// Persists a regenerated debug summary preview onto the scan.
+export async function PATCH(request: NextRequest, { params }: Params) {
+  const debugError = ensureDebugMode(request);
+  if (debugError) return debugError;
+
+  const owned = await getOwnedBrandAndScan(request, params);
+  if ('error' in owned) return owned.error;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return errorResponse('Invalid JSON body');
+  }
+
+  const summary = typeof (body as { summary?: unknown })?.summary === 'string'
+    ? (body as { summary: string }).summary.trim()
+    : '';
+  const rawLlmResponse = typeof (body as { rawLlmResponse?: unknown })?.rawLlmResponse === 'string'
+    ? (body as { rawLlmResponse: string }).rawLlmResponse
+    : undefined;
+
+  if (!summary) {
+    return errorResponse('summary is required');
+  }
+
+  await saveScanAiSummary(owned.scanDoc.id, {
+    summary,
+    rawLlmResponse,
+  });
+
+  return NextResponse.json({
+    data: {
+      id: owned.scanDoc.id,
+      aiSummary: summary,
+      scanSummaryRawLlmResponse: rawLlmResponse,
+    },
+  });
+}
+
 // DELETE /api/brands/[brandId]/scans/[scanId]
 // Permanently deletes a single scan and all its findings.
 export async function DELETE(request: NextRequest, { params }: Params) {
-  const { uid, error } = await requireAuth(request);
-  if (error) return error;
+  const owned = await getOwnedBrandAndScan(request, params);
+  if ('error' in owned) return owned.error;
 
-  const { brandId, scanId } = await params;
-
-  // Verify brand ownership
-  const brandDoc = await db.collection('brands').doc(brandId).get();
-  if (!brandDoc.exists) return errorResponse('Brand not found', 404);
-  if ((brandDoc.data() as BrandProfile).userId !== uid) return errorResponse('Forbidden', 403);
-
-  // Fetch and verify the scan
-  const scanDoc = await db.collection('scans').doc(scanId).get();
-  if (!scanDoc.exists) return errorResponse('Scan not found', 404);
-
-  const scan = scanDoc.data() as Scan;
-  if (scan.userId !== uid) return errorResponse('Forbidden', 403);
-  if (scan.brandId !== brandId) return errorResponse('Scan does not belong to this brand', 400);
-  if (isBrandDeletionActive(brandDoc.data() as BrandProfile) || isBrandHistoryDeletionActive(brandDoc.data() as BrandProfile)) {
+  const { uid, brandId, scanId, brand, scan } = owned;
+  if (isBrandDeletionActive(brand) || isBrandHistoryDeletionActive(brand)) {
     return errorResponse('Cannot delete an individual scan while brand deletion is already in progress', 409);
   }
 

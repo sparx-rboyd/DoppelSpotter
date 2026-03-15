@@ -59,6 +59,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │           ├── mailersend.ts     # MailerSend email client for transactional emails
 │           ├── scan-runner.ts    # Shared manual + scheduled scan reservation and actor startup
 │           ├── scan-sources.ts   # Shared scan-source/scanner config, Google site-operator policy, and display helpers
+│           ├── scan-summary.ts   # Shared scan-summary generation + debug-save helpers reused by webhook completion and debug regeneration
 │           ├── scan-summary-emails.ts # Branded scan-summary email composition + idempotent delivery
 │           ├── scan-schedules.ts # Schedule validation, timezone-aware recurrence, next-run helpers
 │           └── analysis/
@@ -235,6 +236,19 @@ GET /api/brands/[brandId]/scans
  └─ returns `[]` while `brands.historyDeletion` is active
  └─ returns denormalized per-scan counts (high/medium/low/nonHit/ignored/skipped) plus `aiSummary` from the scan document
  └─ returns ScanSummary[] — lightweight shape used by the brand page to render per-scan result sets
+
+GET /api/brands/[brandId]/scans/[scanId]
+ └─ verifies brand + scan ownership
+ └─ returns scan-level debug summary fields (`aiSummary`, `scanSummaryRawLlmResponse`) used by the brand page when `?debug=true`
+
+POST /api/brands/[brandId]/scans/[scanId]?debug=true
+ └─ verifies brand + scan ownership
+ └─ rebuilds a fresh scan-summary preview using the same shared summary generator as the webhook completion path
+ └─ returns the regenerated preview summary + raw LLM response without persisting them
+
+PATCH /api/brands/[brandId]/scans/[scanId]?debug=true
+ └─ verifies brand + scan ownership
+ └─ persists an explicitly accepted regenerated summary preview back onto the scan document for later UI/debug/email/PDF reads
 
 GET /api/brands/[brandId]/scans/[scanId]/export
  └─ verifies brand + scan ownership
@@ -802,7 +816,7 @@ The findings API is optimised to minimise Firestore reads and HTTP round-trips o
 - **Dashboard bootstrap + metrics split** — the main dashboard uses `GET /api/dashboard/bootstrap` for brand selection state and `GET /api/dashboard/metrics` for brand/scan-scoped analytics, instead of reusing the lightweight recent-findings feed.
 - **All-time dashboard totals** — dashboard KPI cards use terminal scan denormalized counts, while the stacked scan-type and theme charts aggregate selected findings with a minimal Firestore `.select(...)` projection.
 - **Recent activity feed remains lightweight** — `GET /api/findings` still pages through the newest findings until it has filled the requested limit, instead of always fetching a fixed `limit * 4` window and filtering in memory. This keeps that cross-brand recent-activity query close to the number of cards rendered.
-- **Debug details fetched on demand** — `FindingCard` fetches `GET /api/brands/[brandId]/findings/[findingId]` only when a debug section is opened (`?debug=true`). Normal list views never load raw actor data or raw AI responses.
+- **Debug details fetched on demand** — `FindingCard` fetches `GET /api/brands/[brandId]/findings/[findingId]` only when a debug section is opened (`?debug=true`). The brand page also lazily fetches `GET /api/brands/[brandId]/scans/[scanId]` for stored scan-summary debug fields and, in debug mode only, can call `POST`/`PATCH` on that same route to preview and optionally persist regenerated scan summaries. Normal list views never load raw actor data or raw AI responses.
 - **No redundant brand ownership checks on per-scan findings** — the `GET /api/brands/[brandId]/findings` route relies solely on `userId == uid` in the Firestore query for authorization (no extra brand doc read per request). The PATCH (ignore/un-ignore) route similarly skips the brand doc read, verifying ownership via the finding document itself.
 
 ---

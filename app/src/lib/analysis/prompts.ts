@@ -414,7 +414,10 @@ Rules:
 - Prefer measured wording such as "notable", "recurring", "concentrated", "mixed", or "limited" when the evidence is narrower or less definitive.
 - Do not imply intent, coordination, or business impact unless the provided findings explicitly support that conclusion.
 - Distinguish between discussion, promotion, tooling, impersonation, and confirmed fraud; do not collapse them into a stronger claim than the evidence supports.
-- Vary phrasing naturally and avoid stock opening lines or repeated alarmist formulations.`;
+- Vary phrasing naturally and avoid stock opening lines or repeated alarmist formulations.
+- Prefer 2-4 sentences. 5 at an absolute maximum where necessary.
+
+Before returning your response, validate that it does not exceed 5 sentences.`;
 
 export const THEME_NORMALIZATION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
 
