@@ -3779,7 +3779,7 @@ function BrandDetailPageContent() {
 
           {brand && !loading && (
             <>
-              {brand.scanSchedule?.enabled && (
+              {brand.scanSchedule?.enabled && !isExecutiveSummaryMentionsMode && (
                 <div className="mb-4 rounded-lg bg-brand-100/70 px-3 py-2 sm:px-4 sm:py-3 lg:mb-6 lg:px-5 lg:py-3.5">
                   <div className="flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between">
                     <div className="flex min-w-0 items-center gap-2.5">
