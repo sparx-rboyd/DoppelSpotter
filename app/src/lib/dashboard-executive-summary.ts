@@ -24,6 +24,7 @@ export const DASHBOARD_EXECUTIVE_SUMMARY_VERSION = 1;
 const MAX_EXECUTIVE_SUMMARY_FINDINGS = 200;
 const MAX_FINDING_TITLE_LENGTH = 120;
 const MAX_FINDING_DESCRIPTION_LENGTH = 320;
+const DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS = 2;
 
 type DashboardExecutiveSummarySeverityBreakdown = NonNullable<DashboardExecutiveSummaryData['severityBreakdown']>;
 type DashboardExecutiveSummaryFindingInput = {
@@ -292,30 +293,49 @@ export async function buildDashboardExecutiveSummary(params: {
 
   let rawLlmResponse: string | undefined;
   try {
-    rawLlmResponse = await chatCompletion([
-      { role: 'system', content: DASHBOARD_EXECUTIVE_SUMMARY_SYSTEM_PROMPT },
-      { role: 'user', content: prompt },
-    ], { temperature: 0.8 });
+    for (let attempt = 1; attempt <= DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS; attempt++) {
+      let attemptRawLlmResponse: string | undefined;
+      try {
+        attemptRawLlmResponse = await chatCompletion([
+          { role: 'system', content: DASHBOARD_EXECUTIVE_SUMMARY_SYSTEM_PROMPT },
+          { role: 'user', content: prompt },
+        ], { temperature: 0.8 });
+        rawLlmResponse = attemptRawLlmResponse;
 
-    const parsed = parseDashboardExecutiveSummaryOutput(rawLlmResponse);
-    if (!parsed) {
-      throw new Error(`Failed to parse dashboard executive summary output: ${rawLlmResponse.slice(0, 200)}`);
+        const parsed = parseDashboardExecutiveSummaryOutput(attemptRawLlmResponse);
+        if (!parsed) {
+          throw new Error(`Failed to parse dashboard executive summary output: ${attemptRawLlmResponse.slice(0, 200)}`);
+        }
+
+        return {
+          version: DASHBOARD_EXECUTIVE_SUMMARY_VERSION,
+          status: 'ready',
+          brandId,
+          inputFindingCount: selectedFindings.length,
+          severityBreakdown,
+          summary: parsed.summary,
+          patterns: clampExecutiveSummaryPatterns(parsed.patterns, new Set(selectedFindings.map((finding) => finding.id))),
+          generatedFromScanId: latestCompletedScan?.id,
+          requestedForScanId: latestCompletedScan?.id,
+          latestCompletedAt: latestCompletedScan?.completedAt ?? latestCompletedScan?.startedAt,
+          completedScanCount: completedScans.length,
+          rawLlmResponse,
+        };
+      } catch (error) {
+        rawLlmResponse = attemptRawLlmResponse;
+        if (attempt < DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS) {
+          console.warn(
+            `[dashboard-executive-summary] Summary generation failed for brand ${brandId} (attempt ${attempt}/${DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS}); retrying once:`,
+            error,
+          );
+          continue;
+        }
+
+        throw error;
+      }
     }
 
-    return {
-      version: DASHBOARD_EXECUTIVE_SUMMARY_VERSION,
-      status: 'ready',
-      brandId,
-      inputFindingCount: selectedFindings.length,
-      severityBreakdown,
-      summary: parsed.summary,
-      patterns: clampExecutiveSummaryPatterns(parsed.patterns, new Set(selectedFindings.map((finding) => finding.id))),
-      generatedFromScanId: latestCompletedScan?.id,
-      requestedForScanId: latestCompletedScan?.id,
-      latestCompletedAt: latestCompletedScan?.completedAt ?? latestCompletedScan?.startedAt,
-      completedScanCount: completedScans.length,
-      rawLlmResponse,
-    };
+    throw new Error(`Dashboard executive summary generation exhausted ${DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS} attempts without returning`);
   } catch (error) {
     console.error(`[dashboard-executive-summary] Summary generation failed for brand ${brandId}:`, error);
     return {
