@@ -143,7 +143,9 @@ export async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummary
         rawLlmResponse,
       };
     } catch (err) {
-      rawLlmResponse = attemptRawLlmResponse;
+      if (typeof attemptRawLlmResponse === 'string') {
+        rawLlmResponse = attemptRawLlmResponse;
+      }
       finalError = err;
       if (attempt < SCAN_SUMMARY_LLM_MAX_ATTEMPTS) {
         console.warn(

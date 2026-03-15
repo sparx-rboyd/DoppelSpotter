@@ -322,7 +322,9 @@ export async function buildDashboardExecutiveSummary(params: {
         rawLlmResponse,
       };
     } catch (error) {
-      rawLlmResponse = attemptRawLlmResponse;
+      if (typeof attemptRawLlmResponse === 'string') {
+        rawLlmResponse = attemptRawLlmResponse;
+      }
       finalError = error;
       if (attempt < DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS) {
         console.warn(
