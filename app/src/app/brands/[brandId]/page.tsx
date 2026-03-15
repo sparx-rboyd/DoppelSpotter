@@ -64,6 +64,10 @@ const DRILLDOWN_THEME_QUERY_PARAM = 'theme';
 const DRILLDOWN_SOURCE_QUERY_PARAM = 'source';
 const RETURN_TO_QUERY_PARAM = 'returnTo';
 const RETURN_TO_DASHBOARD_VALUE = 'dashboard';
+const EXECUTIVE_SUMMARY_THEME_VIEW_PARAM = 'view';
+const EXECUTIVE_SUMMARY_THEME_VIEW_VALUE = 'executive-summary-theme';
+const EXECUTIVE_SUMMARY_FINDING_ID_QUERY_PARAM = 'findingId';
+const EXECUTIVE_SUMMARY_THEME_TITLE_QUERY_PARAM = 'themeTitle';
 const FINDING_SEARCH_MIN_QUERY_LENGTH = 2;
 const FINDING_SEARCH_DEBOUNCE_MS = 250;
 const FINDING_SEARCH_RESULTS_PAGE_SIZE = 50;
@@ -618,7 +622,24 @@ export default function BrandDetailPage() {
   const searchParams = useSearchParams();
   const showDebug = searchParams.get('debug') === 'true';
   const forceThrottlePanel = showDebug && searchParams.get('force_throttle_panel') === 'true';
-  const backHref = searchParams.get(RETURN_TO_QUERY_PARAM) === RETURN_TO_DASHBOARD_VALUE
+  const returnToDashboard = searchParams.get(RETURN_TO_QUERY_PARAM) === RETURN_TO_DASHBOARD_VALUE;
+  const executiveSummaryMentionFindingIds = useMemo(() => {
+    const seen = new Set<string>();
+    const findingIds: string[] = [];
+    for (const value of searchParams.getAll(EXECUTIVE_SUMMARY_FINDING_ID_QUERY_PARAM)) {
+      const trimmedValue = value.trim();
+      if (!trimmedValue || seen.has(trimmedValue)) continue;
+      seen.add(trimmedValue);
+      findingIds.push(trimmedValue);
+    }
+    return findingIds;
+  }, [searchParams]);
+  const executiveSummaryThemeTitle = searchParams.get(EXECUTIVE_SUMMARY_THEME_TITLE_QUERY_PARAM)?.trim() ?? '';
+  const isExecutiveSummaryMentionsMode = (
+    searchParams.get(EXECUTIVE_SUMMARY_THEME_VIEW_PARAM) === EXECUTIVE_SUMMARY_THEME_VIEW_VALUE
+    && executiveSummaryMentionFindingIds.length > 0
+  );
+  const backHref = returnToDashboard
     ? '/dashboard'
     : '/brands';
   const initialFindingCategories = parseFindingCategoryFilters(searchParams.getAll(DRILLDOWN_CATEGORY_QUERY_PARAM));
@@ -777,7 +798,7 @@ export default function BrandDetailPage() {
     ? selectedFindingCategories[0]
     : null;
   const isFindingsSearchActive = normalizedFindingsSearchInput.length > 0;
-  const shouldUseLocalTabFindingSearch = activeTab !== 'scans' && isFindingsSearchActive;
+  const shouldUseLocalTabFindingSearch = activeTab !== 'scans' && isFindingsSearchActive && !isExecutiveSummaryMentionsMode;
   const hasActiveFindingCategoryFilter = selectedFindingCategories.length > 0;
   const hasActiveFindingSourceFilter = selectedFindingSources.length > 0;
   const hasActiveFindingThemeFilter = normalizedSelectedFindingThemeSet.size > 0;
@@ -787,15 +808,20 @@ export default function BrandDetailPage() {
     || hasActiveFindingThemeFilter;
   const isFilterOnlyScansMode = !isFindingsSearchActive && hasActiveNonSearchFindingFilters;
   const shouldUseServerFindingSearch =
-    activeTab === 'scans' && (isFindingsSearchActive || hasActiveNonSearchFindingFilters);
+    activeTab === 'scans' && (isExecutiveSummaryMentionsMode || isFindingsSearchActive || hasActiveNonSearchFindingFilters);
   const canRunServerFindingSearch =
+    isExecutiveSummaryMentionsMode
+    || (
     normalizedFindingsSearchQuery.length >= FINDING_SEARCH_MIN_QUERY_LENGTH
-    || isFilterOnlyScansMode;
+    || isFilterOnlyScansMode
+  );
   const isAnyFindingFilterActive =
-    isFindingsSearchActive
-    || hasActiveFindingCategoryFilter
-    || hasActiveFindingSourceFilter
-    || hasActiveFindingThemeFilter;
+    !isExecutiveSummaryMentionsMode && (
+      isFindingsSearchActive
+      || hasActiveFindingCategoryFilter
+      || hasActiveFindingSourceFilter
+      || hasActiveFindingThemeFilter
+    );
   const activeFindingControlCount = [
     isFindingsSearchActive,
     hasActiveFindingThemeFilter,
@@ -972,6 +998,9 @@ export default function BrandDetailPage() {
   }, [findingsSearchQuery]);
 
   const appendActiveFindingFilterParams = useCallback((params: URLSearchParams) => {
+    if (isExecutiveSummaryMentionsMode) {
+      return;
+    }
     for (const category of selectedFindingCategories) {
       params.append('category', category);
     }
@@ -983,14 +1012,21 @@ export default function BrandDetailPage() {
       if (!trimmedTheme) continue;
       params.append('theme', trimmedTheme);
     }
-  }, [selectedFindingCategories, selectedFindingSources, selectedFindingThemes]);
+  }, [isExecutiveSummaryMentionsMode, selectedFindingCategories, selectedFindingSources, selectedFindingThemes]);
 
   const fetchServerSearchResults = useCallback(async (options?: { append?: boolean; cursor?: string | null; signal?: AbortSignal }) => {
     const params = new URLSearchParams({
-      q: debouncedFindingsSearchQuery.trim(),
       limit: `${FINDING_SEARCH_RESULTS_PAGE_SIZE}`,
       tab: activeTab,
     });
+
+    if (!isExecutiveSummaryMentionsMode) {
+      params.set('q', debouncedFindingsSearchQuery.trim());
+    } else {
+      for (const findingId of executiveSummaryMentionFindingIds) {
+        params.append(EXECUTIVE_SUMMARY_FINDING_ID_QUERY_PARAM, findingId);
+      }
+    }
 
     if (!options?.append) {
       params.set('includeCount', '1');
@@ -1039,6 +1075,8 @@ export default function BrandDetailPage() {
     appendActiveFindingFilterParams,
     brandId,
     debouncedFindingsSearchQuery,
+    executiveSummaryMentionFindingIds,
+    isExecutiveSummaryMentionsMode,
   ]);
 
   async function loadMoreSearchResults() {
@@ -2536,6 +2574,12 @@ export default function BrandDetailPage() {
   }, [brandId, loading, scanning]);
 
   useEffect(() => {
+    if (isExecutiveSummaryMentionsMode && activeTab !== 'scans') {
+      setActiveTab('scans');
+    }
+  }, [activeTab, isExecutiveSummaryMentionsMode]);
+
+  useEffect(() => {
     if (!shouldUseServerFindingSearch) {
       findingSearchAbortControllerRef.current?.abort();
       findingSearchAbortControllerRef.current = null;
@@ -3616,6 +3660,9 @@ export default function BrandDetailPage() {
     : isFindingsSearchActive
       ? 'search'
       : 'filters';
+  const executiveSummaryMentionsHeading = executiveSummaryThemeTitle
+    ? `Mentions for '${executiveSummaryThemeTitle}'`
+    : 'Linked mentions';
   const findingThemeOptions = availableFindingThemes.map((theme) => ({ value: theme, label: theme }));
   const findingCategoryOptions = [
     { value: 'high', label: 'High' },
@@ -3661,7 +3708,7 @@ export default function BrandDetailPage() {
   const visibleLiveScanFindings = filterFindings(liveScanFindings) ?? [];
   const visibleLiveScanNonHits = sortBySeverity(filterFindings(liveScanNonHits) ?? []);
   const isSearchResultsMode = shouldUseServerFindingSearch;
-  const isSearchQueryTooShort = isSearchResultsMode && !canRunServerFindingSearch;
+  const isSearchQueryTooShort = isSearchResultsMode && !isExecutiveSummaryMentionsMode && !canRunServerFindingSearch;
   const searchResultsCountLabel = `${formatInteger(searchResults.length)} result${searchResults.length !== 1 ? 's' : ''}`;
   const searchResultsStatusText = searchResultsTotalCount !== null && searchResultsTotalCount > searchResults.length
     ? `Showing ${formatInteger(searchResults.length)} of ${formatInteger(searchResultsTotalCount)} results that match the current ${activeFindingsFilterLabel}.`
@@ -3683,7 +3730,7 @@ export default function BrandDetailPage() {
   );
   const clearHistoryDisabledReason = scanning ? ACTIVE_SCAN_DELETE_TOOLTIP : null;
   const runScanDisabledReason = historyDeletionInProgress ? RUN_SCAN_DELETION_TOOLTIP : null;
-  const showClearHistoryAction = activeTab === 'scans' && scans.length > 0 && !isAwaitingClearHistoryConfirmation;
+  const showClearHistoryAction = activeTab === 'scans' && scans.length > 0 && !isAwaitingClearHistoryConfirmation && !isExecutiveSummaryMentionsMode;
 
   // ---------------------------------------------------------------------------
   // Render
@@ -3691,21 +3738,24 @@ export default function BrandDetailPage() {
 
   return (
     <AuthGuard>
-      <Navbar />
+      <Navbar activeHref={isExecutiveSummaryMentionsMode && returnToDashboard ? '/dashboard' : undefined} />
       <main id="brand-detail-top" className="min-h-screen bg-gray-50 pt-16 lg:pt-[4.5rem]">
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8 lg:py-10 xl:max-w-[88rem]">
 
           {/* Back link */}
-          <div className="mb-4 flex items-center justify-between gap-3 sm:mb-7 lg:mb-8">
-            <div className="flex min-w-0 items-center gap-3">
-              <Link href={backHref} className="flex-shrink-0 text-brand-600 hover:text-brand-700 transition">
+          <div className="mb-4 flex items-start justify-between gap-3 sm:mb-7 lg:mb-8">
+            <div className="min-w-0">
+              <Link href={backHref} className="inline-flex items-center gap-1.5 text-brand-600 transition hover:text-brand-700">
                 <ArrowLeft className="w-5 h-5" />
+                <span className="text-sm font-medium">
+                  {isExecutiveSummaryMentionsMode ? 'Back to dashboard' : 'Back'}
+                </span>
               </Link>
               {brand && (
-                <h1 className="min-w-0 truncate text-2xl font-bold text-gray-900">{brand.name}</h1>
+                <h1 className="mt-2 min-w-0 truncate text-2xl font-bold text-gray-900">{brand.name}</h1>
               )}
             </div>
-            {brand && (
+            {brand && !isExecutiveSummaryMentionsMode && (
               <Link href={`/brands/${brandId}/edit`} className="flex-shrink-0">
                 <Button variant="secondary" size="sm">
                   <Settings className="w-4 h-4" />
@@ -3752,26 +3802,44 @@ export default function BrandDetailPage() {
                 <div className="rounded-t-2xl bg-brand-600 px-4 py-4 sm:px-5 sm:py-6 lg:px-7 lg:py-7">
                   <div className="flex flex-col gap-4 sm:gap-5 lg:flex-row lg:items-start lg:justify-between lg:gap-7">
                     <div className="min-w-0 space-y-4 lg:space-y-5">
-                      <h2 className="text-xl font-semibold text-white sm:text-2xl">Findings</h2>
+                      <h2 className="text-xl font-semibold text-white sm:text-2xl">
+                        {isExecutiveSummaryMentionsMode ? 'Mentions' : 'Findings'}
+                      </h2>
                       <div className="hidden flex-wrap items-center gap-2.5 sm:flex lg:gap-3">
-                        <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
-                          {scans.length === 0
-                            ? 'No scans yet'
-                            : `${formatInteger(scans.length)} scan${scans.length !== 1 ? 's' : ''}`}
-                        </span>
-                        {scans.length > 0 && (
-                          <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
-                            {formatInteger(totalFindings)} finding{totalFindings !== 1 ? 's' : ''} detected
-                          </span>
-                        )}
-                        {totalNonHits > 0 && (
-                          <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
-                            {formatInteger(totalNonHits)} non-hit{totalNonHits !== 1 ? 's' : ''}
-                          </span>
+                        {isExecutiveSummaryMentionsMode ? (
+                          <>
+                            <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
+                              {executiveSummaryMentionsHeading}
+                            </span>
+                            <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
+                              {searchResultsTotalCount !== null
+                                ? `${formatInteger(searchResultsTotalCount)} finding${searchResultsTotalCount !== 1 ? 's' : ''}`
+                                : 'Loading mentions'}
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
+                              {scans.length === 0
+                                ? 'No scans yet'
+                                : `${formatInteger(scans.length)} scan${scans.length !== 1 ? 's' : ''}`}
+                            </span>
+                            {scans.length > 0 && (
+                              <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
+                                {formatInteger(totalFindings)} finding{totalFindings !== 1 ? 's' : ''} detected
+                              </span>
+                            )}
+                            {totalNonHits > 0 && (
+                              <span className="inline-flex items-center rounded-full bg-white/12 px-2.5 py-1 text-xs font-medium text-white/95 ring-1 ring-white/10">
+                                {formatInteger(totalNonHits)} non-hit{totalNonHits !== 1 ? 's' : ''}
+                              </span>
+                            )}
+                          </>
                         )}
                       </div>
                     </div>
-                    <div className="flex flex-wrap items-center gap-1.5 lg:gap-2">
+                    {!isExecutiveSummaryMentionsMode && (
+                      <div className="flex flex-wrap items-center gap-1.5 lg:gap-2">
                       {showClearHistoryAction && (
                         clearHistoryDisabledReason ? (
                           <Tooltip content={clearHistoryDisabledReason} align="end">
@@ -3881,41 +3949,43 @@ export default function BrandDetailPage() {
                         )}
                       </div>
                     </div>
+                    )}
                   </div>
-                  <div className="mt-5 sm:mt-6">
-                    <div className="sm:hidden">
-                      <button
-                        type="button"
-                        onClick={() => setIsMobileSearchFiltersOpen((current) => !current)}
-                        className="flex w-full items-center justify-between rounded-xl border border-white/15 bg-white/8 px-3 py-2.5 text-left text-sm font-medium text-white/90 transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
-                        aria-expanded={isMobileSearchFiltersOpen}
-                        aria-controls="mobile-search-filter-panel"
+                  {!isExecutiveSummaryMentionsMode && (
+                    <div className="mt-5 sm:mt-6">
+                      <div className="sm:hidden">
+                        <button
+                          type="button"
+                          onClick={() => setIsMobileSearchFiltersOpen((current) => !current)}
+                          className="flex w-full items-center justify-between rounded-xl border border-white/15 bg-white/8 px-3 py-2.5 text-left text-sm font-medium text-white/90 transition hover:bg-white/12 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                          aria-expanded={isMobileSearchFiltersOpen}
+                          aria-controls="mobile-search-filter-panel"
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <Search className="h-4 w-4 flex-none" />
+                            <span>Search &amp; filter</span>
+                            {activeFindingControlCount > 0 && (
+                              <span className="inline-flex items-center rounded-full bg-white/14 px-2 py-0.5 text-[11px] font-semibold text-white/90 ring-1 ring-white/10">
+                                {activeFindingControlCount} active
+                              </span>
+                            )}
+                          </span>
+                          <ChevronDown
+                            className={cn(
+                              'h-4 w-4 flex-none transition-transform',
+                              isMobileSearchFiltersOpen && 'rotate-180',
+                            )}
+                          />
+                        </button>
+                      </div>
+                      <div
+                        id="mobile-search-filter-panel"
+                        className={cn(
+                          'mt-3 sm:mt-0',
+                          isMobileSearchFiltersOpen ? 'block' : 'hidden',
+                          'sm:block',
+                        )}
                       >
-                        <span className="flex min-w-0 items-center gap-2">
-                          <Search className="h-4 w-4 flex-none" />
-                          <span>Search &amp; filter</span>
-                          {activeFindingControlCount > 0 && (
-                            <span className="inline-flex items-center rounded-full bg-white/14 px-2 py-0.5 text-[11px] font-semibold text-white/90 ring-1 ring-white/10">
-                              {activeFindingControlCount} active
-                            </span>
-                          )}
-                        </span>
-                        <ChevronDown
-                          className={cn(
-                            'h-4 w-4 flex-none transition-transform',
-                            isMobileSearchFiltersOpen && 'rotate-180',
-                          )}
-                        />
-                      </button>
-                    </div>
-                    <div
-                      id="mobile-search-filter-panel"
-                      className={cn(
-                        'mt-3 sm:mt-0',
-                        isMobileSearchFiltersOpen ? 'block' : 'hidden',
-                        'sm:block',
-                      )}
-                    >
                       <div className="flex flex-col gap-2.5 sm:mt-5 sm:gap-3 lg:flex-row lg:items-center lg:gap-4">
                         <div className="relative max-w-lg flex-1">
                           <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -4030,11 +4100,12 @@ export default function BrandDetailPage() {
                           </p>
                         </div>
                       )}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
-                {activeTab === 'scans' && isAwaitingClearHistoryConfirmation && (
+                {activeTab === 'scans' && isAwaitingClearHistoryConfirmation && !isExecutiveSummaryMentionsMode && (
                   <div className="border-x border-b border-red-100 bg-red-50 px-4 py-4">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <p className="text-sm text-red-800">
@@ -4057,7 +4128,8 @@ export default function BrandDetailPage() {
                 )}
 
                 <div className="overflow-hidden rounded-b-2xl border border-gray-200 border-t-0 bg-white">
-                  <div className="border-b border-gray-200 px-4 sm:px-6 lg:px-7">
+                  {!isExecutiveSummaryMentionsMode && (
+                    <div className="border-b border-gray-200 px-4 sm:px-6 lg:px-7">
                     <div className="flex items-end gap-4 overflow-x-auto sm:gap-7 lg:gap-8">
                       <button
                         type="button"
@@ -4123,7 +4195,8 @@ export default function BrandDetailPage() {
                         )}
                       </button>
                     </div>
-                  </div>
+                    </div>
+                  )}
 
                   <div className="bg-gray-50 px-2 py-4 sm:px-6 sm:py-6 lg:px-7 lg:py-8">
                     {isSearchResultsMode ? (
@@ -4140,7 +4213,9 @@ export default function BrandDetailPage() {
                         ) : findingsSearchLoading && searchResults.length === 0 ? (
                           <div className="flex min-h-60 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 px-6 py-12 text-center">
                             <Loader2 className="w-5 h-5 animate-spin text-brand-600" />
-                            <p className="text-sm text-gray-500">Searching findings…</p>
+                            <p className="text-sm text-gray-500">
+                              {isExecutiveSummaryMentionsMode ? 'Loading mentions…' : 'Searching findings…'}
+                            </p>
                           </div>
                         ) : searchResultsError ? (
                           <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-4 text-sm text-red-700">
@@ -4151,7 +4226,11 @@ export default function BrandDetailPage() {
                             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-50">
                               <Search className="w-5 h-5 text-brand-600" />
                             </div>
-                            <p className="text-sm text-gray-500">No findings match the current {activeFindingsFilterLabel}.</p>
+                            <p className="text-sm text-gray-500">
+                              {isExecutiveSummaryMentionsMode
+                                ? `No associated findings are available for ${executiveSummaryThemeTitle || 'this theme'}.`
+                                : `No findings match the current ${activeFindingsFilterLabel}.`}
+                            </p>
                           </div>
                         ) : (
                           <>
@@ -4196,6 +4275,7 @@ export default function BrandDetailPage() {
 
                                   <FindingCard
                                     finding={result}
+                                    className="last:border-b last:border-gray-200 sm:last:border sm:last:border-gray-200"
                                     isSelected={selectedFindingIdSet.has(result.id)}
                                     highlightQuery={activeHighlightQuery}
                                     onSelectionChange={handleFindingSelectionChange}
@@ -4209,7 +4289,7 @@ export default function BrandDetailPage() {
                               ))}
                             </div>
 
-                            {(searchResultsNextCursor || searchResultsTruncated) && (
+                            {!isExecutiveSummaryMentionsMode && (searchResultsNextCursor || searchResultsTruncated) && (
                               <div className="flex flex-col items-center gap-3 pt-2">
                                 {searchResultsNextCursor && (
                                   <Button

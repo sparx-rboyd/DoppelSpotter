@@ -116,6 +116,18 @@ export interface ScanSummaryOutput {
   summary: string;
 }
 
+export interface DashboardExecutiveSummaryPatternOutput {
+  name: string;
+  description: string;
+  mentionCount: number;
+  findingIds: string[];
+}
+
+export interface DashboardExecutiveSummaryOutput {
+  summary: string;
+  patterns?: DashboardExecutiveSummaryPatternOutput[];
+}
+
 export interface ThemeNormalizationMapping {
   provisionalTheme: string;
   canonicalTheme: string;
@@ -895,6 +907,65 @@ export function parseScanSummaryOutput(raw: string): ScanSummaryOutput | null {
 
     return {
       summary: parsed.summary.trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function parseDashboardExecutiveSummaryOutput(raw: string): DashboardExecutiveSummaryOutput | null {
+  try {
+    const stripped = stripJsonFences(raw);
+    const parsed = JSON.parse(stripped);
+    if (typeof parsed.summary !== 'string' || parsed.summary.trim().length === 0) {
+      return null;
+    }
+
+    const patterns = Array.isArray(parsed.patterns)
+      ? parsed.patterns.flatMap((pattern: unknown): DashboardExecutiveSummaryPatternOutput[] => {
+        if (!pattern || typeof pattern !== 'object') {
+          return [];
+        }
+
+        const candidate = pattern as {
+          name?: unknown;
+          description?: unknown;
+          mentionCount?: unknown;
+          findingIds?: unknown;
+        };
+        const mentionCount = candidate.mentionCount;
+
+        if (
+          typeof candidate.name !== 'string'
+          || typeof candidate.description !== 'string'
+          || typeof mentionCount !== 'number'
+          || !Number.isInteger(mentionCount)
+          || mentionCount < 2
+          || !Array.isArray(candidate.findingIds)
+        ) {
+          return [];
+        }
+
+        const findingIds = candidate.findingIds
+          .filter((findingId: unknown): findingId is string => typeof findingId === 'string' && findingId.trim().length > 0)
+          .map((findingId: string) => findingId.trim());
+
+        if (findingIds.length === 0) {
+          return [];
+        }
+
+        return [{
+          name: candidate.name.trim(),
+          description: candidate.description.trim(),
+          mentionCount,
+          findingIds,
+        }];
+      })
+      : [];
+
+    return {
+      summary: parsed.summary.trim(),
+      ...(patterns.length > 0 ? { patterns } : {}),
     };
   } catch {
     return null;

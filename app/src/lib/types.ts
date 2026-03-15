@@ -168,6 +168,8 @@ export interface BrandProfile {
   historyDeletion?: AsyncDeletionState;
   /** Async brand deletion job state, if this brand is being removed entirely. */
   brandDeletion?: AsyncDeletionState;
+  /** Persisted brand-wide dashboard executive summary for the all-scans dashboard scope. */
+  dashboardExecutiveSummary?: DashboardExecutiveSummaryData;
   /** Set to true once the user has seen (and dismissed) the lookback-period nudge modal. */
   lookbackNudgeDismissed?: boolean;
   createdAt: Timestamp;
@@ -616,6 +618,38 @@ export interface DashboardMetricsData {
   themeBreakdown: DashboardBreakdownRow[];
   sourceTimeline: DashboardTimeline | null;
   themeTimeline: DashboardTimeline | null;
+  dashboardExecutiveSummary?: DashboardExecutiveSummaryData | null;
+}
+
+export type DashboardExecutiveSummaryStatus = 'pending' | 'ready' | 'failed';
+
+export interface DashboardExecutiveSummaryPattern {
+  name: string;
+  description: string;
+  mentionCount: number;
+  findingIds: string[];
+}
+
+export interface DashboardExecutiveSummaryData {
+  version: number;
+  status: DashboardExecutiveSummaryStatus;
+  brandId: string;
+  inputFindingCount?: number;
+  severityBreakdown?: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+  summary?: string;
+  patterns?: DashboardExecutiveSummaryPattern[];
+  generatedFromScanId?: string;
+  requestedForScanId?: string;
+  latestCompletedAt?: Timestamp;
+  completedScanCount?: number;
+  startedAt?: Timestamp;
+  completedAt?: Timestamp;
+  error?: string;
+  rawLlmResponse?: string;
 }
 
 // ─── AI Analysis ───────────────────────────────────────────────────────────

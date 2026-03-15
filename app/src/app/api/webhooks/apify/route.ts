@@ -108,6 +108,11 @@ import {
   type XScannerConfig,
 } from '@/lib/scan-sources';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
+import {
+  generateAndPersistDashboardExecutiveSummary,
+  markDashboardExecutiveSummaryPending,
+} from '@/lib/dashboard-executive-summary';
+import { scheduleDashboardExecutiveSummaryTaskOrRunInline } from '@/lib/dashboard-summary-tasks';
 import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
 
 /** Maximum normalized candidates per LLM request chunk. */
@@ -6564,6 +6569,28 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
     console.error(`[webhook] Failed to persist dashboard breakdowns for scan ${fresh.id}:`, err);
   }
   await sendCompletedScanSummaryEmailIfNeeded(scanRef);
+
+  try {
+    await markDashboardExecutiveSummaryPending({
+      brandId: fresh.brandId,
+      requestedForScanId: fresh.id,
+    });
+    await scheduleDashboardExecutiveSummaryTaskOrRunInline({
+      payload: {
+        kind: 'dashboard-executive-summary',
+        brandId: fresh.brandId,
+        userId: fresh.userId,
+      },
+      requestHeaders: new Headers(),
+      logPrefix: `[dashboard-executive-summary] Completed scan ${fresh.id}`,
+      runInline: () => generateAndPersistDashboardExecutiveSummary({
+        brandId: fresh.brandId,
+        userId: fresh.userId,
+      }),
+    });
+  } catch (err) {
+    console.error(`[webhook] Failed to schedule dashboard executive summary for scan ${fresh.id}:`, err);
+  }
 }
 
 function normalizeSuggestedSearchKey(query: string): string {

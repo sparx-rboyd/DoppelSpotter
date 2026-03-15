@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePageTitle } from '@/lib/use-page-title';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import {
   AlertCircle,
@@ -11,12 +11,16 @@ import {
   ArrowRight,
   BarChart3,
   Building2,
+  ChevronDown,
+  ChevronRight,
+  Crosshair,
   Expand,
   Info,
   Loader2,
   PlayCircle,
   SearchCheck,
   Shield,
+  Sparkles,
   X,
 } from 'lucide-react';
 import { AuthGuard } from '@/components/auth-guard';
@@ -38,6 +42,7 @@ import type {
   DashboardBootstrapBrand,
   DashboardBreakdownRow,
   DashboardBootstrapData,
+  DashboardExecutiveSummaryData,
   DashboardMetricsData,
   DashboardPreferenceUpdateInput,
   ScanSummary,
@@ -45,7 +50,12 @@ import type {
 
 const DASHBOARD_RETURN_TO_PARAM = 'returnTo';
 const DASHBOARD_RETURN_TO_VALUE = 'dashboard';
+const EXECUTIVE_SUMMARY_THEME_VIEW_PARAM = 'view';
+const EXECUTIVE_SUMMARY_THEME_VIEW_VALUE = 'executive-summary-theme';
+const EXECUTIVE_SUMMARY_FINDING_ID_QUERY_PARAM = 'findingId';
+const EXECUTIVE_SUMMARY_THEME_TITLE_QUERY_PARAM = 'themeTitle';
 const DEFAULT_THEME_TIMELINE_SELECTION_COUNT = 15;
+const EXECUTIVE_SUMMARY_POLL_INTERVAL_MS = 5_000;
 
 type ExpandedDashboardChartId =
   | 'source-breakdown'
@@ -98,13 +108,30 @@ function formatCompactDashboardDateTime(date: Parameters<typeof formatDate>[0]):
   }
 }
 
+function formatDebugRawResponse(raw?: string) {
+  if (!raw) {
+    return '(not available — this run may have used a fallback summary or failed before the raw response was captured)';
+  }
+
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
 export default function DashboardPage() {
   usePageTitle('Dashboard');
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const showDebug = searchParams.get('debug') === 'true';
   const [brands, setBrands] = useState<DashboardBootstrapBrand[]>([]);
   const [selectedBrandId, setSelectedBrandId] = useState<string | null>(null);
   const [selectedScanId, setSelectedScanId] = useState('');
   const [metrics, setMetrics] = useState<DashboardMetricsData | null>(null);
+  const [executiveSummary, setExecutiveSummary] = useState<DashboardExecutiveSummaryData | null>(null);
+  const [executiveSummaryLoading, setExecutiveSummaryLoading] = useState(false);
+  const [executiveSummaryError, setExecutiveSummaryError] = useState('');
   const [bootstrapLoading, setBootstrapLoading] = useState(true);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [bootstrapError, setBootstrapError] = useState('');
@@ -112,6 +139,7 @@ export default function DashboardPage() {
   const [preferenceError, setPreferenceError] = useState('');
   const [expandedChartId, setExpandedChartId] = useState<ExpandedDashboardChartId | null>(null);
   const [isMounted, setIsMounted] = useState(false);
+  const [executiveSummaryThemesExpanded, setExecutiveSummaryThemesExpanded] = useState(false);
   const [selectedSourceTimelineSeriesKeys, setSelectedSourceTimelineSeriesKeys] = useState<string[]>([]);
   const [selectedThemeTimelineSeriesKeys, setSelectedThemeTimelineSeriesKeys] = useState<string[]>([]);
 
@@ -148,6 +176,38 @@ export default function DashboardPage() {
     () => metrics?.themeTimeline?.series ?? [],
     [metrics?.themeTimeline?.series],
   );
+
+  const loadMetrics = useCallback(async (options?: { silent?: boolean }) => {
+    const resolvedBrandId = selectedBrandId;
+    if (!resolvedBrandId) return;
+
+    if (!options?.silent) {
+      setMetricsLoading(true);
+      setMetricsError('');
+    }
+
+    const params = new URLSearchParams({ brandId: resolvedBrandId });
+    if (selectedScanId) {
+      params.set('scanId', selectedScanId);
+    }
+
+    try {
+      const data = await readDashboardResponse<DashboardMetricsData>(`/api/dashboard/metrics?${params.toString()}`, {
+        credentials: 'same-origin',
+      });
+      setMetrics(data);
+      setSelectedScanId(data.selectedScanId ?? '');
+    } catch (err) {
+      if (!options?.silent) {
+        setMetrics(null);
+      }
+      setMetricsError(err instanceof Error ? err.message : 'Failed to load dashboard metrics');
+    } finally {
+      if (!options?.silent) {
+        setMetricsLoading(false);
+      }
+    }
+  }, [selectedBrandId, selectedScanId]);
 
   useEffect(() => {
     setIsMounted(true);
@@ -195,52 +255,14 @@ export default function DashboardPage() {
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
     if (!selectedBrandId) {
       setMetrics(null);
       setSelectedScanId('');
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    async function loadMetrics() {
-      const resolvedBrandId = selectedBrandId;
-      if (!resolvedBrandId) return;
-
-      setMetricsLoading(true);
-      setMetricsError('');
-
-      const params = new URLSearchParams({ brandId: resolvedBrandId });
-      if (selectedScanId) {
-        params.set('scanId', selectedScanId);
-      }
-
-      try {
-        const data = await readDashboardResponse<DashboardMetricsData>(`/api/dashboard/metrics?${params.toString()}`, {
-          credentials: 'same-origin',
-        });
-        if (cancelled) return;
-
-        setMetrics(data);
-        setSelectedScanId(data.selectedScanId ?? '');
-      } catch (err) {
-        if (cancelled) return;
-        setMetrics(null);
-        setMetricsError(err instanceof Error ? err.message : 'Failed to load dashboard metrics');
-      } finally {
-        if (!cancelled) {
-          setMetricsLoading(false);
-        }
-      }
+      return;
     }
 
     void loadMetrics();
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedBrandId, selectedScanId]);
+  }, [loadMetrics, selectedBrandId]);
 
   async function persistSelectedBrandPreference(nextBrandId: string) {
     try {
@@ -274,6 +296,46 @@ export default function DashboardPage() {
       ? `Covering all completed scans for ${selectedBrand.name}.`
       : 'Covering all completed scans.';
   const isAllScansScope = !selectedScanId;
+  const executiveSummaryPatterns = executiveSummary?.patterns ?? [];
+  const isExecutiveSummaryPending = executiveSummary?.status === 'pending';
+  const isExecutiveSummaryFailed = executiveSummary?.status === 'failed';
+  const hasExecutiveSummaryContent = Boolean(executiveSummary?.summary);
+  const shouldShowExecutiveSummaryContent = hasExecutiveSummaryContent && !isExecutiveSummaryPending;
+  const shouldShowExecutiveSummarySection = (
+    isAllScansScope
+    && Boolean(metrics?.hasTerminalScans)
+    && (isExecutiveSummaryPending || hasExecutiveSummaryContent)
+  );
+
+  useEffect(() => {
+    setExecutiveSummaryError('');
+    setExecutiveSummaryLoading(false);
+    setExecutiveSummaryThemesExpanded(false);
+  }, [selectedBrandId, selectedScanId]);
+
+  useEffect(() => {
+    if (!isAllScansScope) {
+      setExecutiveSummary(null);
+      setExecutiveSummaryThemesExpanded(false);
+      return;
+    }
+
+    setExecutiveSummary(metrics?.dashboardExecutiveSummary ?? null);
+  }, [isAllScansScope, metrics]);
+
+  useEffect(() => {
+    if (!isAllScansScope || executiveSummary?.status !== 'pending') {
+      return undefined;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadMetrics({ silent: true });
+    }, EXECUTIVE_SUMMARY_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [executiveSummary?.status, isAllScansScope, loadMetrics]);
 
   useEffect(() => {
     if (sourceTimelineOptions.length === 0) {
@@ -452,6 +514,44 @@ export default function DashboardPage() {
     router.push(`/brands/${selectedBrand.id}?${params.toString()}${hash}`);
   }
 
+  function buildExecutiveSummaryPatternHref(pattern: NonNullable<DashboardExecutiveSummaryData['patterns']>[number]) {
+    if (!selectedBrand) return null;
+
+    const params = new URLSearchParams({
+      [EXECUTIVE_SUMMARY_THEME_VIEW_PARAM]: EXECUTIVE_SUMMARY_THEME_VIEW_VALUE,
+      [DASHBOARD_RETURN_TO_PARAM]: DASHBOARD_RETURN_TO_VALUE,
+    });
+    params.set(EXECUTIVE_SUMMARY_THEME_TITLE_QUERY_PARAM, pattern.name);
+    for (const findingId of pattern.findingIds) {
+      params.append(EXECUTIVE_SUMMARY_FINDING_ID_QUERY_PARAM, findingId);
+    }
+
+    return `/brands/${selectedBrand.id}?${params.toString()}`;
+  }
+
+  async function generateExecutiveSummary() {
+    if (!selectedBrandId || !showDebug || !isAllScansScope) return;
+
+    setExecutiveSummaryLoading(true);
+    setExecutiveSummaryError('');
+    try {
+      const params = new URLSearchParams({
+        brandId: selectedBrandId,
+        debug: 'true',
+      });
+      const data = await readDashboardResponse<DashboardExecutiveSummaryData>(`/api/dashboard/executive-summary?${params.toString()}`, {
+        method: 'POST',
+        credentials: 'same-origin',
+      });
+      setExecutiveSummary(data ?? null);
+    } catch (err) {
+      setExecutiveSummary(null);
+      setExecutiveSummaryError(err instanceof Error ? err.message : 'Failed to generate executive summary');
+    } finally {
+      setExecutiveSummaryLoading(false);
+    }
+  }
+
   function renderChartHeader(
     title: string,
     description: string,
@@ -599,7 +699,7 @@ export default function DashboardPage() {
                   <DashboardCtaCard
                     eyebrow="Ready to scan"
                     title="Run your first scan to get started"
-                    description={`Kick off the first scan for ${selectedBrand.name} to populate the dashboard with severity totals, scan-type insights, and theme insights.`}
+                    description={`Kick off the first scan for ${selectedBrand.name} to surface your first actionable findings.`}
                     href={selectedBrandHref}
                     actionLabel="Open brand and run scan"
                     icon={PlayCircle}
@@ -637,6 +737,194 @@ export default function DashboardPage() {
                       />
                     </div>
                   </div>
+
+                  {shouldShowExecutiveSummarySection && (
+                    <Card className={cn(
+                      'overflow-hidden border-brand-100 bg-white',
+                      showDebug && 'border-dashed border-brand-200 bg-brand-50/40',
+                    )}>
+                      <CardHeader className="border-b border-brand-100 bg-brand-50/80">
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <Sparkles className="h-4 w-4 text-brand-700" />
+                              <h3 className="text-base font-semibold text-gray-900">Executive summary</h3>
+                            </div>
+                          </div>
+                          {showDebug && (
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              onClick={() => void generateExecutiveSummary()}
+                              disabled={!isAllScansScope || executiveSummaryLoading}
+                            >
+                              {executiveSummaryLoading ? (
+                                <>
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                  Generating...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="h-4 w-4" />
+                                  {hasExecutiveSummaryContent ? 'Force regenerate' : 'Generate executive summary'}
+                                </>
+                              )}
+                            </Button>
+                          )}
+                        </div>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {showDebug && executiveSummaryError && (
+                          <p className="rounded-lg border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
+                            {executiveSummaryError}
+                          </p>
+                        )}
+                        <div className="space-y-4">
+                            {isExecutiveSummaryPending && !hasExecutiveSummaryContent && (
+                              <div className="rounded-2xl border border-brand-100 bg-white p-5">
+                                <div className="flex items-start gap-3">
+                                  <Loader2 className="mt-0.5 h-5 w-5 animate-spin text-brand-700" />
+                                  <div>
+                                    <h4 className="text-sm font-semibold text-gray-900">Generating executive summary</h4>
+                                    <p className="mt-1 text-sm text-gray-700">This may take a few minutes</p>
+                                    <p className="mt-2 text-sm text-gray-500">
+                                      Executive summaries are regenerated automatically after every completed scan.
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {isExecutiveSummaryPending && hasExecutiveSummaryContent && (
+                              <div className="rounded-2xl border border-brand-100 bg-white p-5">
+                                <div className="flex items-start gap-3">
+                                  <Loader2 className="mt-0.5 h-5 w-5 animate-spin text-brand-700" />
+                                  <div>
+                                    <h4 className="text-sm font-semibold text-gray-900">Generating executive summary with AI</h4>
+                                    <p className="mt-1 text-sm text-gray-700">This may take a few minutes.</p>
+                                    <p className="mt-2 text-sm text-gray-500">
+                                      Executive summaries are regenerated automatically after every completed scan.
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+
+                            {isExecutiveSummaryFailed && (
+                              <div className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                                <p className="font-medium">Executive summary generation failed.</p>
+                                {executiveSummary?.error && (
+                                  <p className="mt-1">{executiveSummary.error}</p>
+                                )}
+                                {hasExecutiveSummaryContent && (
+                                  <p className="mt-1 text-amber-700/80">
+                                    Showing the last successful executive summary below.
+                                  </p>
+                                )}
+                              </div>
+                            )}
+
+                            {shouldShowExecutiveSummaryContent ? (
+                              <>
+                                <div className="rounded-2xl border border-brand-100 bg-white p-5">
+                                  <p className="text-sm leading-6 text-gray-700">
+                                    {executiveSummary?.summary}
+                                  </p>
+                                </div>
+
+                                {executiveSummaryPatterns.length > 0 ? (
+                                  <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
+                                    <button
+                                      type="button"
+                                      onClick={() => setExecutiveSummaryThemesExpanded((current) => !current)}
+                                      className="flex w-full items-center justify-between gap-3 bg-brand-50/60 px-4 py-3 text-left transition hover:bg-brand-50"
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        {executiveSummaryThemesExpanded ? (
+                                          <ChevronDown className="h-4 w-4 text-gray-500" />
+                                        ) : (
+                                          <ChevronRight className="h-4 w-4 text-gray-500" />
+                                        )}
+                                        <span className="text-sm font-semibold text-brand-700">
+                                          {executiveSummaryPatterns.length} key theme{executiveSummaryPatterns.length !== 1 ? 's' : ''} identified
+                                        </span>
+                                      </div>
+                                      <span className="text-xs font-medium text-gray-500">
+                                        {executiveSummaryThemesExpanded ? 'Hide' : 'Show'}
+                                      </span>
+                                    </button>
+
+                                    {executiveSummaryThemesExpanded && (
+                                      <div className="grid gap-3 border-t border-gray-200 p-4 md:grid-cols-2 xl:grid-cols-3">
+                                        {executiveSummaryPatterns.map((pattern) => (
+                                          <div
+                                            key={`${pattern.name}-${pattern.findingIds.join('-')}`}
+                                            className="flex h-full min-h-[15rem] flex-col rounded-2xl border border-brand-100 bg-brand-50/35 p-4 shadow-sm"
+                                          >
+                                            <div className="min-w-0 flex flex-1 flex-col">
+                                              <div className="flex items-start gap-2">
+                                                <Crosshair className="h-4 w-4 flex-none text-brand-700" />
+                                                <div className="min-w-0 flex-1">
+                                                  <h4 className="text-sm font-semibold leading-5 text-gray-900">
+                                                    {pattern.name}
+                                                  </h4>
+                                                  <Badge
+                                                    variant="default"
+                                                    className="mt-2.5 rounded-full border-none bg-gray-100 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-gray-600"
+                                                  >
+                                                    {pattern.mentionCount} mention{pattern.mentionCount !== 1 ? 's' : ''}
+                                                  </Badge>
+                                                </div>
+                                              </div>
+                                              <div className="mt-3 flex-1 overflow-y-auto pr-1">
+                                                <p className="text-sm leading-6 text-gray-700">
+                                                  {pattern.description}
+                                                </p>
+                                              </div>
+                                              <div className="mt-4">
+                                                <Link
+                                                  href={buildExecutiveSummaryPatternHref(pattern) ?? '#'}
+                                                  className={cn(
+                                                    'inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition hover:text-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500',
+                                                    !selectedBrand && 'pointer-events-none',
+                                                  )}
+                                                >
+                                                  View mentions
+                                                  <ArrowRight className="h-4 w-4" />
+                                                </Link>
+                                              </div>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
+                                    No repeated threat patterns were confidently extracted from this input set.
+                                  </div>
+                                )}
+                              </>
+                            ) : !isExecutiveSummaryPending ? (
+                              <div className="rounded-2xl border border-gray-200 bg-white p-5 text-sm text-gray-600">
+                                No executive summary has been generated yet.
+                              </div>
+                            ) : null}
+
+                            {showDebug && executiveSummary && !isExecutiveSummaryPending && (
+                              <details className="overflow-hidden rounded-2xl border border-gray-200 bg-white">
+                                <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-gray-900">
+                                  Raw LLM response
+                                </summary>
+                                <pre className="max-h-80 overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words border-t border-gray-200 p-4 font-mono text-xs leading-relaxed text-gray-700">
+                                  {formatDebugRawResponse(executiveSummary.rawLlmResponse)}
+                                </pre>
+                              </details>
+                            )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
 
                   <div className="grid gap-4 md:grid-cols-2 lg:gap-5 xl:grid-cols-4">
                     <DashboardMetricCard

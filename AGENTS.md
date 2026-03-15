@@ -43,7 +43,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │       │       ├── brands/       # CRUD + findings + scans per brand
 │       │       ├── dashboard/    # Dashboard bootstrap, persisted selection, and analytics metrics
 │       │       ├── findings/     # Cross-brand findings query
-│       │       ├── internal/     # Internal service-to-service routes (scheduled scan dispatch + Cloud Tasks deletion worker)
+│       │       ├── internal/     # Internal service-to-service routes (scheduled scan dispatch + Cloud Tasks deletion + dashboard-summary workers)
 │       │       ├── scan/         # Trigger scan + poll status
 │       │       └── webhooks/apify/  # Apify webhook receiver → AI analysis pipeline
 │       ├── settings/             # Authenticated account settings page (password + account deletion)
@@ -54,6 +54,8 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │           │   └── launch-queue.ts # Shared queued-launch drain + Apify backoff/throttle state helpers for initial and deep-search runs
 │           ├── async-deletions.ts  # Resumable lease-based deletion passes for scans, brand history, brands, and full accounts
 │           ├── deletion-tasks.ts   # Cloud Tasks client: typed deletion payloads, enqueue helpers, inline-drain fallback
+│           ├── dashboard-executive-summary.ts # Brand-wide dashboard executive summary generation + persistence helpers
+│           ├── dashboard-summary-tasks.ts # Cloud Tasks client: typed dashboard-summary payloads, enqueue helpers, inline fallback
 │           ├── internal-google-oidc.ts # Reusable Google OIDC token verifier for internal service-to-service routes
 │           ├── dashboard.ts      # Dashboard metrics helpers: terminal-scan totals + source/theme rollups from stored scan summaries
 │           ├── dashboard-aggregates.ts # Scan-level dashboard breakdown backfill/rebuild helpers
@@ -72,6 +74,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 └── docs/
     ├── GCP_SETUP.md
     ├── GCP_DELETION_TASKS_SETUP.md
+ ├── GCP_DASHBOARD_SUMMARY_TASKS_SETUP.md
     └── PIPELINE_SETUP.md
 ```
 
@@ -656,18 +659,20 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 - Each scan also stores `dashboardBreakdowns = { version, source[], theme[] }`, a compact per-scan summary used by the dashboard charts so `GET /api/dashboard/metrics` does not need to load raw findings during normal reads
 - The scan-type and theme charts aggregate those stored scan-level summaries for the selected scope and use the same visible-count semantics as the rest of the app: actionable hits plus non-hits, excluding ignored and addressed real findings
 - Scan completion writes the latest dashboard breakdowns, finding PATCH mutations rebuild the affected scans' breakdowns after ignore/address/reclassify actions, and the metrics route can lazily backfill older scans that predate the field
+- The brand document may also store a persisted `dashboardExecutiveSummary` for the all-scans dashboard scope; it is regenerated asynchronously via a dedicated Cloud Tasks worker after scan completion and surfaced only in the debug dashboard view for now
 - Missing `theme` labels are grouped into an `Unlabelled` chart bucket
 - Each chart row also tracks the newest matching scan id per severity bucket so stacked-bar segments can drill into the brand page
 - Scan-type chart drill-down links navigate to the brand page with `scanResultSet`, `category`, and optional `source` query params so the matching scan opens with the relevant scan-type filter state applied
 - Theme chart drill-down links navigate to the brand page with `scanResultSet`, `category`, and optional `theme` query params so the matching scan opens with the relevant filter state applied
 - Dashboard severity metric cards use the same drill-down pattern, applying the matching `category` filter and, when a specific scan is in scope, anchoring into the relevant section of that scan
 - Dashboard-originated links into a brand page also carry `returnTo=dashboard`, so the brand-page back arrow returns to the dashboard instead of the brands index for that navigation path
+- Dashboard executive-summary theme cards can now deep-link into a special brand-page mentions mode using repeated `findingId` query params plus `view=executive-summary-theme`; that mode reuses the brand page's flat results rendering, shows only the linked findings, hides normal search/filter controls, and forces the dashboard navbar tab to stay visually selected
 - When a brand has no terminal scans yet, the dashboard shows a CTA to run the first scan; if the first scan is already in progress, it instead shows a progress-focused CTA linked to the brand page
 
 **API:**
 - `GET /api/dashboard/bootstrap` — returns lightweight brand selector options plus the resolved selected brand id
 - `PATCH /api/dashboard/preferences` — persists `{ selectedBrandId }` on the authenticated user document
-- `GET /api/dashboard/metrics?brandId=...&scanId=...` — returns scan selector options, the selected brand's summary badges, KPI totals, active-scan state, and the scan-type/theme stacked-bar datasets
+- `GET /api/dashboard/metrics?brandId=...&scanId=...` — returns scan selector options, the selected brand's summary badges, KPI totals, active-scan state, the scan-type/theme stacked-bar datasets, and the persisted all-scans dashboard executive summary when present
 
 ---
 
@@ -687,6 +692,8 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | `SCHEDULE_DISPATCH_SERVICE_ACCOUNT_EMAIL` | Email of the dedicated Cloud Scheduler service account allowed to call the internal scheduled-scan dispatch route |
 | `DELETION_TASKS_QUEUE_PATH` | Full Cloud Tasks queue resource path used to enqueue deletion-worker jobs |
 | `DELETION_TASKS_SERVICE_ACCOUNT_EMAIL` | Email of the dedicated Cloud Tasks service account allowed to call the internal deletion worker route and used to sign those task requests |
+| `DASHBOARD_SUMMARY_TASKS_QUEUE_PATH` | Full Cloud Tasks queue resource path used to enqueue brand-level dashboard executive summary refresh jobs |
+| `DASHBOARD_SUMMARY_TASKS_SERVICE_ACCOUNT_EMAIL` | Email of the dedicated Cloud Tasks service account allowed to call the internal dashboard executive summary worker route and used to sign those task requests |
 | `GCP_PROJECT_ID` | Google Cloud project ID |
 | `FIRESTORE_DATABASE_ID` | Firestore DB (default: `(default)`) |
 | `APP_URL` | Public base URL — used to construct webhook callback URLs |
@@ -701,7 +708,7 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | `users` | id, email, passwordHash, **sessionVersion?**, **lastSeenAt?**, **passwordChangedAt?**, **accountDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`, `pendingRunAborts?`), **dashboardPreferences?** (`selectedBrandId?`), **emailVerified?**, **emailVerificationVersion?**, **emailVerifiedAt?**, createdAt |
 | `inviteCodes` | id (`sha256(code)`), codeHash, createdAt, **usedAt?**, **usedByEmail?**, **usedByUserId?** |
 | `authRateLimits` | id (`<scope>:<sha256(client-identifier)>`), scope, keyHash, attemptCount, windowStartedAt, lastAttemptAt |
-| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **lookbackPeriod?** (`1year`\|`1month`\|`1week`\|`since_last_scan`, default `1year`), **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `apple_app_store`, `google_play`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), **lookbackNudgeDismissed?**, createdAt, updatedAt |
+| `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **lookbackPeriod?** (`1year`\|`1month`\|`1week`\|`since_last_scan`, default `1year`), **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `apple_app_store`, `google_play`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), **dashboardExecutiveSummary?** (`version`, `status`, `summary?`, `patterns[]?`, `inputFindingCount?`, `severityBreakdown?`, `generatedFromScanId?`, `requestedForScanId?`, `latestCompletedAt?`, `completedScanCount?`, `startedAt?`, `completedAt?`, `error?`, `rawLlmResponse?`), **lookbackNudgeDismissed?**, createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), **deletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), actorIds[], actorRuns{} (`scannerId`, `source`, `status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`, `displayQuery?`, `deepSearchSuggestionsProcessed?`, `suggestedSearches?`), **queuedActorRuns[] / launchingActorRuns{}** (`launchId`, `scannerId`, `source`, `searchDepth`, serialized input, raw/user-visible queries), **apifyThrottle?** (`activeLaunchIds[]`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, dashboardBreakdowns?** (`version`, `source[]`, `theme[]` compact dashboard chart summaries), **userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
 | `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`apple_app_store`\|`google_play`\|`domains`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, **provisionalTheme?**, description, llmAnalysis, url?, **canonicalId?** (source-specific normalized dedupe key: normalized URL / post id / video id / repo fullName / domain / tweet id), **xAuthorId?**, **xAuthorHandle?**, **xAuthorUrl?**, **xMatchBasis?** (`none`\|`handle_only`\|`content_only`\|`handle_and_content`), rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 
@@ -830,5 +837,6 @@ The findings API is optimised to minimise Firestore reads and HTTP round-trips o
 ## Key Docs
 
 - [`docs/GCP_SETUP.md`](docs/GCP_SETUP.md) — GCP / Firestore / Cloud Run setup
+- [`docs/GCP_DASHBOARD_SUMMARY_TASKS_SETUP.md`](docs/GCP_DASHBOARD_SUMMARY_TASKS_SETUP.md) — Cloud Tasks setup for dashboard executive summary refresh jobs
 - [`docs/PIPELINE_SETUP.md`](docs/PIPELINE_SETUP.md) — Apify, OpenRouter, ngrok, env vars
 - [`REVIEW.md`](REVIEW.md) — Ongoing scan quality review: actor details and AI analysis prompts

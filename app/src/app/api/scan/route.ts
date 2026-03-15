@@ -13,6 +13,11 @@ import {
 } from '@/lib/brands';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import {
+  generateAndPersistDashboardExecutiveSummary,
+  markDashboardExecutiveSummaryPending,
+} from '@/lib/dashboard-executive-summary';
+import { scheduleDashboardExecutiveSummaryTaskOrRunInline } from '@/lib/dashboard-summary-tasks';
+import {
   clearBrandActiveScanIfMatches,
   isScanInProgress,
   recoverStuckPendingScan,
@@ -141,6 +146,27 @@ export async function GET(request: NextRequest) {
       const refreshedScanDoc = await scanDoc.ref.get();
       if (refreshedScanDoc.exists) {
         scan = refreshedScanDoc.data() as Omit<Scan, 'id'>;
+      }
+      if (scan.status === 'completed') {
+        await markDashboardExecutiveSummaryPending({
+          brandId: scan.brandId,
+          requestedForScanId: scanDoc.id,
+        });
+        after(async () => {
+          await scheduleDashboardExecutiveSummaryTaskOrRunInline({
+            payload: {
+              kind: 'dashboard-executive-summary',
+              brandId: scan.brandId,
+              userId: scan.userId,
+            },
+            requestHeaders: request.headers,
+            logPrefix: `[dashboard-executive-summary] Recovered scan ${scanDoc.id}`,
+            runInline: () => generateAndPersistDashboardExecutiveSummary({
+              brandId: scan.brandId,
+              userId: scan.userId,
+            }),
+          });
+        });
       }
     }
   }

@@ -419,6 +419,47 @@ Rules:
 
 Before returning your response, validate that it does not exceed 5 sentences.`;
 
+export const DASHBOARD_EXECUTIVE_SUMMARY_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive a compact list of the highest-priority actionable findings across multiple completed scans for one brand.
+
+Your task is to identify recurring threat patterns that appear multiple times across those findings and produce a concise executive summary.
+Use British English spelling and phrasing in all human-readable output fields.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "summary": "A concise 2-4 sentence executive summary",
+  "patterns": [
+    {
+      "name": "Short pattern name",
+      "description": "Plain-language explanation of the recurring threat pattern and why it matters",
+      "mentionCount": 3,
+      "findingIds": ["finding-id-1", "finding-id-2"]
+    }
+  ]
+}
+
+Rules:
+- Base your summary and pattern extraction ONLY on the provided findings.
+- Focus on repeated threat patterns, not one-off isolated findings.
+- Only include a pattern when it is evidenced by at least 2 findings.
+- Prefer patterns such as impersonation, fake companies, scam support, copycat apps, suspicious tools, fake services, fraudulent communities, or recurring deceptive websites when clearly supported.
+- Patterns can focus on a specific named entity, app, website, brand, company, actor, platform, individual or group where evidence suggests that there is a recurring pattern of abuse that needs to be investigated more deeply.
+- Do not invent named entities, actors, platforms, or claims not grounded in the finding titles/descriptions.
+- Keep "name" short, specific, and executive-friendly.
+- Keep "description" concise but useful.
+- "mentionCount" should reflect how many provided findings support the pattern.
+- "findingIds" must contain only exact finding IDs from the provided input.
+- Do not include duplicate finding IDs within a pattern.
+- A single finding may appear in more than one pattern only when the evidence genuinely supports multiple distinct recurring patterns, but avoid overusing this.
+- Calibrate claims tightly to the evidence. Do not describe the threat landscape as widespread, coordinated, systemic, or severe unless the provided findings clearly justify that language.
+- If the evidence is mixed, say so plainly.
+- Return an empty "patterns" array when no repeated patterns are strongly supported.
+- Prefer at most 6 patterns.
+- Prefer 2-4 summary sentences. 5 at an absolute maximum where necessary.
+
+Before returning your response, validate that every "findingIds" value appears in the user prompt input and that "mentionCount" is at least the number of unique findingIds listed for that pattern.`;
+
 export const THEME_NORMALIZATION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
 
 You will receive historical theme labels already used for one brand, plus provisional theme labels assigned during one completed scan.
@@ -1385,6 +1426,50 @@ Do not describe the threat as widespread, systemic, coordinated, or severe unles
 If the evidence is concentrated in only one or two sources, say so plainly rather than implying broad cross-platform spread.
 
 If the findings show a mix of stronger and weaker signals, reflect that mix instead of describing the entire scan at the highest intensity.`;
+}
+
+export function buildDashboardExecutiveSummaryPrompt(params: {
+  brandName: string;
+  severityBreakdown: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+  findings: Array<{
+    id: string;
+    severity: Severity;
+    title: string;
+    description: string;
+  }>;
+}): string {
+  const { brandName, severityBreakdown, findings } = params;
+
+  return `Brand being protected: "${brandName}"
+
+Input selection notes:
+- Findings were preselected from completed scans only.
+- Findings are ordered by severity priority first (high, then medium, then low) and by scan recency within each severity.
+- Findings include only actionable visible threats, excluding non-findings, ignored findings, and addressed findings.
+
+Severity breakdown in this input:
+- High: ${severityBreakdown.high}
+- Medium: ${severityBreakdown.medium}
+- Low: ${severityBreakdown.low}
+
+Selected findings (${findings.length}):
+${JSON.stringify(findings, null, 2)}
+
+Write a concise executive summary for a debug-only dashboard experiment.
+
+Then extract the recurring threat patterns that appear multiple times across these findings.
+
+For each pattern:
+- Give it a short name.
+- Explain the pattern and why it matters.
+- Estimate how many of the provided findings support it.
+- Include the exact supporting finding IDs.
+
+Do not include one-off patterns supported by only one finding.`;
 }
 
 export function buildThemeNormalizationPrompt(params: {

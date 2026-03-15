@@ -154,6 +154,9 @@ export async function GET(request: NextRequest) {
     themeBreakdown: buildDashboardBreakdownRows(selectedDashboardScans, scanOrderById),
     sourceTimeline: selectedScanId ? null : buildDashboardSourceTimeline(terminalDashboardScans),
     themeTimeline: selectedScanId ? null : buildDashboardThemeTimeline(terminalDashboardScans),
+    dashboardExecutiveSummary: historyDeletionInProgress || selectedScanId
+      ? null
+      : brand.dashboardExecutiveSummary ?? null,
   };
 
   return NextResponse.json({ data });

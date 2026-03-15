@@ -12,7 +12,11 @@ const navLinks = [
   { href: '/brands', label: 'Brands', icon: Shield },
 ];
 
-export function Navbar() {
+type NavbarProps = {
+  activeHref?: string;
+};
+
+export function Navbar({ activeHref }: NavbarProps = {}) {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -38,7 +42,7 @@ export function Navbar() {
                 href={href}
                 className={cn(
                   'flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium transition lg:px-4 lg:py-2.5',
-                  pathname.startsWith(href)
+                  (activeHref ? activeHref === href : pathname.startsWith(href))
                     ? 'bg-white/20 text-white'
                     : 'text-white/70 hover:text-white hover:bg-white/10',
                 )}
@@ -86,7 +90,7 @@ export function Navbar() {
               href={href}
               className={cn(
                 'flex items-center gap-2.5 rounded-lg px-3 py-3 text-sm font-medium transition',
-                pathname.startsWith(href)
+                (activeHref ? activeHref === href : pathname.startsWith(href))
                   ? 'bg-white/20 text-white'
                   : 'text-white/70 hover:text-white hover:bg-white/10',
               )}

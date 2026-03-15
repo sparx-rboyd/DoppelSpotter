@@ -34,6 +34,20 @@ const MAX_RESULT_LIMIT = 100;
 const SEARCH_SCAN_BATCH_SIZE = 200;
 const MAX_SCANNED_FINDINGS = 5000;
 
+function parseFindingIds(values: string[]) {
+  const seen = new Set<string>();
+  const parsedValues: string[] = [];
+
+  for (const value of values) {
+    const trimmedValue = value.trim();
+    if (!trimmedValue || seen.has(trimmedValue)) continue;
+    seen.add(trimmedValue);
+    parsedValues.push(trimmedValue);
+  }
+
+  return parsedValues;
+}
+
 function normalizeSearchText(value: string) {
   return value.toLowerCase().replace(/\s+/g, ' ').trim();
 }
@@ -268,6 +282,7 @@ export async function GET(request: NextRequest, { params }: Params) {
   if (error) return error;
 
   const { brandId } = await params;
+  const findingIds = parseFindingIds(request.nextUrl.searchParams.getAll('findingId'));
   const rawQuery = request.nextUrl.searchParams.get('q')?.trim() ?? '';
   const normalizedQuery = normalizeSearchText(rawQuery);
   const categories = parseSearchCategories(request.nextUrl.searchParams.getAll('category'));
@@ -321,6 +336,54 @@ export async function GET(request: NextRequest, { params }: Params) {
         hasMore: false,
         truncated: false,
         ...(includeCount ? { totalCount: 0 } : {}),
+      },
+    });
+  }
+
+  if (findingIds.length > 0) {
+    const findingRefs = findingIds.map((findingId) => db.collection('findings').doc(findingId));
+    const findingSnapshots = await db.getAll(...findingRefs);
+    const findingById = new Map(
+      findingSnapshots
+        .filter((snapshot) => snapshot.exists)
+        .map((snapshot) => [
+          snapshot.id,
+          {
+            id: snapshot.id,
+            ...(snapshot.data() as Omit<FindingSummary, 'id'>),
+          } satisfies FindingSummary,
+        ]),
+    );
+
+    const orderedFindings = findingIds
+      .map((findingId) => findingById.get(findingId) ?? null)
+      .filter((finding): finding is FindingSummary => (
+        finding !== null
+        && finding.brandId === brandId
+        && !deletingScanIds.has(finding.scanId)
+      ));
+
+    const scanContextById = await loadScanContextById(
+      Array.from(new Set(orderedFindings.map((finding) => finding.scanId))),
+    );
+
+    const results: FindingSearchResult[] = orderedFindings.map((finding) => {
+      const scanContext = scanContextById.get(finding.scanId);
+      return {
+        ...finding,
+        displayBucket: getFindingDisplayBucket(finding),
+        ...(scanContext?.startedAt ? { scanStartedAt: scanContext.startedAt } : {}),
+        ...(scanContext?.status ? { scanStatus: scanContext.status } : {}),
+      };
+    });
+
+    return NextResponse.json({
+      data: {
+        results,
+        nextCursor: null,
+        hasMore: false,
+        truncated: false,
+        totalCount: results.length,
       },
     });
   }
