@@ -123,47 +123,43 @@ export async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummary
   });
 
   let rawLlmResponse: string | undefined;
-  try {
-    for (let attempt = 1; attempt <= SCAN_SUMMARY_LLM_MAX_ATTEMPTS; attempt++) {
-      let attemptRawLlmResponse: string | undefined;
-      try {
-        attemptRawLlmResponse = await chatCompletion([
-          { role: 'system', content: SCAN_SUMMARY_SYSTEM_PROMPT },
-          { role: 'user', content: prompt },
-        ], { temperature: 1.2 });
-        rawLlmResponse = attemptRawLlmResponse;
+  let finalError: unknown;
+  for (let attempt = 1; attempt <= SCAN_SUMMARY_LLM_MAX_ATTEMPTS; attempt++) {
+    let attemptRawLlmResponse: string | undefined;
+    try {
+      attemptRawLlmResponse = await chatCompletion([
+        { role: 'system', content: SCAN_SUMMARY_SYSTEM_PROMPT },
+        { role: 'user', content: prompt },
+      ], { temperature: 1.2 });
+      rawLlmResponse = attemptRawLlmResponse;
 
-        const parsed = parseScanSummaryOutput(attemptRawLlmResponse);
-        if (!parsed) {
-          throw new Error(`Failed to parse scan summary output: ${attemptRawLlmResponse.slice(0, 200)}`);
-        }
+      const parsed = parseScanSummaryOutput(attemptRawLlmResponse);
+      if (!parsed) {
+        throw new Error(`Failed to parse scan summary output: ${attemptRawLlmResponse.slice(0, 200)}`);
+      }
 
-        return {
-          summary: parsed.summary,
-          rawLlmResponse,
-        };
-      } catch (err) {
-        rawLlmResponse = attemptRawLlmResponse;
-        if (attempt < SCAN_SUMMARY_LLM_MAX_ATTEMPTS) {
-          console.warn(
-            `[scan-summary] Scan summary generation failed for scan ${scan.id} (attempt ${attempt}/${SCAN_SUMMARY_LLM_MAX_ATTEMPTS}); retrying once:`,
-            err,
-          );
-          continue;
-        }
-
-        throw err;
+      return {
+        summary: parsed.summary,
+        rawLlmResponse,
+      };
+    } catch (err) {
+      rawLlmResponse = attemptRawLlmResponse;
+      finalError = err;
+      if (attempt < SCAN_SUMMARY_LLM_MAX_ATTEMPTS) {
+        console.warn(
+          `[scan-summary] Scan summary generation failed for scan ${scan.id} (attempt ${attempt}/${SCAN_SUMMARY_LLM_MAX_ATTEMPTS}); retrying once:`,
+          err,
+        );
+        continue;
       }
     }
-
-    throw new Error(`Scan summary generation exhausted ${SCAN_SUMMARY_LLM_MAX_ATTEMPTS} attempts without returning`);
-  } catch (err) {
-    console.error(`[scan-summary] Scan summary generation failed for scan ${scan.id}:`, err);
-    return {
-      summary: buildFallbackScanAiSummary(findings),
-      ...(typeof rawLlmResponse === 'string' ? { rawLlmResponse } : {}),
-    };
   }
+
+  console.error(`[scan-summary] Scan summary generation failed for scan ${scan.id}:`, finalError);
+  return {
+    summary: buildFallbackScanAiSummary(findings),
+    ...(typeof rawLlmResponse === 'string' ? { rawLlmResponse } : {}),
+  };
 }
 
 export async function saveScanAiSummary(scanId: string, summaryResult: BuiltScanAiSummaryResult) {
