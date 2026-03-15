@@ -152,20 +152,29 @@ function formatDomainRegistrationDate(value?: string) {
   return `Registered on ${dayNumber}${ordinalSuffix(dayNumber)} ${monthLabel} ${year}`;
 }
 
-function buildSecondaryLabel(finding: FindingSummary) {
+function buildSecondaryLabelParts(finding: FindingSummary): { primary: string; suffix?: string } | null {
   if (finding.source === 'domains') {
     const domainLabel = extractDomainLabel(finding.url);
     const registrationLabel = formatDomainRegistrationDate(finding.registrationDate);
 
     if (domainLabel && registrationLabel) {
-      return `${domainLabel} | ${registrationLabel}`;
+      return { primary: domainLabel, suffix: registrationLabel };
     }
 
-    return domainLabel ?? registrationLabel;
+    if (domainLabel) {
+      return { primary: domainLabel };
+    }
+
+    if (registrationLabel) {
+      return { primary: registrationLabel };
+    }
+
+    return null;
   }
 
   if (finding.source === 'x') {
-    return formatXHandleLabel(finding.xAuthorHandle);
+    const handleLabel = formatXHandleLabel(finding.xAuthorHandle);
+    return handleLabel ? { primary: handleLabel } : null;
   }
 
   return null;
@@ -460,12 +469,14 @@ export function FindingCard({
     && highlightQuery?.trim()
     && finding.url.toLowerCase().includes(highlightQuery.trim().toLowerCase()),
   );
-  const secondaryLabel = buildSecondaryLabel(finding);
-  const truncatedSecondaryLabel = secondaryLabel ? truncateMiddle(secondaryLabel) : null;
+  const secondaryLabelParts = buildSecondaryLabelParts(finding);
+  const truncatedSecondaryPrimary = secondaryLabelParts?.primary
+    ? truncateMiddle(secondaryLabelParts.primary)
+    : null;
   const isSecondaryLabelTruncated = Boolean(
-    secondaryLabel
-    && truncatedSecondaryLabel
-    && secondaryLabel !== truncatedSecondaryLabel,
+    secondaryLabelParts?.primary
+    && truncatedSecondaryPrimary
+    && secondaryLabelParts.primary !== truncatedSecondaryPrimary,
   );
   const shouldWarnBeforeDomainVisit = finding.source === 'domains'
     && user?.preferences?.skipDomainRegistrationVisitWarning !== true;
@@ -763,11 +774,13 @@ export function FindingCard({
                     </Tooltip>
                   )}
                 </div>
-                {secondaryLabel && (
+                {secondaryLabelParts && (
                   <div className="min-w-0">
                     {isSecondaryLabelTruncated ? (
                       <Tooltip
-                        content={secondaryLabel}
+                        content={secondaryLabelParts.suffix
+                          ? `${secondaryLabelParts.primary} | ${secondaryLabelParts.suffix}`
+                          : secondaryLabelParts.primary}
                         contentClassName="max-w-sm whitespace-normal break-all"
                       >
                         <span
@@ -776,7 +789,8 @@ export function FindingCard({
                             muted ? 'text-gray-400' : 'text-gray-500',
                           )}
                         >
-                          {renderHighlightedText(truncatedSecondaryLabel ?? '', highlightQuery)}
+                          {renderHighlightedText(truncatedSecondaryPrimary ?? '', highlightQuery)}
+                          {secondaryLabelParts.suffix && ` | ${secondaryLabelParts.suffix}`}
                         </span>
                       </Tooltip>
                     ) : (
@@ -786,7 +800,8 @@ export function FindingCard({
                           muted ? 'text-gray-400' : 'text-gray-500',
                         )}
                       >
-                        {renderHighlightedText(truncatedSecondaryLabel ?? '', highlightQuery)}
+                        {renderHighlightedText(truncatedSecondaryPrimary ?? '', highlightQuery)}
+                        {secondaryLabelParts.suffix && ` | ${secondaryLabelParts.suffix}`}
                       </span>
                     )}
                   </div>

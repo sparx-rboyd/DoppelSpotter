@@ -1077,16 +1077,14 @@ function DashboardPageContent() {
                   {expandedChartMeta.description}
                 </p>
               </div>
-              <Button
+              <button
                 type="button"
-                variant="ghost"
-                size="sm"
                 onClick={() => setExpandedChartId(null)}
-                className="h-10 w-10 rounded-full border border-brand-100 bg-white/90 p-0 text-brand-700 hover:bg-white"
+                className="inline-flex h-11 w-11 items-center justify-center rounded-full border border-brand-100 bg-white/95 text-2xl leading-none font-light text-slate-700 shadow-sm transition hover:bg-white hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                aria-label="Close expanded chart"
               >
-                <X className="h-4 w-4" />
-                <span className="sr-only">Close expanded chart</span>
-              </Button>
+                <span aria-hidden="true">&times;</span>
+              </button>
             </div>
             <div className={cn('flex-1 min-h-0 overflow-auto p-4 sm:p-6 lg:p-7')}>
               {expandedChartMeta.controls ? (
