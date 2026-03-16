@@ -4,7 +4,7 @@ import { chatCompletion } from '@/lib/analysis/openrouter';
 import { SCAN_SUMMARY_SYSTEM_PROMPT, buildScanSummaryPrompt } from '@/lib/analysis/prompts';
 import { parseScanSummaryOutput } from '@/lib/analysis/types';
 import { buildCountOnlyScanAiSummary } from '@/lib/scans';
-import type { BrandProfile, Finding, Scan } from '@/lib/types';
+import type { BrandProfile, Finding, Scan, ScanSummaryPhase } from '@/lib/types';
 
 type ScanSummaryFindingInput = Pick<Finding, 'severity' | 'title' | 'source'>;
 
@@ -179,6 +179,22 @@ export async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummary
 export async function saveScanAiSummary(scanId: string, summaryResult: BuiltScanAiSummaryResult) {
   await db.collection('scans').doc(scanId).update({
     aiSummary: summaryResult.summary,
+    ...(typeof summaryResult.rawLlmResponse === 'string'
+      ? { scanSummaryRawLlmResponse: summaryResult.rawLlmResponse }
+      : { scanSummaryRawLlmResponse: FieldValue.delete() }),
+  });
+}
+
+export async function saveScanAiSummaryProgress(params: {
+  scanId: string;
+  summaryResult: BuiltScanAiSummaryResult;
+  summaryPhase?: ScanSummaryPhase;
+}) {
+  const { scanId, summaryResult, summaryPhase } = params;
+
+  await db.collection('scans').doc(scanId).update({
+    aiSummary: summaryResult.summary,
+    ...(summaryPhase ? { summaryPhase } : {}),
     ...(typeof summaryResult.rawLlmResponse === 'string'
       ? { scanSummaryRawLlmResponse: summaryResult.rawLlmResponse }
       : { scanSummaryRawLlmResponse: FieldValue.delete() }),

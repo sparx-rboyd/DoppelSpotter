@@ -3365,7 +3365,9 @@ function BrandDetailPageContent() {
 
   function getScanStatusLabel(source: FindingSource): ReactNode {
     if (activeScan?.status === 'summarising') {
-      return 'Summarising findings';
+      return activeScan.summaryPhase === 'theming_findings'
+        ? 'Theming findings'
+        : 'Generating summary';
     }
     if (activeScan?.status === 'completed') {
       return 'Finalising results';
@@ -4683,6 +4685,9 @@ function BrandDetailPageContent() {
                                 </div>
                                 <div className="border-t border-brand-100 bg-brand-50/30 px-2 py-3 sm:px-6 sm:py-5 lg:px-7 lg:py-6">
                                   <div className="space-y-4 lg:space-y-5">
+                                    {activeScan?.aiSummary && !isAnyFindingFilterActive && (
+                                      <ScanSummaryPanel summary={activeScan.aiSummary} />
+                                    )}
                                     {visibleLiveScanFindings.length === 0 && visibleLiveScanNonHits.length === 0 ? (
                                       <div className="flex items-center justify-center gap-2 py-8 text-gray-400">
                                         <Loader2 className="w-4 h-4 animate-spin" />

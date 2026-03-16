@@ -99,7 +99,11 @@ import {
 } from '@/lib/brands';
 import { rebuildAndPersistDashboardBreakdownsForScanIds } from '@/lib/dashboard-aggregates';
 import { loadBrandFindingTaxonomy } from '@/lib/findings-taxonomy';
-import { buildScanAiSummary, type BuiltScanAiSummaryResult } from '@/lib/scan-summary';
+import {
+  buildScanAiSummary,
+  saveScanAiSummaryProgress,
+  type BuiltScanAiSummaryResult,
+} from '@/lib/scan-summary';
 import {
   GOOGLE_SEARCH_ACTOR_ID,
   REDDIT_POST_SCRAPER_ACTOR_ID,
@@ -2584,6 +2588,7 @@ async function finalizeIdleScanIfNoRemainingWork(scanDoc: ScanDocHandle): Promis
     if (anySucceeded || hasResults) {
       updates.status = 'summarising';
       updates.summaryStartedAt = FieldValue.serverTimestamp();
+      updates.summaryPhase = 'generating_summary';
     } else {
       updates.status = 'failed';
       updates.completedAt = FieldValue.serverTimestamp();
@@ -7209,6 +7214,7 @@ async function finalizeScanWithSummary(scanRef: DocumentReference, summaryResult
       status: 'completed',
       aiSummary: summaryResult.summary,
       completedAt: FieldValue.serverTimestamp(),
+      summaryPhase: FieldValue.delete(),
       summaryStartedAt: FieldValue.delete(),
       ...(typeof summaryResult.rawLlmResponse === 'string'
         ? { scanSummaryRawLlmResponse: summaryResult.rawLlmResponse }
@@ -7235,6 +7241,20 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
   const summariseStart = Date.now();
   console.log(`[webhook] Scan ${fresh.id}: starting parallel theme normalization + scan summary`);
 
+  const summaryPromise = buildScanAiSummary(fresh)
+    .catch((err): BuiltScanAiSummaryResult => {
+      console.error(`[webhook] Unexpected scan summary build error for scan ${fresh.id}:`, err);
+      return { summary: buildCountOnlyScanAiSummary(fresh) };
+    })
+    .then(async (summaryResult) => {
+      await saveScanAiSummaryProgress({
+        scanId: fresh.id,
+        summaryResult,
+        summaryPhase: 'theming_findings',
+      });
+      return summaryResult;
+    });
+
   const [, summaryResult] = await Promise.all([
     normalizeAndPersistScanThemes({
       scanId: fresh.id,
@@ -7244,11 +7264,7 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
     }).catch((err) => {
       console.error(`[webhook] Theme normalization failed for scan ${fresh.id}:`, err);
     }),
-
-    buildScanAiSummary(fresh).catch((err): BuiltScanAiSummaryResult => {
-      console.error(`[webhook] Unexpected scan summary build error for scan ${fresh.id}:`, err);
-      return { summary: buildCountOnlyScanAiSummary(fresh) };
-    }),
+    summaryPromise,
   ]);
 
   console.log(`[webhook] Scan ${fresh.id}: parallel summarise phase completed in ${((Date.now() - summariseStart) / 1000).toFixed(1)}s — finalizing`);
@@ -8236,6 +8252,7 @@ async function markActorRunComplete(
       if (anySucceeded || hasResults) {
         updates.status = 'summarising';
         updates.summaryStartedAt = FieldValue.serverTimestamp();
+        updates.summaryPhase = 'generating_summary';
       } else {
         updates.status = 'failed';
         updates.completedAt = FieldValue.serverTimestamp();

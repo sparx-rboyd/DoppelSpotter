@@ -5,7 +5,7 @@ import { rebuildAndPersistDashboardBreakdownsForScanIds } from './dashboard-aggr
 import type { BrandProfile, Scan, ScanStatus } from './types';
 
 type ScanSnapshot = DocumentSnapshot | QueryDocumentSnapshot;
-const STUCK_SUMMARISING_TIMEOUT_MS = 120_000;
+const STUCK_SUMMARISING_TIMEOUT_MS = 300_000;
 const STUCK_PENDING_TIMEOUT_MS = 120_000;
 
 export function isScanInProgress(status: ScanStatus): boolean {
@@ -165,6 +165,7 @@ export async function recoverStuckSummarisingScan(scanRef: DocumentReference): P
       status: 'completed',
       aiSummary: scan.aiSummary ?? buildCountOnlyScanAiSummary(scan),
       completedAt: scan.completedAt ?? FieldValue.serverTimestamp(),
+      summaryPhase: FieldValue.delete(),
       summaryStartedAt: FieldValue.delete(),
       ...(scan.errorMessage ? { errorMessage: FieldValue.delete() } : {}),
     });

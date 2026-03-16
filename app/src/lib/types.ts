@@ -372,6 +372,7 @@ export interface Finding extends FindingSummary {
 // ─── Scans ─────────────────────────────────────────────────────────────────
 
 export type ScanStatus = 'pending' | 'running' | 'summarising' | 'completed' | 'failed' | 'cancelled';
+export type ScanSummaryPhase = 'generating_summary' | 'theming_findings';
 export type ScanSummaryEmailStatus = 'sending' | 'sent' | 'failed' | 'skipped';
 export type UserPreferenceHintsStatus = 'pending' | 'ready' | 'failed';
 export type ScannerId =
@@ -532,6 +533,8 @@ export interface Scan {
   userPreferenceHintsCompletedAt?: Timestamp;
   /** Succinct AI-generated overview of the scan's high/medium/low findings. */
   aiSummary?: string;
+  /** Fine-grained progress state for the scan's summarising phase. */
+  summaryPhase?: ScanSummaryPhase;
   /** Delivery status for the optional post-scan summary email. */
   scanSummaryEmailStatus?: ScanSummaryEmailStatus;
   /** When scan summary email delivery was last attempted or explicitly skipped. */
