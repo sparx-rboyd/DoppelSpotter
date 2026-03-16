@@ -36,10 +36,15 @@ type ScanThemeNormalizationParams = {
 type ScanFindingSnapshot = QueryDocumentSnapshot;
 
 export async function normalizeAndPersistScanThemes(params: ScanThemeNormalizationParams): Promise<void> {
+  const prefix = `[theme-normalization] Scan ${params.scanId}:`;
+  console.log(`${prefix} starting — loading pending findings`);
+
   const pendingFindings = await loadPendingThemeFindings(params);
   if (pendingFindings.length === 0) {
+    console.log(`${prefix} no pending findings — skipping`);
     return;
   }
+  console.log(`${prefix} loaded ${pendingFindings.length} pending findings`);
 
   const historicalThemes = (
     await loadBrandFindingTaxonomy({
@@ -50,8 +55,10 @@ export async function normalizeAndPersistScanThemes(params: ScanThemeNormalizati
   ).themes;
   const provisionalGroups = buildThemeNormalizationGroups(pendingFindings);
   if (provisionalGroups.length === 0) {
+    console.log(`${prefix} no provisional groups after grouping — skipping`);
     return;
   }
+  console.log(`${prefix} ${provisionalGroups.length} provisional groups, ${historicalThemes.length} historical themes`);
 
   const brandName = params.brandName ?? await loadBrandName(params.brandId);
   const mappingByKey = await buildThemeNormalizationMap({
@@ -60,8 +67,10 @@ export async function normalizeAndPersistScanThemes(params: ScanThemeNormalizati
     historicalThemes,
     provisionalGroups,
   });
+  console.log(`${prefix} mapping resolved — ${mappingByKey.size} entries. Applying to ${pendingFindings.length} findings`);
 
   await applyThemeMappingToFindings(params.scanId, pendingFindings, mappingByKey);
+  console.log(`${prefix} theme normalization complete`);
 }
 
 export async function promoteProvisionalThemesForScan(params: Omit<ScanThemeNormalizationParams, 'brandName'>): Promise<void> {
@@ -187,15 +196,23 @@ async function buildThemeNormalizationMap(params: {
       historicalThemes,
       provisionalGroups,
     });
+    console.log(`[theme-normalization] Scan ${scanId}: calling LLM — prompt length ${prompt.length} chars, ${provisionalGroups.length} groups`);
     const raw = await chatCompletion([
       { role: 'system', content: THEME_NORMALIZATION_SYSTEM_PROMPT },
       { role: 'user', content: prompt },
     ], { temperature: 0.1 });
+    console.log(`[theme-normalization] Scan ${scanId}: LLM returned ${raw.length} chars`);
 
-    const { output: parsed } = parseThemeNormalizationOutputWithDiagnostics(raw, new Set(provisionalThemes));
+    const { output: parsed, diagnostics } = parseThemeNormalizationOutputWithDiagnostics(raw, new Set(provisionalThemes));
     if (!parsed) {
+      console.error(`[theme-normalization] Scan ${scanId}: parse failed — raw response (first 500 chars): ${raw.slice(0, 500)}`);
       throw new Error('Failed to parse theme normalization output');
     }
+    const diagParts: string[] = [];
+    if (diagnostics.rawMappingCount !== diagnostics.acceptedMappingCount) diagParts.push(`raw=${diagnostics.rawMappingCount}, accepted=${diagnostics.acceptedMappingCount}`);
+    if (diagnostics.missingProvisionalThemes.length > 0) diagParts.push(`missing=${diagnostics.missingProvisionalThemes.join(',')}`);
+    if (diagnostics.issues.length > 0) diagParts.push(`issues=${diagnostics.issues.join('; ')}`);
+    console.log(`[theme-normalization] Scan ${scanId}: parsed ${parsed.mappings.length} mappings${diagParts.length > 0 ? ` (${diagParts.join('; ')})` : ''}`);
 
     const resolvedMap = new Map(fallbackMap);
     for (const mapping of parsed.mappings) {
@@ -204,6 +221,9 @@ async function buildThemeNormalizationMap(params: {
         resolveCanonicalThemeLabel(mapping.canonicalTheme, historicalThemes, provisionalThemes),
       );
     }
+
+    const distinctCanonical = new Set([...resolvedMap.values()]);
+    console.log(`[theme-normalization] Scan ${scanId}: ${provisionalGroups.length} provisional themes → ${distinctCanonical.size} distinct canonical themes`);
     return resolvedMap;
   } catch (error) {
     console.error(`[theme-normalization] Scan ${scanId}: failed to canonicalise provisional themes; falling back to identity map`, error);

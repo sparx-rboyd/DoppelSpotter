@@ -260,6 +260,8 @@ export async function buildDashboardExecutiveSummary(params: {
     low: lowFindings.length,
   };
 
+  console.log(`[dashboard-executive-summary] Brand ${brandId}: ${completedScans.length} completed scans, selected ${highFindings.length}h/${mediumFindings.length}m/${lowFindings.length}l = ${selectedFindings.length} findings (cap ${MAX_EXECUTIVE_SUMMARY_FINDINGS})`);
+
   if (selectedFindings.length === 0) {
     return {
       version: DASHBOARD_EXECUTIVE_SUMMARY_VERSION,
@@ -290,17 +292,20 @@ export async function buildDashboardExecutiveSummary(params: {
       description: truncateSummaryInput(finding.description, MAX_FINDING_DESCRIPTION_LENGTH),
     })),
   });
+  console.log(`[dashboard-executive-summary] Brand ${brandId}: prompt built — ${prompt.length} chars, ${selectedFindings.length} findings`);
 
   let rawLlmResponse: string | undefined;
   let finalError: unknown;
   for (let attempt = 1; attempt <= DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS; attempt++) {
     let attemptRawLlmResponse: string | undefined;
     try {
+      console.log(`[dashboard-executive-summary] Brand ${brandId}: calling LLM (attempt ${attempt}/${DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS})`);
       attemptRawLlmResponse = await chatCompletion([
         { role: 'system', content: DASHBOARD_EXECUTIVE_SUMMARY_SYSTEM_PROMPT },
         { role: 'user', content: prompt },
       ], { temperature: 0.8 });
       rawLlmResponse = attemptRawLlmResponse;
+      console.log(`[dashboard-executive-summary] Brand ${brandId}: LLM returned ${attemptRawLlmResponse.length} chars (attempt ${attempt})`);
 
       const parsed = parseDashboardExecutiveSummaryOutput(attemptRawLlmResponse);
       if (!parsed) {
