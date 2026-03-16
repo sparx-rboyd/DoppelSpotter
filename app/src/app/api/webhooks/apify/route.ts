@@ -5282,11 +5282,11 @@ async function upsertEuipoFinding({
         llmAnalysis: preferredOutcome.analysis,
         url: candidate.euipoUrl,
         applicationNumber: candidate.applicationNumber,
-        applicantName: candidate.applicantName,
-        filingDate: candidate.filingDate,
-        status: candidate.status,
-        niceClasses: candidate.niceClasses,
-        markType: candidate.markType,
+        ...(candidate.applicantName ? { applicantName: candidate.applicantName } : {}),
+        ...(candidate.filingDate ? { filingDate: candidate.filingDate } : {}),
+        ...(candidate.status ? { status: candidate.status } : {}),
+        ...(candidate.niceClasses ? { niceClasses: candidate.niceClasses } : {}),
+        ...(candidate.markType ? { markType: candidate.markType } : {}),
         rawData: mergedRawData,
         isFalsePositive: preferredOutcome.isFalsePositive,
         ...(preferredOutcome.isFalsePositive && {
@@ -6602,7 +6602,7 @@ function readEuipoStoredFindingRawData(rawData?: Record<string, unknown>): Euipo
   const context = typeof rawData.context === 'object' && rawData.context !== null ? rawData.context as Record<string, unknown> : {};
   const analysis = typeof rawData.analysis === 'object' && rawData.analysis !== null ? rawData.analysis as Record<string, unknown> : {};
 
-  return {
+  return stripUndefinedDeep({
     kind: 'euipo-normalized',
     version: EUIPO_RAW_DATA_VERSION,
     trademark: {
@@ -6653,7 +6653,7 @@ function readEuipoStoredFindingRawData(rawData?: Record<string, unknown>): Euipo
       searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
       displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
     },
-  };
+  });
 }
 
 function normalizeGoogleSearchSighting(value: unknown): GoogleSearchSighting | null {
