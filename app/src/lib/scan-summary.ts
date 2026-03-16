@@ -6,7 +6,9 @@ import { parseScanSummaryOutput } from '@/lib/analysis/types';
 import { buildCountOnlyScanAiSummary } from '@/lib/scans';
 import type { BrandProfile, Finding, Scan } from '@/lib/types';
 
-type ScanSummaryFindingInput = Pick<Finding, 'severity' | 'title' | 'llmAnalysis' | 'source' | 'url'>;
+type ScanSummaryFindingInput = Pick<Finding, 'severity' | 'title' | 'source'>;
+
+const SCAN_SUMMARY_MAX_FINDINGS = 500;
 
 export type BuiltScanAiSummaryResult = {
   summary: string;
@@ -78,7 +80,7 @@ export async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummary
     .where('scanId', '==', scan.id)
     .where('brandId', '==', scan.brandId)
     .where('userId', '==', scan.userId)
-    .select('severity', 'title', 'llmAnalysis', 'source', 'url', 'isFalsePositive')
+    .select('severity', 'title', 'source', 'isFalsePositive')
     .get();
 
   const findings = sortFindingsForSummary(
@@ -88,9 +90,7 @@ export async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummary
       .map((finding) => ({
         severity: finding.severity,
         title: finding.title,
-        llmAnalysis: finding.llmAnalysis,
         source: finding.source,
-        url: finding.url,
       })),
   );
 
@@ -110,16 +110,20 @@ export async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummary
     { high: 0, medium: 0, low: 0 },
   );
 
+  // findings is already sorted high → medium → low, so slicing at the cap
+  // naturally preserves all high, then all medium, then fills remaining slots with low.
+  const cappedFindings = findings.slice(0, SCAN_SUMMARY_MAX_FINDINGS);
+  const lowTruncated = counts.low - cappedFindings.filter((f) => f.severity === 'low').length;
+
   const prompt = buildScanSummaryPrompt({
     brandName,
     counts,
-    findings: findings.map((finding) => ({
+    findings: cappedFindings.map((finding) => ({
       severity: finding.severity,
       source: finding.source,
       title: truncateSummaryInput(finding.title, 120),
-      llmAnalysis: truncateSummaryInput(finding.llmAnalysis, 320),
-      ...(finding.url ? { url: truncateSummaryInput(finding.url, 200) } : {}),
     })),
+    ...(lowTruncated > 0 ? { lowTruncated } : {}),
   });
 
   let rawLlmResponse: string | undefined;

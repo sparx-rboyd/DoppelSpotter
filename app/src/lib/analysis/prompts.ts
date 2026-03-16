@@ -1521,11 +1521,10 @@ export function buildScanSummaryPrompt(params: {
     severity: Severity;
     source: FindingSource;
     title: string;
-    llmAnalysis: string;
-    url?: string;
   }>;
+  lowTruncated?: number;
 }): string {
-  const { brandName, counts, findings } = params;
+  const { brandName, counts, findings, lowTruncated } = params;
   const sourceCounts = findings.reduce(
     (acc, finding) => {
       acc[finding.source] = (acc[finding.source] ?? 0) + 1;
@@ -1538,6 +1537,10 @@ export function buildScanSummaryPrompt(params: {
     .filter((entry) => entry.count > 0)
     .map((entry) => `${getFindingSourceLabel(entry.source)}: ${entry.count}`);
 
+  const truncationNote = lowTruncated && lowTruncated > 0
+    ? `\nNote: the findings list below is capped at ${findings.length} entries. All high and medium findings are shown. ${lowTruncated} additional low-severity finding${lowTruncated === 1 ? ' is' : 's are'} not listed but are reflected in the counts above.\n`
+    : '';
+
   return `Brand being protected: "${brandName}"
 
 Actionable finding counts:
@@ -1548,8 +1551,8 @@ Actionable finding counts:
 Actionable source spread:
 - Distinct sources with actionable findings: ${sourceBreakdown.length}
 ${sourceBreakdown.length > 0 ? sourceBreakdown.map((line) => `- ${line}`).join('\n') : '- None'}
-
-Actionable findings for this scan (${findings.length}):
+${truncationNote}
+Actionable findings for this scan (${findings.length} shown):
 ${JSON.stringify(findings, null, 2)}
 
 Write a concise overall summary of this scan (max 600 characters). 
