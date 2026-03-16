@@ -634,6 +634,100 @@ export interface GitHubStoredFindingRawData extends Record<string, unknown> {
 }
 
 /**
+ * One EUIPO trademark candidate returned by the EUIPO trademark actor.
+ */
+export interface EuipoTrademarkCandidate {
+  resultId: string;
+  applicationNumber: string;
+  markName: string;
+  applicantName?: string;
+  niceClasses?: string;
+  status?: string;
+  filingDate?: string;
+  registrationDate?: string;
+  expiryDate?: string;
+  markType?: string;
+  markKind?: string;
+  markBasis?: string;
+  representativeName?: string;
+  goodsAndServicesDescription?: string;
+  renewalStatus?: string;
+  markImageUrl?: string;
+  euipoUrl: string;
+  extractedAt?: string;
+}
+
+/**
+ * Run-level EUIPO context shared across chunked analysis calls.
+ */
+export interface EuipoRunContext {
+  sourceQueries: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  maxResults?: number;
+  observedStatuses: string[];
+  observedApplicants: string[];
+  observedNiceClasses: string[];
+  sampleMarkNames: string[];
+}
+
+/**
+ * One assessed EUIPO trademark returned by chunked AI analysis.
+ */
+export interface EuipoChunkAnalysisItem {
+  resultId: string;
+  title: string;
+  severity: Severity;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+}
+
+/**
+ * The structured JSON output expected from chunked EUIPO analysis.
+ */
+export interface EuipoChunkAnalysisOutput {
+  items: EuipoChunkAnalysisItem[];
+}
+
+/**
+ * Compact stored debug payload for EUIPO findings.
+ */
+export interface EuipoStoredFindingRawData extends Record<string, unknown> {
+  kind: 'euipo-normalized';
+  version: 1;
+  trademark: {
+    applicationNumber: string;
+    markName: string;
+    applicantName?: string;
+    niceClasses?: string;
+    status?: string;
+    filingDate?: string;
+    registrationDate?: string;
+    expiryDate?: string;
+    markType?: string;
+    markKind?: string;
+    markBasis?: string;
+    representativeName?: string;
+    goodsAndServicesDescription?: string;
+    renewalStatus?: string;
+    markImageUrl?: string;
+    euipoUrl: string;
+    extractedAt?: string;
+  };
+  context: EuipoRunContext;
+  analysis: {
+    source: 'llm' | 'fallback';
+    runId: string;
+    findingSource: FindingSource;
+    scannerId: ScannerId;
+    searchDepth: number;
+    searchQuery?: string;
+    displayQuery?: string;
+  };
+}
+
+/**
  * One tweet/post candidate returned by the X tweet scraper.
  */
 export interface XTweetCandidate {
@@ -813,6 +907,17 @@ export function parseGitHubChunkAnalysisOutput(
   raw: string,
   validResultIds: Set<string>,
 ): GitHubChunkAnalysisOutput | null {
+  const items = parseChunkAnalysisItems(raw, validResultIds);
+  return items ? { items } : null;
+}
+
+/**
+ * Parse and validate the raw JSON string returned by chunked EUIPO analysis.
+ */
+export function parseEuipoChunkAnalysisOutput(
+  raw: string,
+  validResultIds: Set<string>,
+): EuipoChunkAnalysisOutput | null {
   const items = parseChunkAnalysisItems(raw, validResultIds);
   return items ? { items } : null;
 }

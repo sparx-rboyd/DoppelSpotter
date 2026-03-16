@@ -127,6 +127,11 @@ const SOURCE_BADGE_STYLES: Record<FindingSource, { bg: string; border: string; t
     border: BRAND.blue100,
     text: BRAND.blue700,
   },
+  euipo: {
+    bg: BRAND.blue50,
+    border: BRAND.blue100,
+    text: BRAND.blue700,
+  },
   x: {
     bg: BRAND.blue50,
     border: BRAND.blue100,

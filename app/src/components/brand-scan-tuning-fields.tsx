@@ -140,7 +140,7 @@ export function BrandScanTuningFields({
         <SliderField
           id="search-result-pages"
           label="Search depth"
-          tooltip="Controls how extensively DoppelSpotter searches for potential matches. Google-backed scan types like Web search, Reddit, TikTok, YouTube, Facebook, Instagram, Telegram channels, Apple App Store, and Google Play use this as search-result depth, Domain registrations map it to result volume from 100 to 500 domains, GitHub repos and X map it to result volume from 50 to 250 items, and Discord servers map it to an Apify spend cap from $0.20 to $0.60 per run."
+          tooltip="Controls how extensively DoppelSpotter searches for potential matches. Google-backed scan types like Web search, Reddit, TikTok, YouTube, Facebook, Instagram, Telegram channels, Apple App Store, and Google Play use this as search-result depth, Domain registrations map it to result volume from 100 to 500 domains, GitHub repos, EUIPO trademarks, and X map it to result volume from 50 to 250 items, and Discord servers map it to an Apify spend cap from $0.20 to $0.60 per run."
           value={searchResultPages}
           min={MIN_SEARCH_RESULT_PAGES}
           max={MAX_SEARCH_RESULT_PAGES}

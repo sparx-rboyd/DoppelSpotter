@@ -8,6 +8,7 @@ import {
   X_TWEET_SCRAPER_ACTOR_ID,
   DISCORD_SERVER_SCRAPER_ACTOR_ID,
   GITHUB_REPO_SEARCH_ACTOR_ID,
+  EUIPO_TRADEMARK_SEARCH_ACTOR_ID,
   type ScannerConfig,
 } from '@/lib/scan-sources';
 import type { BrandScanSources, ScannerId } from '@/lib/types';
@@ -27,6 +28,7 @@ export const CORE_SCANNER_IDS: ScannerId[] = [
   'domain-registrations',
   'discord-servers',
   'github-repos',
+  'euipo-trademarks',
   'x-search',
 ];
 
@@ -43,6 +45,7 @@ export {
   DOMAIN_REGISTRATIONS_ACTOR_ID,
   GITHUB_REPO_SEARCH_ACTOR_ID,
   GOOGLE_SEARCH_ACTOR_ID,
+  EUIPO_TRADEMARK_SEARCH_ACTOR_ID,
   REDDIT_POST_SCRAPER_ACTOR_ID,
   TIKTOK_POST_SCRAPER_ACTOR_ID,
   X_TWEET_SCRAPER_ACTOR_ID,

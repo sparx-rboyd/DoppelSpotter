@@ -222,6 +222,12 @@ function computeCanonicalId(source: FindingSource | undefined, data: FindingBack
       return normalizeStoredCanonicalId(data.canonicalId, { lowerCase: true });
     }
 
+    case 'euipo': {
+      const trademark = getObject(data.rawData)?.trademark;
+      return getString(getObject(trademark)?.applicationNumber)
+        ?? normalizeStoredCanonicalId(data.canonicalId);
+    }
+
     case 'x': {
       const tweet = getObject(data.rawData)?.tweet;
       return getString(getObject(tweet)?.id)

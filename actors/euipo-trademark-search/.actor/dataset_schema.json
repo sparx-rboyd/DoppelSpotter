@@ -1,0 +1,27 @@
+{
+  "actorSpecification": 1,
+  "views": {
+    "overview": {
+      "title": "Trademark filings",
+      "transformation": {
+        "fields": [
+          "applicationNumber",
+          "markName",
+          "applicantName",
+          "niceClasses",
+          "filingDate",
+          "registrationDate",
+          "expiryDate",
+          "status",
+          "markType",
+          "markKind",
+          "euipoUrl",
+          "requestMetadata"
+        ]
+      },
+      "display": {
+        "component": "table"
+      }
+    }
+  }
+}

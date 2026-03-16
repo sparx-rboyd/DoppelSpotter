@@ -62,6 +62,12 @@ export interface GitHubScannerConfig extends BaseScannerConfig {
   kind: 'github';
 }
 
+export interface EuipoScannerConfig extends BaseScannerConfig {
+  id: 'euipo-trademarks';
+  source: 'euipo';
+  kind: 'euipo';
+}
+
 export interface XScannerConfig extends BaseScannerConfig {
   id: 'x-search';
   source: 'x';
@@ -75,6 +81,7 @@ export type ScannerConfig =
   | DomainRegistrationsScannerConfig
   | DiscordScannerConfig
   | GitHubScannerConfig
+  | EuipoScannerConfig
   | XScannerConfig;
 
 export const GOOGLE_SEARCH_ACTOR_ID = 'apify/google-search-scraper';
@@ -83,6 +90,7 @@ export const TIKTOK_POST_SCRAPER_ACTOR_ID = 'apidojo/tiktok-scraper';
 export const DOMAIN_REGISTRATIONS_ACTOR_ID = 'doppelspotter/recent-domain-registrations';
 export const DISCORD_SERVER_SCRAPER_ACTOR_ID = 'louisdeconinck/discord-server-scraper';
 export const GITHUB_REPO_SEARCH_ACTOR_ID = 'ryanclinton/github-repo-search';
+export const EUIPO_TRADEMARK_SEARCH_ACTOR_ID = 'doppelspotter/euipo-trademark-search';
 export const X_TWEET_SCRAPER_ACTOR_ID = 'apidojo/tweet-scraper';
 
 export const SCAN_SOURCE_ORDER: ScanFindingSource[] = [
@@ -98,6 +106,7 @@ export const SCAN_SOURCE_ORDER: ScanFindingSource[] = [
   'domains',
   'discord',
   'github',
+  'euipo',
   'x',
 ];
 
@@ -237,6 +246,15 @@ const SCANNER_CONFIGS: Record<ScannerId, ScannerConfig> = {
     shortLabel: 'GitHub',
     supportsDeepSearch: false,
   },
+  'euipo-trademarks': {
+    id: 'euipo-trademarks',
+    source: 'euipo',
+    actorId: EUIPO_TRADEMARK_SEARCH_ACTOR_ID,
+    kind: 'euipo',
+    displayName: 'EUIPO trademarks',
+    shortLabel: 'EUIPO',
+    supportsDeepSearch: false,
+  },
   'x-search': {
     id: 'x-search',
     source: 'x',
@@ -261,6 +279,7 @@ const SCANNER_ID_BY_SOURCE: Record<ScanFindingSource, ScannerId> = {
   domains: 'domain-registrations',
   discord: 'discord-servers',
   github: 'github-repos',
+  euipo: 'euipo-trademarks',
   x: 'x-search',
 };
 

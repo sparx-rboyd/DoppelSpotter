@@ -195,7 +195,7 @@ export async function POST(request: NextRequest) {
     );
   }
   if (!isValidBrandScanSources(scanSources)) {
-    return errorResponse('scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, telegram, apple_app_store, google_play, domains, discord, github, and x values');
+    return errorResponse('scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, telegram, apple_app_store, google_play, domains, discord, github, euipo, and x values');
   }
   if (!isValidBrandAnalysisSeverityDefinitions(analysisSeverityDefinitions)) {
     return errorResponse('analysisSeverityDefinitions must include optional high, medium, and low strings up to 1500 characters');

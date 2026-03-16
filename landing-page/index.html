@@ -238,7 +238,7 @@
                             <div class="flex-shrink-0 w-10 h-10 rounded-full bg-brand-100 text-brand-600 flex items-center justify-center font-bold border border-brand-200">2</div>
                             <div>
                                 <h4 class="text-xl font-semibold text-gray-900 mb-2">Apify Actors scan the web</h4>
-                                <p class="text-gray-600">A suite of official and community actors, and <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="font-medium text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-800">our own custom Apify actor</a>, monitor web results, social platforms, domain registries, app stores and code repositories.</p>
+                                <p class="text-gray-600">A suite of official and community actors, plus two custom actors we built and published (<a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="font-medium text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-800">domain registrations</a> and <a href="https://apify.com/doppelspotter/euipo-trademark-search" target="_blank" rel="noreferrer" class="font-medium text-brand-700 underline decoration-brand-300 underline-offset-2 hover:text-brand-800">EUIPO trademarks</a>), monitor web results, social platforms, domain registries, trademark filings, app stores and code repositories.</p>
                             </div>
                         </div>
                         
@@ -398,7 +398,7 @@
                                     Searches X posts.
                                 </td>
                             </tr>
-                            <tr>
+                            <tr class="bg-brand-50/60">
                                 <td class="p-4 font-medium text-gray-900 whitespace-nowrap text-sm align-top">
                                     <i data-lucide="globe-2" class="w-4 h-4 inline mr-1 text-brand-500"></i>New Domains
                                 </td>
@@ -411,6 +411,21 @@
                                 </td>
                                 <td class="p-4 text-sm text-gray-700 hidden md:table-cell align-top">
                                     Detects recently registered domains containing brand keywords. Uniquely uses Generative AI internally to actively visit and analyse the resolving homepage to more clearly surface threats.
+                                </td>
+                            </tr>
+                            <tr class="bg-brand-50/60">
+                                <td class="p-4 font-medium text-gray-900 whitespace-nowrap text-sm align-top">
+                                    <i data-lucide="shield" class="w-4 h-4 inline mr-1 text-brand-500"></i>EUIPO Trademarks
+                                </td>
+                                <td class="p-4 align-top">
+                                    <a href="https://apify.com/doppelspotter/euipo-trademark-search" target="_blank" rel="noreferrer" class="font-mono text-xs text-brand-700 font-semibold underline decoration-brand-300 underline-offset-2 hover:text-brand-800">doppelspotter/euipo-trademark-search</a>
+                                    <div class="mt-2 inline-flex items-center gap-1.5 px-2 py-1 rounded bg-brand-100 border border-brand-200">
+                                        <i data-lucide="star" class="w-3 h-3 text-brand-600"></i>
+                                        <span class="text-[10px] font-sans font-bold uppercase tracking-wide text-brand-700">Custom Built &amp; Published</span>
+                                    </div>
+                                </td>
+                                <td class="p-4 text-sm text-gray-700 hidden md:table-cell align-top">
+                                    Searches EU trademark filings via the EUIPO API. Handles multi-word brand names with wildcard RSQL queries and caches OAuth2 tokens with expiry-aware refresh logic.
                                 </td>
                             </tr>
                         </tbody>
@@ -440,7 +455,7 @@
                         <i data-lucide="bot" class="w-6 h-6 text-white"></i>
                     </div>
                     <h3 class="text-xl font-bold mb-3">Agentic AI Development</h3>
-                    <p class="text-brand-100/80 mb-4 leading-relaxed">We utilised Cursor's agentic AI for end-to-end development. From writing this pitch and building the landing page, to making core architectural decisions, to designing, building, testing, and deploying both the Next.js app and <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="font-medium text-white underline decoration-brand-300 underline-offset-2 hover:text-brand-100">our custom Apify actor</a>.</p>
+                    <p class="text-brand-100/80 mb-4 leading-relaxed">We utilised Cursor's agentic AI for end-to-end development. From writing this pitch and building the landing page, to making core architectural decisions, to designing, building, testing, and deploying the Next.js app and both of our custom Apify actors (<a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="font-medium text-white underline decoration-brand-300 underline-offset-2 hover:text-brand-100">domain registrations</a> and <a href="https://apify.com/doppelspotter/euipo-trademark-search" target="_blank" rel="noreferrer" class="font-medium text-white underline decoration-brand-300 underline-offset-2 hover:text-brand-100">EUIPO trademarks</a>).</p>
                 </div>
 
                 <div class="bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20 shadow-xl shadow-black/10 relative overflow-hidden group hover:bg-white/15 transition-colors">
@@ -456,8 +471,8 @@
                     <div class="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-6 shadow-sm">
                         <i data-lucide="layers" class="w-6 h-6 text-white"></i>
                     </div>
-                    <h3 class="text-xl font-bold mb-3">AI-Enriched Actor</h3>
-                    <p class="text-brand-100/80 mb-4 leading-relaxed">Our custom published actor, <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="underline decoration-brand-300 underline-offset-2 hover:text-brand-100"><code class="bg-black/20 px-1.5 py-0.5 rounded text-sm font-mono text-white/90">recent-domain-registrations</code></a>, isn't a simple API wrapper. It intrinsically uses Generative AI during the scraping process to perform enhanced homepage analysis, actively assessing the content of new domains for phishing intent.</p>
+                    <h3 class="text-xl font-bold mb-3">Custom-Built Actors</h3>
+                    <p class="text-brand-100/80 mb-4 leading-relaxed">We published two custom actors to the Apify Store. <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="underline decoration-brand-300 underline-offset-2 hover:text-brand-100"><code class="bg-black/20 px-1.5 py-0.5 rounded text-sm font-mono text-white/90">recent-domain-registrations</code></a> uses Generative AI internally to visit and analyse new domains for phishing intent. <a href="https://apify.com/doppelspotter/euipo-trademark-search" target="_blank" rel="noreferrer" class="underline decoration-brand-300 underline-offset-2 hover:text-brand-100"><code class="bg-black/20 px-1.5 py-0.5 rounded text-sm font-mono text-white/90">euipo-trademark-search</code></a> queries the EU trademark registry with wildcard RSQL and cached OAuth2 token management.</p>
                 </div>
             </div>
         </div>
@@ -490,7 +505,7 @@
                         <span class="font-bold text-xl">3</span>
                     </div>
                     <h3 class="text-xl font-bold mb-3">Path 3: Build an Actor</h3>
-                    <p class="text-gray-400 leading-relaxed">The <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="underline decoration-brand-300 underline-offset-2 hover:text-white"><code class="bg-black/30 px-1.5 py-0.5 rounded text-sm font-mono text-gray-300">doppelspotter/recent-domain-registrations</code></a> actor is published to the Apify Store as a standalone, reusable Actor. Any developer building domain monitoring tools can utilise it, bringing AI-enriched phishing detection to their own pipelines.</p>
+                    <p class="text-gray-400 leading-relaxed">Two custom actors are published to the Apify Store as standalone, reusable Actors. <a href="https://apify.com/doppelspotter/recent-domain-registrations" target="_blank" rel="noreferrer" class="underline decoration-brand-300 underline-offset-2 hover:text-white"><code class="bg-black/30 px-1.5 py-0.5 rounded text-sm font-mono text-gray-300">recent-domain-registrations</code></a> brings AI-enriched phishing detection to any pipeline, and <a href="https://apify.com/doppelspotter/euipo-trademark-search" target="_blank" rel="noreferrer" class="underline decoration-brand-300 underline-offset-2 hover:text-white"><code class="bg-black/30 px-1.5 py-0.5 rounded text-sm font-mono text-gray-300">euipo-trademark-search</code></a> enables EU trademark monitoring with robust multi-word wildcard search and token caching.</p>
                 </div>
             </div>
 
@@ -521,7 +536,7 @@
                         </div>
                         <div>
                             <strong class="text-white block text-lg mb-1">Quality and depth of Apify integration</strong>
-                            <span class="text-gray-400 text-sm leading-relaxed block">Multiple actors spanning diverse monitoring surfaces form the backbone of the product, with a newly custom-built, AI-enriched Actor published back to the Apify ecosystem.</span>
+                            <span class="text-gray-400 text-sm leading-relaxed block">Multiple actors spanning diverse monitoring surfaces form the backbone of the product, with two newly custom-built Actors published back to the Apify ecosystem — one AI-enriched for domain phishing detection, the other for EU trademark monitoring.</span>
                         </div>
                     </li>
                 </ul>

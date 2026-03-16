@@ -6,6 +6,7 @@ import {
   getDeepSearchXMaxItems,
   getInitialDomainRegistrationLimit,
   getInitialDiscordMaxTotalChargeUsd,
+  getInitialEuipoMaxResults,
   getInitialRedditMaxTotalChargeUsd,
   getInitialRedditTotalPosts,
   getInitialTikTokTotalPosts,
@@ -257,6 +258,22 @@ export function buildActorInputs(
         displayQuery: term,
       };
     });
+  }
+
+  if (actor.kind === 'euipo') {
+    const displayQuery = joinSearchTermsForDisplay(searchTerms);
+    return [{
+      input: {
+        keywords: searchTerms,
+        dateFrom: settings.lookbackDate,
+        dateTo: getCurrentUtcDateString(),
+        clientId: getRequiredEnvVar('EUIPO_API_KEY'),
+        clientSecret: getRequiredEnvVar('EUIPO_API_SECRET'),
+        maxResults: getInitialEuipoMaxResults(settings.searchResultPages),
+      },
+      query: displayQuery,
+      displayQuery,
+    }];
   }
 
   const primaryQuery = searchTerms.join(' OR ');
@@ -585,6 +602,10 @@ function getInitialTikTokMaxItemsPerQuery(searchResultPages: unknown, queryCount
   return Math.max(TIKTOK_MIN_POSTS_PER_QUERY, Math.ceil(totalPosts / Math.max(1, queryCount)));
 }
 
+function getCurrentUtcDateString(now = new Date()): string {
+  return now.toISOString().slice(0, 10);
+}
+
 function getRedditTimeframeForLookbackDate(lookbackDate?: string): 'hour' | 'day' | 'week' | 'month' | 'year' | 'all' {
   if (!lookbackDate) {
     return 'all';
@@ -660,7 +681,9 @@ function buildActorStartOptions(
   return startOptions;
 }
 
-function getRequiredEnvVar(name: 'CODEPUNCH_API_KEY' | 'CODEPUNCH_API_SECRET' | 'OPENROUTER_API_KEY'): string {
+function getRequiredEnvVar(
+  name: 'CODEPUNCH_API_KEY' | 'CODEPUNCH_API_SECRET' | 'OPENROUTER_API_KEY' | 'EUIPO_API_KEY' | 'EUIPO_API_SECRET',
+): string {
   const value = process.env[name]?.trim();
   if (!value) {
     throw new Error(`${name} is not set`);

@@ -1,0 +1,149 @@
+{
+  "title": "EUIPO Trademark Search input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "clientId": {
+      "title": "EUIPO Client ID",
+      "type": "string",
+      "editor": "textfield",
+      "isSecret": true,
+      "description": "Your EUIPO developer portal Client ID. Register for free at https://dev.euipo.europa.eu/ — used only to obtain an OAuth2 access token."
+    },
+    "clientSecret": {
+      "title": "EUIPO Client Secret",
+      "type": "string",
+      "editor": "textfield",
+      "isSecret": true,
+      "description": "Your EUIPO developer portal Client Secret. Register for free at https://dev.euipo.europa.eu/ — used only to obtain an OAuth2 access token."
+    },
+    "keywords": {
+      "title": "Keywords",
+      "type": "array",
+      "description": "Brand keywords to search for. All keywords are combined into a single RSQL OR query so multi-word terms with spaces are supported. Each value is automatically wrapped as *keyword* if no * is present.",
+      "prefill": ["sparx", "sparx maths"],
+      "editor": "stringList",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "dateFrom": {
+      "title": "Filing date from",
+      "type": "string",
+      "editor": "textfield",
+      "pattern": "^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$",
+      "description": "Optional lower bound for the trademark application date (YYYY-MM-DD). Results include trademarks filed on or after this date."
+    },
+    "dateTo": {
+      "title": "Filing date to",
+      "type": "string",
+      "editor": "textfield",
+      "pattern": "^(\\d{4})-(0[1-9]|1[0-2])-(0[1-9]|[12]\\d|3[01])$",
+      "description": "Optional upper bound for the trademark application date (YYYY-MM-DD). Results include trademarks filed on or before this date."
+    },
+    "maxResults": {
+      "title": "Max results",
+      "type": "integer",
+      "editor": "number",
+      "minimum": 1,
+      "maximum": 500,
+      "default": 50,
+      "description": "Maximum number of trademark records to emit. The EUIPO API returns pages of 100; the actor paginates until this limit is reached."
+    },
+    "niceClass": {
+      "title": "Nice class filter",
+      "type": "string",
+      "editor": "textfield",
+      "description": "Optional Nice Classification filter. Use a single class number (e.g. 9) or comma-separated values for multiple classes (e.g. 9,42). Leave empty to return all classes."
+    },
+    "status": {
+      "title": "Trademark status filter",
+      "type": "string",
+      "editor": "select",
+      "enum": [
+        "",
+        "REGISTERED",
+        "RECEIVED",
+        "UNDER_EXAMINATION",
+        "APPLICATION_PUBLISHED",
+        "REGISTRATION_PENDING",
+        "WITHDRAWN",
+        "REFUSED",
+        "OPPOSITION_PENDING",
+        "APPEALED",
+        "CANCELLATION_PENDING",
+        "CANCELLED",
+        "SURRENDERED",
+        "EXPIRED",
+        "ACCEPTED"
+      ],
+      "enumTitles": [
+        "All statuses",
+        "Registered",
+        "Received",
+        "Under examination",
+        "Application published",
+        "Registration pending",
+        "Withdrawn",
+        "Refused",
+        "Opposition pending",
+        "Appealed",
+        "Cancellation pending",
+        "Cancelled",
+        "Surrendered",
+        "Expired",
+        "Accepted"
+      ],
+      "default": "",
+      "description": "Optional trademark status filter. Leave empty to return all statuses."
+    },
+    "markFeature": {
+      "title": "Mark type filter",
+      "type": "string",
+      "editor": "select",
+      "enum": [
+        "",
+        "WORD",
+        "FIGURATIVE",
+        "SHAPE_3D",
+        "COLOUR",
+        "SOUND",
+        "HOLOGRAM",
+        "POSITION",
+        "PATTERN",
+        "MOTION",
+        "MULTIMEDIA",
+        "OTHER"
+      ],
+      "enumTitles": [
+        "All types",
+        "Word mark",
+        "Figurative",
+        "3D shape",
+        "Colour",
+        "Sound",
+        "Hologram",
+        "Position",
+        "Pattern",
+        "Motion",
+        "Multimedia",
+        "Other"
+      ],
+      "default": "",
+      "description": "Optional mark type filter. Leave empty to return all mark types."
+    },
+    "useSandbox": {
+      "title": "Use sandbox environment",
+      "type": "boolean",
+      "editor": "checkbox",
+      "default": false,
+      "description": "When enabled, all requests go to the EUIPO sandbox environment, which uses test data rather than live production records. Useful while waiting for production API approval."
+    }
+  },
+  "required": [
+    "clientId",
+    "clientSecret",
+    "keywords"
+  ]
+}

@@ -34,8 +34,8 @@ Why this is a strong hackathon submission:
 
 ## At A Glance
 
-- `13 logical scan surfaces` across web, social, communities, code, domains, and app stores.
-- `7 underlying Apify actors` powering the monitoring pipeline.
+- `14 logical scan surfaces` across web, social, communities, code, domains, app stores, and trademark filings.
+- `8 underlying Apify actors` powering the monitoring pipeline.
 - `AI triage` for severity scoring, theme labelling, false-positive suppression, scan summaries, and deep-search follow-ups.
 - `User review workflow` with ignore, address, bookmark, notes, search, and filtering.
 - `Operational outputs` including dashboard analytics, CSV export, PDF reports, and optional scan-summary emails.
@@ -63,6 +63,7 @@ DoppelSpotter is designed for a simple user journey:
 | Recent domain registrations | Domain registrations | `doppelspotter/recent-domain-registrations` |
 | Public communities | Discord servers | `louisdeconinck/discord-server-scraper` |
 | Code platforms | GitHub repos | `ryanclinton/github-repo-search` |
+| Trademark filings | EUIPO trademarks | `doppelspotter/euipo-trademark-search` |
 | Social posts | X | `apidojo/tweet-scraper` |
 
 ### Why The Breadth Matters
@@ -158,7 +159,7 @@ The app is not only about detection. It is also about making results manageable 
 
 ### Deep Search
 
-Deep search is supported for Google-backed scan surfaces plus the first-class Reddit, TikTok, and X scan types.
+Deep search is supported for Google-backed scan surfaces plus the first-class Reddit, TikTok, and X scan types. It is not used for EUIPO trademark, domain-registration, Discord, or GitHub scans.
 
 After the initial scan, the app can use the run-level context to synthesize more targeted follow-up searches. This is intended to uncover adjacent abuse vectors without requiring the user to manually craft every secondary query.
 
@@ -344,6 +345,8 @@ For true end-to-end scan testing, Apify needs to call back into the app's webhoo
 | `APIFY_MAX_LIVE_RUNS_PER_SCAN` | No | Positive integer override for the per-scan live Apify actor-run cap, defaulting to `5`. |
 | `OPENROUTER_API_KEY` | Yes | Used for finding classification, scan summaries, and domain actor integration inside the app. |
 | `OPENROUTER_MODEL` | No | Overrides the default app model (`deepseek/deepseek-v3.2`). |
+| `EUIPO_API_KEY` | Yes for EUIPO trademark scans | Used as the EUIPO actor `clientId` when the app starts EUIPO trademark runs. |
+| `EUIPO_API_SECRET` | Yes for EUIPO trademark scans | Used as the EUIPO actor `clientSecret` when the app starts EUIPO trademark runs. |
 | `CODEPUNCH_API_KEY` | Yes for domain scans | Used when the app starts the recent-domain-registrations actor. |
 | `CODEPUNCH_API_SECRET` | Yes for domain scans | Used when the app starts the recent-domain-registrations actor. |
 | `MAILERSEND_API_TOKEN` | Optional | Enables transactional emails such as verification, reset, and scan summaries. |

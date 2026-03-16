@@ -3398,6 +3398,7 @@ function BrandDetailPageContent() {
         if (source === 'domains') return 'Fetching recent domain registrations';
         if (source === 'discord') return 'Fetching Discord server results';
         if (source === 'github') return 'Fetching GitHub repositories';
+        if (source === 'euipo') return 'Fetching EUIPO trademark results';
         if (source === 'x') return 'Fetching X posts';
         if (source === 'apple_app_store') return 'Fetching Apple App Store results';
         if (source === 'google_play') return 'Fetching Google Play results';
@@ -3414,6 +3415,9 @@ function BrandDetailPageContent() {
         }
         if (source === 'github') {
           return withAnalysisCounts('Analysing GitHub repositories', 'Analysing GitHub repositories', activeRun);
+        }
+        if (source === 'euipo') {
+          return withAnalysisCounts('Analysing EUIPO trademark filings', 'Analysing EUIPO trademark filings', activeRun);
         }
         if (source === 'x') {
           return withAnalysisCounts('Analysing X posts', 'Analysing X posts', activeRun);

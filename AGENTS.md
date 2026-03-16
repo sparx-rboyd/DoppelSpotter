@@ -49,7 +49,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │       ├── settings/             # Authenticated account settings page (password + account deletion)
 │       └── lib/
 │           ├── apify/
-│           │   ├── actors.ts     # Logical scanner registry (Google + Reddit + TikTok + Discord + GitHub + X) + Apify actor lookup helpers
+│           │   ├── actors.ts     # Logical scanner registry (Google + Reddit + TikTok + Discord + GitHub + EUIPO + X) + Apify actor lookup helpers
 │           │   ├── client.ts     # Apify client: source-specific actor input builders, run start helpers, dataset fetch
 │           │   └── launch-queue.ts # Shared queued-launch drain + Apify backoff/throttle state helpers for initial and deep-search runs
 │           ├── async-deletions.ts  # Resumable lease-based deletion passes for scans, brand history, brands, and full accounts
@@ -67,10 +67,10 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │           ├── scan-schedules.ts # Schedule validation, timezone-aware recurrence, next-run helpers
 │           └── analysis/
 │               ├── google-scanner-policy.ts # Small prompt-policy helpers for Google specialist scans
-│               ├── prompts.ts    # Google + Reddit + TikTok + Discord + GitHub + X classification, deep-search, scan-summary, and theme-normalisation prompts
+│               ├── prompts.ts    # Google + Reddit + TikTok + Discord + GitHub + EUIPO + X classification, deep-search, scan-summary, and theme-normalisation prompts
 │               ├── openrouter.ts # AI analysis client: chatCompletion()
 │               ├── theme-normalization.ts # Scan-wide provisional-theme canonicalisation before scan completion
-│               └── types.ts      # Google + Reddit + TikTok + Discord + GitHub + X analysis output interfaces + parsers
+│               └── types.ts      # Google + Reddit + TikTok + Discord + GitHub + EUIPO + X analysis output interfaces + parsers
 └── docs/
     ├── GCP_SETUP.md
     ├── GCP_DELETION_TASKS_SETUP.md
@@ -82,7 +82,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 
 ## Actor Registry
 
-The scan pipeline now has thirteen active logical scanner variants backed by seven physical Apify actors:
+The scan pipeline now has fourteen active logical scanner variants backed by eight physical Apify actors:
 
 - `google-web` → normal web search
 - `reddit-posts` → public Reddit post discovery via the dedicated Reddit search actor
@@ -96,6 +96,7 @@ The scan pipeline now has thirteen active logical scanner variants backed by sev
 - `discord-servers` → public Discord server discovery via the Apify Discord actor
 - `domain-registrations` → recent domain registration discovery via the CodePunch-backed Apify actor
 - `github-repos` → public GitHub repository discovery via the Apify GitHub repo-search actor
+- `euipo-trademarks` → EUIPO trademark filing discovery via the first-party DoppelSpotter EUIPO trademark-search actor
 - `x-search` → public X post discovery via the Apify tweet-search actor
 
 The seven active Google logical scanners all reuse the same physical Apify actor
@@ -104,7 +105,8 @@ The seven active Google logical scanners all reuse the same physical Apify actor
 `apidojo/tiktok-scraper`, and `domain-registrations` uses
 `doppelspotter/recent-domain-registrations`, `discord-servers` uses
 `louisdeconinck/discord-server-scraper`, `github-repos` uses
-`ryanclinton/github-repo-search`, and `x-search` uses `apidojo/tweet-scraper`.
+`ryanclinton/github-repo-search`, `euipo-trademarks` uses
+`doppelspotter/euipo-trademark-search`, and `x-search` uses `apidojo/tweet-scraper`.
 `app/src/lib/apify/actors.ts` therefore keys the registry by logical scanner id rather than raw
 `actorId`.
 
@@ -159,6 +161,17 @@ run for the same scan leaves raw actor execution. Stores one finding per reposit
 the canonical identity for per-scan upserts and historical repeat suppression, and does **not**
 support deep-search follow-up runs.
 
+`euipo-trademarks` is a trademark-filing source. It uses the first-party
+`doppelspotter/euipo-trademark-search` actor — a DoppelSpotter-built actor that fixes RSQL quoting
+for multi-word brand names and caches EUIPO OAuth2 tokens with expiry-aware refresh logic. The
+actor receives the full keywords array in a single run and compiles them into an RSQL OR query
+(`(verbalElement==*sparx*,verbalElement==*sparx*maths*);applicationDate>="..."`) so all
+brand terms are searched in one actor invocation with no per-keyword concurrency required. The
+brand-page `Search depth` setting (`1..5`) maps to a total `maxResults` budget of `50..250`
+for the single run. Stores one finding per trademark application, uses EUIPO `applicationNumber`
+as the canonical identity for per-scan upserts and historical repeat suppression, derives the
+actor's `euipoUrl` as the user-visible URL, and does **not** support deep-search follow-up runs.
+
 `x-search` is a tweet-level source. It uses `searchTerms` only, maps the brand-page `Search depth`
 setting from `1..5` to `maxItems = 50..250`, stores one finding per tweet, uses tweet `id` as
 the canonical identity for per-scan upserts and historical repeat suppression, and supports
@@ -181,8 +194,8 @@ support deep-search follow-up runs.
 ```
 Brand add/edit pages
  └─ persist `brands.sendScanSummaryEmails` to opt the brand into post-scan summary emails
- └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Reddit maps it to a total post budget (`60..300`, distributed across query terms with a minimum 10 posts per query) plus an Apify spend cap (`$0.10..$0.50` per run), TikTok maps it to a total video budget (`100..500`, distributed across query terms with a minimum 10 posts per query), Domain registrations map it to requested domain volume (`100..500`), Discord maps it to an Apify spend cap (`$0.20..$0.60` per run), GitHub maps it to a per-keyword result budget from a `50..250` total (minimum 10 per keyword), and X maps it to requested tweet volume (`50..250`)
- └─ persist `brands.lookbackPeriod` as the user-facing `Lookback period` setting (`1year` | `1month` | `1week` | `since_last_scan`, default `1year`); at scan-start time this is resolved to a concrete `YYYY-MM-DD` date (with a 1-day buffer) and snapshotted as `scans.effectiveSettings.lookbackDate`; Google-backed scans append `after:YYYY-MM-DD` to the search query, Reddit maps the date to the closest actor `timeframe` bucket and the webhook then exact-filters posts by `created_utc >= lookbackDate`, TikTok maps the date to the closest actor `dateRange` bucket and the webhook then exact-filters videos by created-at time, Domain registrations use it as the `date` filter, GitHub appends `created:>YYYY-MM-DD pushed:>YYYY-MM-DD` qualifiers, X passes it as `tweetDateSince`; Discord is unaffected; the `since_last_scan` option resolves to the brand's last completed scan date, falling back to 1 year when no prior scan exists
+ └─ persist `brands.searchResultPages` as the user-facing `Search depth` setting; Google-backed scans map it to requested SERP pages, Reddit maps it to a total post budget (`60..300`, distributed across query terms with a minimum 10 posts per query) plus an Apify spend cap (`$0.10..$0.50` per run), TikTok maps it to a total video budget (`100..500`, distributed across query terms with a minimum 10 posts per query), Domain registrations map it to requested domain volume (`100..500`), Discord maps it to an Apify spend cap (`$0.20..$0.60` per run), GitHub maps it to a per-keyword result budget from a `50..250` total (minimum 10 per keyword), EUIPO maps it to a total trademark-result budget of `50..250` for a single actor run covering all brand keywords, and X maps it to requested tweet volume (`50..250`)
+ └─ persist `brands.lookbackPeriod` as the user-facing `Lookback period` setting (`1year` | `1month` | `1week` | `since_last_scan`, default `1year`); at scan-start time this is resolved to a concrete `YYYY-MM-DD` date (with a 1-day buffer) and snapshotted as `scans.effectiveSettings.lookbackDate`; Google-backed scans append `after:YYYY-MM-DD` to the search query, Reddit maps the date to the closest actor `timeframe` bucket and the webhook then exact-filters posts by `created_utc >= lookbackDate`, TikTok maps the date to the closest actor `dateRange` bucket and the webhook then exact-filters videos by created-at time, Domain registrations use it as the `date` filter, GitHub appends `created:>YYYY-MM-DD pushed:>YYYY-MM-DD` qualifiers, EUIPO passes it as `dateFrom` with `dateTo = today (UTC)`, X passes it as `tweetDateSince`; Discord is unaffected; the `since_last_scan` option resolves to the brand's last completed scan date, falling back to 1 year when no prior scan exists
  └─ persist `brands.allowAiDeepSearches` to allow or block AI-requested follow-up searches on supported deep-search-capable scan types
  └─ persist `brands.maxAiDeepSearches` as the user-facing deep-search breadth setting; it caps AI-requested follow-up searches from 1-5 on supported deep-search-capable scan types
  └─ persist `brands.scanSources.google|reddit|tiktok|youtube|facebook|instagram|telegram|apple_app_store|google_play|domains|discord|github|x` so each scan surface can be enabled or disabled per brand
@@ -216,9 +229,9 @@ POST /api/scan
  └─ snapshots the resolved per-run `scans.effectiveSettings` onto the scan so later webhook processing stays deterministic even if brand settings change mid-scan
  └─ also snapshots the resolved `scans.analysisSeverityDefinitions` so classification thresholds stay deterministic if the brand settings are edited mid-scan
  └─ initializes `scans.userPreferenceHintsStatus = 'pending'` before any actor webhook can race ahead
- └─ resolves the scan's enabled logical scanners (`google-web`, `reddit-posts`, `tiktok-posts`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `google-apple-app-store`, `google-play`, `domain-registrations`, `discord-servers`, `github-repos`, `x-search`) from `scans.effectiveSettings.scanSources`
- └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Reddit maps the same setting to a `60..300` total post budget distributed across `queries[]` via `maxPosts` (minimum 10 per query) plus `maxTotalChargeUsd = $0.10..$0.50` per run; TikTok maps it to a `100..500` total video budget distributed across keyword runs via `maxItems` (minimum 10 per query); Domain registrations map it to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to a per-keyword `maxResults` from a `50..250` total budget (minimum 10 per keyword); X maps it to `maxItems = 50..250`
- └─ applies `scans.effectiveSettings.lookbackDate` (pre-resolved YYYY-MM-DD with 1-day buffer) to time-constrain actor queries: Google appends `after:YYYY-MM-DD`, Reddit maps it to the closest actor `timeframe` bucket and then exact-filters posts in the webhook by `created_utc`, TikTok maps it to the closest actor `dateRange` bucket and then exact-filters videos in the webhook by created-at time, Domain registrations pass it as the `date` + `gte` filter, GitHub appends `created:>` + `pushed:>` qualifiers, X passes `tweetDateSince`; Discord is unaffected
+ └─ resolves the scan's enabled logical scanners (`google-web`, `reddit-posts`, `tiktok-posts`, `google-youtube`, `google-facebook`, `google-instagram`, `google-telegram`, `google-apple-app-store`, `google-play`, `domain-registrations`, `discord-servers`, `github-repos`, `euipo-trademarks`, `x-search`) from `scans.effectiveSettings.scanSources`
+ └─ maps `scans.effectiveSettings.searchResultPages` (default 3, min 1, max 5) to Google Search `maxPagesPerQuery`; Reddit maps the same setting to a `60..300` total post budget distributed across `queries[]` via `maxPosts` (minimum 10 per query) plus `maxTotalChargeUsd = $0.10..$0.50` per run; TikTok maps it to a `100..500` total video budget distributed across keyword runs via `maxItems` (minimum 10 per query); Domain registrations map it to `totalLimit = 100..500`; Discord maps it to `maxTotalChargeUsd = $0.20..$0.60` per run; GitHub maps it to a per-keyword `maxResults` from a `50..250` total budget (minimum 10 per keyword); EUIPO maps it to `maxResults = 50..250` for a single actor run that covers all brand keywords; X maps it to `maxItems = 50..250`
+ └─ applies `scans.effectiveSettings.lookbackDate` (pre-resolved YYYY-MM-DD with 1-day buffer) to time-constrain actor queries: Google appends `after:YYYY-MM-DD`, Reddit maps it to the closest actor `timeframe` bucket and then exact-filters posts in the webhook by `created_utc`, TikTok maps it to the closest actor `dateRange` bucket and then exact-filters videos in the webhook by created-at time, Domain registrations pass it as the `date` + `gte` filter, GitHub appends `created:>` + `pushed:>` qualifiers, EUIPO passes it as `dateFrom` while the actor input also sets `dateTo = today (UTC)`, X passes `tweetDateSince`; Discord is unaffected
  └─ returns the reserved `scanId` immediately with the scan already marked `running`; initial actor starts, preference-hint preparation, and any first-wave backoff now continue asynchronously after the response
  └─ uses the same queued-launch drain path for initial starts and later deep-search starts: launches are claimed into `scans.launchingActorRuns`, started up to the scan-wide live-Apify-run cap (`APIFY_MAX_LIVE_RUNS_PER_SCAN`, default `5`), then converted into real `actorRuns` once Apify accepts them
  └─ stores runId → scan document incrementally as each launched actor starts, including `actorRuns.*.scannerId`, raw `searchQuery`, operator-free `displayQuery`, and optional explicit `searchQueries[]` / `displayQueries[]` arrays for batched runs
@@ -301,7 +314,7 @@ DELETE /api/brands/[brandId]/findings
 GET /api/brands/[brandId]/findings/search?q=...
  └─ authenticated brand-scoped text search over lightweight finding summaries used by the brand page when the search box is non-empty
  └─ accepts optional `scanId`, `category`, `source`, `theme`, `limit`, and `cursor`
- └─ applies exact Firestore filters first where available, then server-side substring matching on `title`, `url`, `llmAnalysis`, and denormalized X handles
+ └─ applies exact Firestore filters first where available, then server-side substring matching on `title`, `url`, `llmAnalysis`, denormalized X handles, and denormalized EUIPO trademark metadata (`applicationNumber`, `applicantName`, `filingDate`, `status`, `niceClasses`, `markType`)
  └─ returns flat paginated matches annotated with `displayBucket` (`hit` | `non-hit` | `ignored` | `addressed`) plus scan-level context (`scanStartedAt`, `scanStatus`)
  └─ excludes matches from scans that are currently being deleted
  └─ includes cursor pagination and a scan-budget cap so very broad queries degrade gracefully instead of freezing the browser
@@ -312,7 +325,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
  └─ if the scan's preference hints are still `pending`, the run is parked in `actorRuns.*.status = 'waiting_for_preference_hints'` and no analysis starts yet
  └─ once the scan-level preference hints are `ready` or `failed`, deferred succeeded callbacks are replayed through the same webhook route so they resume normal processing
  └─ duplicate callbacks for a run already in `fetching_dataset` / `analysing` are acknowledged and skipped before expensive work starts
- └─ fetches source-specific capped items from Apify dataset (source-level actor limits still apply before post-normalization chunked analysis: Google via requested SERP pages, Reddit via `maxPosts` + `maxTotalChargeUsd`, TikTok via `maxItems`, Discord via `maxTotalChargeUsd` spend cap, and GitHub / X via the requested `50..250` result volume)
+ └─ fetches source-specific capped items from Apify dataset (source-level actor limits still apply before post-normalization chunked analysis: Google via requested SERP pages, Reddit via `maxPosts` + `maxTotalChargeUsd`, TikTok via `maxItems`, Discord via `maxTotalChargeUsd` spend cap, GitHub / X via the requested `50..250` result volume, and EUIPO via the requested `50..250` trademark-result volume with a minimum 20 per keyword run)
  └─ Google Search mode: normalize SERP pages into compact organic-result candidates
       └─ excludes ads from AI analysis; keeps `relatedQueries` + `peopleAlsoAsk` as run-level context
       └─ stores scanner-aware sighting/debug metadata so merged findings can retain which logical scan surfaces saw a URL
@@ -349,6 +362,13 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
       └─ dedupes repeated repository `fullName` values within the run before analysis
       └─ skips repository `fullName` values that already appeared in previous scans for the same brand before any LLM analysis
       └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
+      └─ does not run deep-search suggestion generation or follow-up runs
+ └─ EUIPO mode: normalize public trademark-search records into compact trademark candidates
+      └─ derives the stored/displayed URL from the actor's `euipoUrl` field
+      └─ dedupes repeated trademark `applicationNumber` values within the run before analysis
+      └─ skips trademark `applicationNumber` values that already appeared in previous scans for the same brand before any LLM analysis
+      └─ chunked AI classification: bounded concurrent chunk calls (deterministically merged in chunk order)
+      └─ EUIPO findings denormalize `applicationNumber`, `applicantName`, `filingDate`, `status`, `niceClasses`, and `markType` for lightweight list/search/UI use
       └─ does not run deep-search suggestion generation or follow-up runs
  └─ X mode: normalize public tweet records into compact tweet candidates
       └─ uses the returned tweet `url` / `twitterUrl` as the user-facing link
@@ -398,7 +418,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **File:** `app/src/lib/analysis/`
 - **When:** After each Apify actor run completes, inside the webhook handler
 - **Model:** `deepseek/deepseek-v3.2` via OpenRouter (overridable via `OPENROUTER_MODEL`)
-- **Prompts:** `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `REDDIT_CLASSIFICATION_SYSTEM_PROMPT` + `buildRedditChunkAnalysisPrompt()` for chunked Reddit post classification; `TIKTOK_CLASSIFICATION_SYSTEM_PROMPT` + `buildTikTokChunkAnalysisPrompt()` for chunked TikTok video classification; `DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT` + `buildDomainRegistrationChunkAnalysisPrompt()` for chunked recent-domain-registration classification; `DISCORD_CLASSIFICATION_SYSTEM_PROMPT` + `buildDiscordChunkAnalysisPrompt()` for chunked Discord server classification; `GITHUB_CLASSIFICATION_SYSTEM_PROMPT` + `buildGitHubChunkAnalysisPrompt()` for chunked GitHub repository classification; `X_CLASSIFICATION_SYSTEM_PROMPT` + `buildXChunkAnalysisPrompt()` for chunked X post classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for Google deep-search selection; `buildRedditFinalSelectionSystemPrompt()` + `buildRedditFinalSelectionPrompt()` for Reddit deep-search selection; `buildTikTokFinalSelectionSystemPrompt()` + `buildTikTokFinalSelectionPrompt()` for TikTok deep-search selection; `THEME_NORMALIZATION_SYSTEM_PROMPT` + `buildThemeNormalizationPrompt()` for scan-wide theme canonicalisation; `SCAN_SUMMARY_SYSTEM_PROMPT` + `buildScanSummaryPrompt()` for the final scan summary
+- **Prompts:** `GOOGLE_CLASSIFICATION_SYSTEM_PROMPT` + `buildGoogleChunkAnalysisPrompt()` for chunked Google classification; `REDDIT_CLASSIFICATION_SYSTEM_PROMPT` + `buildRedditChunkAnalysisPrompt()` for chunked Reddit post classification; `TIKTOK_CLASSIFICATION_SYSTEM_PROMPT` + `buildTikTokChunkAnalysisPrompt()` for chunked TikTok video classification; `DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT` + `buildDomainRegistrationChunkAnalysisPrompt()` for chunked recent-domain-registration classification; `DISCORD_CLASSIFICATION_SYSTEM_PROMPT` + `buildDiscordChunkAnalysisPrompt()` for chunked Discord server classification; `GITHUB_CLASSIFICATION_SYSTEM_PROMPT` + `buildGitHubChunkAnalysisPrompt()` for chunked GitHub repository classification; `EUIPO_CLASSIFICATION_SYSTEM_PROMPT` + `buildEuipoChunkAnalysisPrompt()` for chunked EUIPO trademark classification; `X_CLASSIFICATION_SYSTEM_PROMPT` + `buildXChunkAnalysisPrompt()` for chunked X post classification; `buildGoogleFinalSelectionSystemPrompt()` + `buildGoogleFinalSelectionPrompt()` for Google deep-search selection; `buildRedditFinalSelectionSystemPrompt()` + `buildRedditFinalSelectionPrompt()` for Reddit deep-search selection; `buildTikTokFinalSelectionSystemPrompt()` + `buildTikTokFinalSelectionPrompt()` for TikTok deep-search selection; `THEME_NORMALIZATION_SYSTEM_PROMPT` + `buildThemeNormalizationPrompt()` for scan-wide theme canonicalisation; `SCAN_SUMMARY_SYSTEM_PROMPT` + `buildScanSummaryPrompt()` for the final scan summary
 - **Scan-level summary:** after all actor runs finish, the webhook runs one final LLM pass over the scan's actionable findings and stores a concise `aiSummary` on the scan document for the brand page
 - **Theme canonicalisation:** chunked finding classification writes `findings.provisionalTheme` during actor-run processing; the hidden `summarising` phase then runs a separate LLM pass across the whole scan to collapse near-duplicate provisional labels into final canonical `findings.theme` values before dashboard breakdowns and scan completion
 - **Watch words:** optional per-brand terms passed to the prompt builder; AI analysis is instructed to note any presence or implied association and use its discretion on severity impact
@@ -408,6 +428,7 @@ Apify calls POST /api/webhooks/apify (on SUCCEEDED / FAILED / ABORTED)
 - **Historical TikTok suppression:** TikTok runs load previously seen TikTok video ids only from prior TikTok findings, preferring the top-level `canonicalId` and falling back to stored raw data for older records
 - **Historical Discord suppression:** Discord runs load previously seen Discord server ids only from prior Discord findings, preferring the top-level `canonicalId` and falling back to stored raw data for older records
 - **Historical GitHub suppression:** GitHub runs load previously seen repository `fullName` values only from prior GitHub findings, preferring the lowercased top-level `canonicalId` and falling back to stored raw data for older records
+- **Historical EUIPO suppression:** EUIPO runs load previously seen trademark `applicationNumber` values only from prior EUIPO findings, preferring the top-level `canonicalId` and falling back to stored raw data for older records
 - **Historical X suppression:** X runs load previously seen tweet ids only from prior X findings, preferring the top-level `canonicalId` and falling back to stored raw data for older records; handle-only hits are additionally suppressed for accounts that already have a previous real X finding for the brand using denormalized `xAuthorId` / `xAuthorHandle` fields instead of parsing raw data
 - **User preference hints:** each scan prepares a tiny LLM-authored soft-guidance summary from explicit user-review signals before actor-run analysis begins; this is now the only historical-review context sent into classification prompts
 - **Existing taxonomy hints:** prompts receive the current brand's distinct `theme` labels so the LLM can reuse them exactly where appropriate, while still inventing a new short label when none fit
@@ -685,6 +706,8 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | `APIFY_API_TOKEN` | Apify platform token |
 | `APIFY_WEBHOOK_SECRET` | Shared secret for webhook validation |
 | `APIFY_MAX_LIVE_RUNS_PER_SCAN` | Optional positive integer override for the per-scan live Apify actor-run cap (default: `5`) |
+| `EUIPO_API_KEY` | EUIPO client id used by the EUIPO trademark-search actor |
+| `EUIPO_API_SECRET` | EUIPO client secret used by the EUIPO trademark-search actor |
 | `OPENROUTER_API_KEY` | OpenRouter API key |
 | `CODEPUNCH_API_KEY` | CodePunch API key used by the recent-domain-registrations actor |
 | `CODEPUNCH_API_SECRET` | CodePunch API secret used by the recent-domain-registrations actor |
@@ -712,7 +735,7 @@ The authenticated dashboard is now fully brand-scoped rather than a cross-brand 
 | `authRateLimits` | id (`<scope>:<sha256(client-identifier)>`), scope, keyHash, attemptCount, windowStartedAt, lastAttemptAt |
 | `brands` | id, userId, name, keywords[], officialDomains[], **sendScanSummaryEmails?**, **searchResultPages?**, **lookbackPeriod?** (`1year`\|`1month`\|`1week`\|`since_last_scan`, default `1year`), **allowAiDeepSearches?**, **maxAiDeepSearches?**, **scanSources?** (`google`, `reddit`, `tiktok`, `youtube`, `facebook`, `instagram`, `telegram`, `apple_app_store`, `google_play`, `domains`, `discord`, `github`, `x`), **activeScanId?**, watchWords[]?, safeWords[]?, **scanSchedule?** (`enabled`, `frequency`, `timeZone`, `startAt`, `nextRunAt`, `lastTriggeredAt?`, `lastScheduledScanId?`), **historyDeletion?**, **brandDeletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), **dashboardExecutiveSummary?** (`version`, `status`, `summary?`, `patterns[]?`, `inputFindingCount?`, `severityBreakdown?`, `generatedFromScanId?`, `requestedForScanId?`, `latestCompletedAt?`, `completedScanCount?`, `startedAt?`, `completedAt?`, `error?`, `rawLlmResponse?`), **lookbackNudgeDismissed?**, createdAt, updatedAt |
 | `scans` | id, brandId, userId, status (`pending`\|`running`\|`summarising`\|`completed`\|`failed`\|`cancelled`), **deletion?** (`status`, `requestedAt`, `startedAt?`, `lastHeartbeatAt?`, `leaseExpiresAt?`), actorIds[], actorRuns{} (`scannerId`, `source`, `status`, `datasetId?`, `itemCount?`, `analysedCount?`, `skippedDuplicateCount?`, `searchDepth?`, `searchQuery?`, `displayQuery?`, `deepSearchSuggestionsProcessed?`, `suggestedSearches?`), **queuedActorRuns[] / launchingActorRuns{}** (`launchId`, `scannerId`, `source`, `searchDepth`, serialized input, raw/user-visible queries), **apifyThrottle?** (`activeLaunchIds[]`), completedRunCount, findingCount, **highCount, mediumCount, lowCount, nonHitCount, ignoredCount, addressedCount, skippedCount, dashboardBreakdowns?** (`version`, `source[]`, `theme[]` compact dashboard chart summaries), **userPreferenceHintsStatus?, userPreferenceHints?, userPreferenceHintsError?, userPreferenceHintsStartedAt?, userPreferenceHintsCompletedAt?, aiSummary?, summaryStartedAt?**, **scanSummaryEmailStatus?**, **scanSummaryEmailAttemptedAt?**, **scanSummaryEmailSentAt?**, **scanSummaryEmailMessageId?**, **scanSummaryEmailError?** (denormalized completion + notification metadata), startedAt, completedAt |
-| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`apple_app_store`\|`google_play`\|`domains`\|`discord`\|`github`\|`x`\|`unknown`), actorId, severity, title, **theme?**, **provisionalTheme?**, description, llmAnalysis, url?, **registrationDate?** (denormalized top-level recent-domain-registration date for lightweight card rendering), **canonicalId?** (source-specific normalized dedupe key: normalized URL / post id / video id / repo fullName / domain / tweet id), **xAuthorId?**, **xAuthorHandle?**, **xAuthorUrl?**, **xMatchBasis?** (`none`\|`handle_only`\|`content_only`\|`handle_and_content`), rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
+| `findings` | id, scanId, brandId, userId, source (`google`\|`reddit`\|`tiktok`\|`youtube`\|`facebook`\|`instagram`\|`telegram`\|`apple_app_store`\|`google_play`\|`domains`\|`discord`\|`github`\|`euipo`\|`x`\|`unknown`), actorId, severity, title, **theme?**, **provisionalTheme?**, description, llmAnalysis, url?, **registrationDate?** (denormalized top-level recent-domain-registration date for lightweight card rendering), **applicationNumber?**, **applicantName?**, **filingDate?**, **status?**, **niceClasses?**, **markType?** (denormalized top-level EUIPO trademark fields for lightweight card/search rendering), **canonicalId?** (source-specific normalized dedupe key: normalized URL / post id / video id / repo fullName / domain / application number / tweet id), **xAuthorId?**, **xAuthorHandle?**, **xAuthorUrl?**, **xMatchBasis?** (`none`\|`handle_only`\|`content_only`\|`handle_and_content`), rawData, llmAnalysisPrompt?, isFalsePositive?, isIgnored?, ignoredAt?, **userPreferenceSignal?**, **userPreferenceSignalReason?**, **userPreferenceSignalAt?**, **userReclassifiedFrom?**, **userReclassifiedTo?**, **isAddressed?**, **addressedAt?**, **isBookmarked?**, **bookmarkedAt?**, **bookmarkNote?** (per-finding user note), rawLlmResponse?, createdAt |
 
 ---
 

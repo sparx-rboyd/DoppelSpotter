@@ -23,6 +23,8 @@ import type {
   DiscordServerCandidate,
   DomainRegistrationCandidate,
   DomainRegistrationRunContext,
+  EuipoTrademarkCandidate,
+  EuipoRunContext,
   GitHubRepoCandidate,
   GitHubRunContext,
   GoogleRunContext,
@@ -334,6 +336,60 @@ Treat repositories with less caution when ...
 - The brand term is used in an unrelated technical or academic context that would not realistically infringe the brand
 
 Set isFalsePositive: true if the repository is clearly legitimate use of the brand name, such as a benign integration, academic project, ordinary discussion repo, or otherwise non-deceptive ecosystem tooling.`;
+
+/**
+ * System prompt for chunked EUIPO trademark classification.
+ */
+export const EUIPO_CLASSIFICATION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
+
+You will receive a compact list of EUIPO trademark candidates for a brand, plus supporting metadata such as the applicant name, Nice classes, filing date, status, mark type, and any available goods and services description.
+
+Your task is to assess ONLY the provided trademark candidates for potential brand infringement, confusing similarity, suspicious filing activity, or other concerning brand misuse.
+Do not invent extra trademarks. Do not assume a filing is infringing purely because it contains part of the brand name. Use the applicant identity, class overlap, wording, and any descriptive metadata to judge whether the filing is likely benign, unrelated, official, or concerning.
+Use British English spelling and phrasing in all human-readable output fields.
+
+You must respond with a raw JSON object matching this exact schema (no markdown, no code fences, just the JSON):
+{
+  "items": [
+    {
+      "resultId": "the exact resultId from the input candidate",
+      "title": "Short, descriptive title of the finding (max 10 words)",
+      "severity": "high" | "medium" | "low",
+      "theme": "Short theme label (preferably 1 word, maximum ${MAX_FINDING_TAXONOMY_WORDS} words)",
+      "analysis": "Plain-language explanation of what was found, why it is or isn't flagged, and what the business risk is (2-3 sentences)",
+      "isFalsePositive": boolean
+    }
+  ]
+}
+
+Rules for "items":
+- Include exactly one item for every input trademark candidate and reuse the exact same resultId.
+- Assess only the provided trademark candidates. Do not add extra items and do not omit any candidate.
+- Each item must have all six fields: resultId, title, severity, theme, analysis, isFalsePositive.
+- Each individual analysis must make sense in isolation. No referring to things like 'Another ...' or 'More examples of ...'
+- This applies to both the title and the analysis text.
+- Always return a concise "theme" label. Prefer 1 word where natural, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words. Must be in title case.
+- If the user prompt includes existing theme labels that fit, reuse one of them exactly.
+- If none fit well, create a new short label rather than forcing a poor match.
+- Keep theme labels broad. It's better to have a small number of high quality theme labels than many low quality theme labels.
+- Never create theme labels like 'Unknown' or 'Unrelated' - use 'Other'.
+- If historical user-review tendencies are provided, treat them only as soft guidance. Never let them override official domains, watch words, safe words, or clear evidence in the current trademark metadata.
+
+Severity assignment:
+- The user prompt will include this brand's definitions for "high", "medium", and "low".
+- Apply those brand-specific definitions exactly when assigning severity.
+
+Counter signals:
+Treat trademark filings with less caution when ...
+- The filing appears to be the brand's own application, or clearly belongs to a legitimate unrelated applicant in a different context
+- The wording is only loosely similar and the Nice classes / goods and services clearly point away from likely confusion
+
+Escalation signals:
+Treat trademark filings with more caution when ...
+- The mark wording is highly similar to the protected brand, especially in the same or adjacent Nice classes
+- The applicant identity, goods and services, or other metadata suggest possible impersonation, overlap, or opportunistic brand targeting
+
+Set isFalsePositive: true if the filing is clearly benign, official, unrelated, or too weakly connected to the protected brand to be a realistic infringement concern.`;
 
 /**
  * System prompt for chunked X tweet classification.
@@ -1034,6 +1090,87 @@ Use British English in any human-readable text you generate.
 Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
 
 GitHub repositories (${compactCandidates.length}):
+${JSON.stringify(compactCandidates, null, 2)}`;
+}
+
+export function buildEuipoChunkAnalysisPrompt(params: {
+  brandName: string;
+  keywords: string[];
+  officialDomains: string[];
+  severityDefinitions: ResolvedBrandAnalysisSeverityDefinitions;
+  watchWords?: string[];
+  safeWords?: string[];
+  userPreferenceHints?: UserPreferenceHints;
+  existingThemes?: string[];
+  source: FindingSource;
+  candidates: EuipoTrademarkCandidate[];
+  runContext: EuipoRunContext;
+}): string {
+  const {
+    brandName,
+    keywords,
+    officialDomains,
+    severityDefinitions,
+    watchWords,
+    safeWords,
+    userPreferenceHints,
+    existingThemes,
+    source,
+    candidates,
+    runContext,
+  } = params;
+
+  const watchWordsLine = watchWords && watchWords.length > 0
+    ? `Watch words (concerning terms the brand owner does NOT want associated with their brand — flag any presence or implied association in the individual "analysis" field for that trademark filing): ${watchWords.join(', ')}`
+    : null;
+
+  const safeWordsLine = safeWords && safeWords.length > 0
+    ? `Safe words (terms the brand owner is comfortable being associated with — if present in a trademark filing, treat it with reduced caution in the individual "analysis" field unless there are strong warning signs elsewhere): ${safeWords.join(', ')}`
+    : null;
+
+  const userPreferenceHintsSection = buildUserPreferenceHintsSection(source, userPreferenceHints);
+  const existingThemesLine = `Existing theme labels for this brand (reuse one exactly if it fits; otherwise create a new short label): ${existingThemes && existingThemes.length > 0 ? existingThemes.join(', ') : 'none'}`;
+  const compactCandidates = candidates.map((candidate) => ({
+    resultId: candidate.resultId,
+    applicationNumber: candidate.applicationNumber,
+    markName: candidate.markName,
+    applicantName: candidate.applicantName,
+    niceClasses: candidate.niceClasses,
+    status: candidate.status,
+    filingDate: candidate.filingDate,
+    registrationDate: candidate.registrationDate,
+    expiryDate: candidate.expiryDate,
+    markType: candidate.markType,
+    markKind: candidate.markKind,
+    markBasis: candidate.markBasis,
+    representativeName: candidate.representativeName,
+    goodsAndServicesDescription: candidate.goodsAndServicesDescription,
+    renewalStatus: candidate.renewalStatus,
+    euipoUrl: candidate.euipoUrl,
+  }));
+
+  return `Brand being protected: "${brandName}"
+Brand keywords: ${keywords.length > 0 ? keywords.join(', ') : 'none'}
+Official domains: ${officialDomains.length > 0 ? officialDomains.join(', ') : 'none'}
+${buildSeverityDefinitionsSection(severityDefinitions)}
+${watchWordsLine ? `${watchWordsLine}\n` : ''}${safeWordsLine ? `${safeWordsLine}\n` : ''}${userPreferenceHintsSection ? `${userPreferenceHintsSection}\n` : ''}${existingThemesLine}
+Monitoring surface: EUIPO trademarks
+
+Supporting EUIPO context:
+- Search terms used: ${runContext.sourceQueries.length > 0 ? runContext.sourceQueries.join(' | ') : 'none'}
+- Filing date from: ${runContext.dateFrom ?? 'unknown'}
+- Filing date to: ${runContext.dateTo ?? 'unknown'}
+- Max results requested for this run: ${runContext.maxResults ?? 'unknown'}
+- Observed statuses: ${runContext.observedStatuses.length > 0 ? runContext.observedStatuses.join(' | ') : 'none'}
+- Observed applicants: ${runContext.observedApplicants.length > 0 ? runContext.observedApplicants.join(' | ') : 'none'}
+- Observed Nice classes: ${runContext.observedNiceClasses.length > 0 ? runContext.observedNiceClasses.join(' | ') : 'none'}
+- Sample mark names: ${runContext.sampleMarkNames.length > 0 ? runContext.sampleMarkNames.join(' | ') : 'none'}
+
+Assess every trademark candidate below and return one item in the "items" array per resultId.
+Use British English in any human-readable text you generate.
+Keep the theme label short: prefer 1 word where natural, never more than ${MAX_FINDING_TAXONOMY_WORDS} words.
+
+EUIPO trademark candidates (${compactCandidates.length}):
 ${JSON.stringify(compactCandidates, null, 2)}`;
 }
 

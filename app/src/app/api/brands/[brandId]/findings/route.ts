@@ -73,6 +73,7 @@ function parseSearchSource(value?: string | null): FindingSource | null {
     || value === 'domains'
     || value === 'discord'
     || value === 'github'
+    || value === 'euipo'
     || value === 'x'
     || value === 'unknown'
   ) {
@@ -148,8 +149,11 @@ function buildFindingSearchText(finding: FindingSummary) {
   const xHandleSearchText = finding.xAuthorHandle
     ? `${finding.xAuthorHandle} @${finding.xAuthorHandle}`
     : '';
+  const euipoSearchText = finding.source === 'euipo'
+    ? `${finding.applicationNumber ?? ''} ${finding.applicantName ?? ''} ${finding.filingDate ?? ''} ${finding.status ?? ''} ${finding.niceClasses ?? ''} ${finding.markType ?? ''}`
+    : '';
 
-  return normalizeSearchText(`${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis} ${xHandleSearchText}`);
+  return normalizeSearchText(`${finding.title} ${finding.url ?? ''} ${finding.llmAnalysis} ${xHandleSearchText} ${euipoSearchText}`);
 }
 
 function matchesCrossScanTabFilters(
@@ -332,6 +336,12 @@ export async function GET(request: NextRequest, { params }: Params) {
         'llmAnalysis',
         'url',
         'registrationDate',
+        'applicationNumber',
+        'applicantName',
+        'filingDate',
+        'status',
+        'niceClasses',
+        'markType',
         'xAuthorId',
         'xAuthorHandle',
         'xAuthorUrl',
@@ -474,6 +484,12 @@ export async function GET(request: NextRequest, { params }: Params) {
       'llmAnalysis',
       'url',
       'registrationDate',
+      'applicationNumber',
+      'applicantName',
+      'filingDate',
+      'status',
+      'niceClasses',
+      'markType',
       'xAuthorId',
       'xAuthorHandle',
       'xAuthorUrl',

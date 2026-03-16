@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
       return errorResponse('customSettings.maxAiDeepSearches must be a whole number from 1 to 5');
     }
     if (customSettings.scanSources !== undefined && !isValidBrandScanSources(customSettings.scanSources)) {
-      return errorResponse('customSettings.scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, telegram, apple_app_store, google_play, domains, discord, github, and x values');
+      return errorResponse('customSettings.scanSources must include boolean google, reddit, tiktok, youtube, facebook, instagram, telegram, apple_app_store, google_play, domains, discord, github, euipo, and x values');
     }
     if (customSettings.scanSources !== undefined && !hasEnabledBrandScanSource(customSettings.scanSources)) {
       return errorResponse('At least one scan source must be enabled');

@@ -16,6 +16,7 @@ import { areUserPreferenceHintsTerminal } from '@/lib/analysis/user-preference-h
 import {
   DISCORD_CLASSIFICATION_SYSTEM_PROMPT,
   DOMAIN_REGISTRATION_CLASSIFICATION_SYSTEM_PROMPT,
+  EUIPO_CLASSIFICATION_SYSTEM_PROMPT,
   GITHUB_CLASSIFICATION_SYSTEM_PROMPT,
   GOOGLE_CLASSIFICATION_SYSTEM_PROMPT,
   REDDIT_CLASSIFICATION_SYSTEM_PROMPT,
@@ -25,6 +26,7 @@ import {
   buildTikTokChunkAnalysisPrompt,
   buildDiscordChunkAnalysisPrompt,
   buildDomainRegistrationChunkAnalysisPrompt,
+  buildEuipoChunkAnalysisPrompt,
   buildGitHubChunkAnalysisPrompt,
   buildGoogleFinalSelectionSystemPrompt,
   buildGoogleFinalSelectionPrompt,
@@ -43,6 +45,7 @@ import {
   parseTikTokChunkAnalysisOutput,
   parseDiscordChunkAnalysisOutput,
   parseDomainRegistrationChunkAnalysisOutput,
+  parseEuipoChunkAnalysisOutput,
   parseGitHubChunkAnalysisOutput,
   parseGoogleChunkAnalysisOutput,
   parseXChunkAnalysisOutput,
@@ -55,6 +58,10 @@ import {
   type DomainRegistrationChunkAnalysisItem,
   type DomainRegistrationRunContext,
   type DomainRegistrationStoredFindingRawData,
+  type EuipoChunkAnalysisItem,
+  type EuipoRunContext,
+  type EuipoStoredFindingRawData,
+  type EuipoTrademarkCandidate,
   type GitHubChunkAnalysisItem,
   type GitHubRepoCandidate,
   type GitHubRunContext,
@@ -133,6 +140,8 @@ const DOMAIN_REGISTRATION_ANALYSIS_CHUNK_SIZE = 10;
 const DOMAIN_REGISTRATION_ANALYSIS_CONCURRENCY = 6;
 const GITHUB_ANALYSIS_CHUNK_SIZE = 10;
 const GITHUB_ANALYSIS_CONCURRENCY = 6;
+const EUIPO_ANALYSIS_CHUNK_SIZE = 10;
+const EUIPO_ANALYSIS_CONCURRENCY = 6;
 const X_ANALYSIS_CHUNK_SIZE = 10;
 const X_ANALYSIS_CONCURRENCY = 6;
 const FINDING_UPSERT_CONCURRENCY = 15;
@@ -149,6 +158,8 @@ const DOMAIN_REGISTRATION_FINDING_ID_PREFIX = 'domains';
 const DOMAIN_REGISTRATION_RAW_DATA_VERSION = 1;
 const GITHUB_FINDING_ID_PREFIX = 'github';
 const GITHUB_RAW_DATA_VERSION = 1;
+const EUIPO_FINDING_ID_PREFIX = 'euipo';
+const EUIPO_RAW_DATA_VERSION = 1;
 const X_FINDING_ID_PREFIX = 'x';
 const X_RAW_DATA_VERSION = 1;
 type ScanDocHandle = {
@@ -550,6 +561,13 @@ async function handleSucceededRun({
       currentScanId: scan.id ?? scanDoc.id,
     })
     : undefined;
+  const previousEuipoApplicationNumbers = scannerConfig.kind === 'euipo'
+    ? await loadPreviousEuipoApplicationNumbers({
+      brandId: scan.brandId,
+      userId: scan.userId,
+      currentScanId: scan.id ?? scanDoc.id,
+    })
+    : undefined;
   const previousXTweetIds = scannerConfig.kind === 'x'
     ? await loadPreviousXTweetIds({
       brandId: scan.brandId,
@@ -710,6 +728,24 @@ async function handleSucceededRun({
           displayQuery,
           userPreferenceHints,
           previousRepoFullNames: previousGitHubRepoFullNames,
+          existingTaxonomy,
+          scannerConfig,
+        })
+      : scannerConfig.kind === 'euipo'
+        ? await analyseAndWriteEuipoBatch({
+          scanDoc,
+          scan,
+          brand,
+          source,
+          actorId,
+          datasetId,
+          runId,
+          items,
+          searchDepth,
+          searchQuery,
+          displayQuery,
+          userPreferenceHints,
+          previousApplicationNumbers: previousEuipoApplicationNumbers,
           existingTaxonomy,
           scannerConfig,
         })
@@ -1013,6 +1049,40 @@ async function loadPreviousGitHubRepoFullNames({
   }
 
   return repoFullNames;
+}
+
+async function loadPreviousEuipoApplicationNumbers({
+  brandId,
+  userId,
+  currentScanId,
+}: {
+  brandId: string;
+  userId: string;
+  currentScanId: string;
+}): Promise<Set<string>> {
+  const previousFindingsSnap = await db
+    .collection('findings')
+    .where('brandId', '==', brandId)
+    .where('userId', '==', userId)
+    .where('source', '==', 'euipo')
+    .select('scanId', 'canonicalId', 'rawData')
+    .get();
+
+  const applicationNumbers = new Set<string>();
+  for (const doc of previousFindingsSnap.docs) {
+    const data = doc.data() as { scanId?: string; canonicalId?: string; rawData?: Record<string, unknown> };
+    if (data.scanId === currentScanId) {
+      continue;
+    }
+
+    const applicationNumber = normalizeStoredCanonicalId(data.canonicalId)
+      ?? readEuipoStoredFindingRawData(data.rawData)?.trademark.applicationNumber;
+    if (typeof applicationNumber === 'string' && applicationNumber.trim().length > 0) {
+      applicationNumbers.add(applicationNumber.trim());
+    }
+  }
+
+  return applicationNumbers;
 }
 
 async function loadPreviousXTweetIds({
@@ -2175,6 +2245,146 @@ async function analyseAndWriteGitHubBatch({
   return { findingCount, counts, skippedDuplicateCount };
 }
 
+async function analyseAndWriteEuipoBatch({
+  scanDoc,
+  scan,
+  brand,
+  source,
+  scannerConfig,
+  actorId,
+  datasetId,
+  runId,
+  items,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  userPreferenceHints,
+  previousApplicationNumbers,
+  existingTaxonomy,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  brand: BrandProfile;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  datasetId: string;
+  runId: string;
+  items: Record<string, unknown>[];
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  userPreferenceHints?: Scan['userPreferenceHints'];
+  previousApplicationNumbers?: ReadonlySet<string>;
+  existingTaxonomy: { themes: string[] };
+}): Promise<{
+  findingCount: number;
+  suggestedSearches?: string[];
+  counts: { high: number; medium: number; low: number; nonHit: number };
+  skippedDuplicateCount: number;
+}> {
+  let findingCount = 0;
+  const counts = { high: 0, medium: 0, low: 0, nonHit: 0 };
+  const severityDefinitions = scan.analysisSeverityDefinitions
+    ?? resolveBrandAnalysisSeverityDefinitions(brand.analysisSeverityDefinitions);
+  const normalizedRun = normalizeEuipoRun({
+    searchQuery,
+    displayQuery,
+    items,
+  });
+  const candidatesToAnalyse = normalizedRun.candidates.filter(
+    (candidate) => !previousApplicationNumbers?.has(candidate.applicationNumber),
+  );
+  const skippedDuplicateCount = normalizedRun.candidates.length - candidatesToAnalyse.length;
+
+  await updateScanProcessingState(scanDoc, {
+    [`actorRuns.${runId}.itemCount`]: candidatesToAnalyse.length,
+    [`actorRuns.${runId}.analysedCount`]: 0,
+    [`actorRuns.${runId}.skippedDuplicateCount`]: skippedDuplicateCount,
+  });
+
+  if (candidatesToAnalyse.length === 0) {
+    return { findingCount, counts, skippedDuplicateCount };
+  }
+
+  const outcomes = new Map<string, { candidate: EuipoTrademarkCandidate; outcome: EuipoFindingOutcome }>();
+  const chunks = chunkArray(candidatesToAnalyse, EUIPO_ANALYSIS_CHUNK_SIZE);
+  const chunkResults = await mapWithConcurrency(
+    chunks,
+    EUIPO_ANALYSIS_CONCURRENCY,
+    async (chunk, chunkIndex): Promise<EuipoChunkAnalysisResult | null> => {
+      const prompt = buildEuipoChunkAnalysisPrompt({
+        brandName: brand.name,
+        keywords: brand.keywords,
+        officialDomains: brand.officialDomains,
+        severityDefinitions,
+        watchWords: brand.watchWords,
+        safeWords: brand.safeWords,
+        userPreferenceHints,
+        existingThemes: existingTaxonomy.themes,
+        source,
+        candidates: chunk,
+        runContext: normalizedRun.runContext,
+      });
+      const llmAnalysisPrompt = formatLlmPromptForDebug(EUIPO_CLASSIFICATION_SYSTEM_PROMPT, prompt);
+
+      try {
+        return await retryChunkAnalysisOnce({
+          sourceLabel: 'EUIPO',
+          datasetId,
+          chunkIndex,
+          totalChunks: chunks.length,
+          analyse: () => analyseEuipoChunk({
+            candidates: chunk,
+            prompt,
+            llmAnalysisPrompt,
+          }),
+        });
+      } finally {
+        await updateScanProcessingState(scanDoc, {
+          [`actorRuns.${runId}.analysedCount`]: FieldValue.increment(chunk.length),
+        });
+      }
+    },
+  );
+
+  for (const chunkResult of chunkResults) {
+    if (!chunkResult) continue;
+    for (const [applicationNumber, value] of chunkResult.outcomes.entries()) {
+      outcomes.set(applicationNumber, value);
+    }
+  }
+
+  const deltas = await mapWithConcurrency(
+    [...outcomes.values()],
+    FINDING_UPSERT_CONCURRENCY,
+    async ({ candidate, outcome }) => upsertEuipoFinding({
+      scanDoc,
+      scan,
+      source,
+      actorId,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      candidate,
+      runContext: normalizedRun.runContext,
+      outcome,
+      scannerConfig,
+    }),
+  );
+
+  for (const delta of deltas) {
+    findingCount += delta.findingCount;
+    counts.high += delta.counts.high;
+    counts.medium += delta.counts.medium;
+    counts.low += delta.counts.low;
+    counts.nonHit += delta.counts.nonHit;
+  }
+
+  return { findingCount, counts, skippedDuplicateCount };
+}
+
 type GoogleFindingOutcome = {
   severity: Finding['severity'];
   title: string;
@@ -2263,6 +2473,21 @@ type GitHubFindingOutcome = {
 
 type GitHubChunkAnalysisResult = {
   outcomes: Map<string, { candidate: GitHubRepoCandidate; outcome: GitHubFindingOutcome }>;
+};
+
+type EuipoFindingOutcome = {
+  severity: Finding['severity'];
+  title: string;
+  theme?: string;
+  analysis: string;
+  isFalsePositive: boolean;
+  llmAnalysisPrompt?: string;
+  rawLlmResponse?: string;
+  classificationSource: 'llm' | 'fallback';
+};
+
+type EuipoChunkAnalysisResult = {
+  outcomes: Map<string, { candidate: EuipoTrademarkCandidate; outcome: EuipoFindingOutcome }>;
 };
 
 type XFindingOutcome = {
@@ -3347,6 +3572,106 @@ function normalizeGitHubRun({
   };
 }
 
+function normalizeEuipoRun({
+  searchQuery,
+  displayQuery,
+  items,
+}: {
+  searchQuery?: string;
+  displayQuery?: string;
+  items: Record<string, unknown>[];
+}): { candidates: EuipoTrademarkCandidate[]; runContext: EuipoRunContext } {
+  const candidateMap = new Map<string, EuipoTrademarkCandidate>();
+  const sourceQueries = new Set<string>();
+  const observedStatuses = new Set<string>();
+  const observedApplicants = new Set<string>();
+  const observedNiceClasses = new Set<string>();
+  const sampleMarkNames = new Set<string>();
+  let dateFrom: string | undefined;
+  let dateTo: string | undefined;
+  let maxResults: number | undefined;
+  let nextResultId = 1;
+
+  for (const sourceQuery of readDelimitedQueries(displayQuery ?? searchQuery)) {
+    sourceQueries.add(sourceQuery);
+  }
+
+  for (const item of items) {
+    const applicationNumber = readEuipoApplicationNumber(item);
+    if (!applicationNumber) continue;
+
+    const markName = readOptionalTrimmedString(item.markName) ?? readOptionalTrimmedString(item.tradeMarkName);
+    if (!markName) continue;
+
+    const applicantName = readOptionalTrimmedString(item.applicantName);
+    const niceClasses = readOptionalTrimmedString(item.niceClasses);
+    const status = readOptionalTrimmedString(item.status);
+    const filingDate = readOptionalTrimmedString(item.filingDate);
+    const registrationDate = readOptionalTrimmedString(item.registrationDate);
+    const expiryDate = readOptionalTrimmedString(item.expiryDate);
+    const markType = readOptionalTrimmedString(item.markType);
+    const markKind = readOptionalTrimmedString(item.markKind);
+    const markBasis = readOptionalTrimmedString(item.markBasis);
+    const representativeName = readOptionalTrimmedString(item.representativeName);
+    const goodsAndServicesDescription = readOptionalTrimmedString(item.goodsAndServicesDescription);
+    const renewalStatus = readOptionalTrimmedString(item.renewalStatus);
+    const markImageUrl = readOptionalTrimmedString(item.markImageUrl);
+    const euipoUrl = readEuipoUrl(item, applicationNumber);
+    const extractedAt = readOptionalTrimmedString(item.extractedAt);
+
+    const requestMetadata = typeof item.requestMetadata === 'object' && item.requestMetadata !== null
+      ? item.requestMetadata as Record<string, unknown>
+      : null;
+    if (!dateFrom) dateFrom = readOptionalTrimmedString(requestMetadata?.dateFrom);
+    if (!dateTo) dateTo = readOptionalTrimmedString(requestMetadata?.dateTo);
+    if (maxResults === undefined) maxResults = readOptionalFiniteNumber(requestMetadata?.maxResults);
+
+    if (status) observedStatuses.add(status);
+    if (applicantName) observedApplicants.add(applicantName);
+    if (niceClasses) observedNiceClasses.add(niceClasses);
+    sampleMarkNames.add(markName);
+
+    if (candidateMap.has(applicationNumber)) {
+      continue;
+    }
+
+    candidateMap.set(applicationNumber, {
+      resultId: `eu${nextResultId++}`,
+      applicationNumber,
+      markName,
+      ...(applicantName ? { applicantName } : {}),
+      ...(niceClasses ? { niceClasses } : {}),
+      ...(status ? { status } : {}),
+      ...(filingDate ? { filingDate } : {}),
+      ...(registrationDate ? { registrationDate } : {}),
+      ...(expiryDate ? { expiryDate } : {}),
+      ...(markType ? { markType } : {}),
+      ...(markKind ? { markKind } : {}),
+      ...(markBasis ? { markBasis } : {}),
+      ...(representativeName ? { representativeName } : {}),
+      ...(goodsAndServicesDescription ? { goodsAndServicesDescription } : {}),
+      ...(renewalStatus ? { renewalStatus } : {}),
+      ...(markImageUrl ? { markImageUrl } : {}),
+      euipoUrl,
+      ...(extractedAt ? { extractedAt } : {}),
+    });
+  }
+
+  return {
+    candidates: Array.from(candidateMap.values()),
+    runContext: {
+      sourceQueries: uniqueStrings(Array.from(sourceQueries)),
+      ...(dateFrom ? { dateFrom } : {}),
+      ...(dateTo ? { dateTo } : {}),
+      ...(maxResults !== undefined ? { maxResults } : {}),
+      observedStatuses: uniqueStrings(Array.from(observedStatuses)),
+      observedApplicants: uniqueStrings(Array.from(observedApplicants)).slice(0, 12),
+      observedNiceClasses: uniqueStrings(Array.from(observedNiceClasses)).slice(0, 12),
+      sampleMarkNames: uniqueStrings(Array.from(sampleMarkNames)).slice(0, 12),
+    },
+  };
+}
+
 async function analyseGoogleChunk({
   candidates,
   prompt,
@@ -3579,6 +3904,40 @@ async function analyseGitHubChunk({
     outcomes.set(candidate.fullName, {
       candidate,
       outcome: buildGitHubFindingOutcome(item, raw, llmAnalysisPrompt),
+    });
+  }
+
+  return { outcomes };
+}
+
+async function analyseEuipoChunk({
+  candidates,
+  prompt,
+  llmAnalysisPrompt,
+}: {
+  candidates: EuipoTrademarkCandidate[];
+  prompt: string;
+  llmAnalysisPrompt: string;
+}): Promise<EuipoChunkAnalysisResult> {
+  const raw = await chatCompletion([
+    { role: 'system', content: EUIPO_CLASSIFICATION_SYSTEM_PROMPT },
+    { role: 'user', content: prompt },
+  ]);
+
+  const parsed = parseEuipoChunkAnalysisOutput(raw, new Set(candidates.map((candidate) => candidate.resultId)));
+  if (!parsed) {
+    throw new Error(`Failed to parse EUIPO chunk analysis output: ${raw.slice(0, 200)}`);
+  }
+
+  const byResultId = new Map(parsed.items.map((item) => [item.resultId, item]));
+  assertChunkAnalysisCoveredCandidates('EUIPO', candidates, byResultId);
+  const outcomes = new Map<string, { candidate: EuipoTrademarkCandidate; outcome: EuipoFindingOutcome }>();
+
+  for (const candidate of candidates) {
+    const item = byResultId.get(candidate.resultId)!;
+    outcomes.set(candidate.applicationNumber, {
+      candidate,
+      outcome: buildEuipoFindingOutcome(item, raw, llmAnalysisPrompt),
     });
   }
 
@@ -4852,6 +5211,152 @@ async function upsertGitHubFinding({
   });
 }
 
+async function upsertEuipoFinding({
+  scanDoc,
+  scan,
+  source,
+  scannerConfig,
+  actorId,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  candidate,
+  runContext,
+  outcome,
+}: {
+  scanDoc: ScanDocHandle;
+  scan: Scan;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  actorId: string;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  candidate: EuipoTrademarkCandidate;
+  runContext: EuipoRunContext;
+  outcome: EuipoFindingOutcome;
+}): Promise<FindingDelta> {
+  const scanId = scan.id ?? scanDoc.id;
+  const findingRef = db.collection('findings').doc(buildEuipoFindingId(scanId, candidate.applicationNumber));
+
+  return db.runTransaction(async (tx) => {
+    const freshScan = await loadProcessableScanInTransaction(tx, scanDoc);
+    if (!freshScan) {
+      return emptyFindingDelta();
+    }
+
+    const existingSnap = await tx.get(findingRef);
+    const existing = existingSnap.exists ? (existingSnap.data() as Finding) : null;
+    const preferredOutcome = choosePreferredEuipoOutcome(existing, outcome);
+    const mergedRawData = buildEuipoStoredFindingRawData({
+      existingRawData: existing?.rawData,
+      candidate,
+      runContext,
+      source,
+      scannerConfig,
+      runId,
+      searchDepth,
+      searchQuery,
+      displayQuery,
+      classificationSource: preferredOutcome.classificationSource,
+    });
+    const preferredSource = choosePreferredFindingSource(existing?.source, source);
+
+    const previousState = existing ? getFindingCountState(existing) : emptyFindingCountState();
+    const nextState = getOutcomeCountState(preferredOutcome);
+
+    if (!existing) {
+      const finding: Omit<Finding, 'id'> = {
+        scanId,
+        brandId: freshScan.brandId,
+        userId: freshScan.userId,
+        source: preferredSource,
+        actorId,
+        canonicalId: candidate.applicationNumber,
+        severity: preferredOutcome.severity,
+        title: preferredOutcome.title,
+        ...(preferredOutcome.theme ? { provisionalTheme: preferredOutcome.theme } : {}),
+        description: preferredOutcome.analysis,
+        llmAnalysis: preferredOutcome.analysis,
+        url: candidate.euipoUrl,
+        applicationNumber: candidate.applicationNumber,
+        applicantName: candidate.applicantName,
+        filingDate: candidate.filingDate,
+        status: candidate.status,
+        niceClasses: candidate.niceClasses,
+        markType: candidate.markType,
+        rawData: mergedRawData,
+        isFalsePositive: preferredOutcome.isFalsePositive,
+        ...(preferredOutcome.isFalsePositive && {
+          isIgnored: true,
+          ignoredAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+        }),
+        ...(typeof preferredOutcome.llmAnalysisPrompt === 'string' && {
+          llmAnalysisPrompt: preferredOutcome.llmAnalysisPrompt,
+        }),
+        ...(typeof preferredOutcome.rawLlmResponse === 'string' && {
+          rawLlmResponse: preferredOutcome.rawLlmResponse,
+        }),
+        createdAt: FieldValue.serverTimestamp() as unknown as import('@google-cloud/firestore').Timestamp,
+      };
+      tx.set(findingRef, finding);
+      return diffFindingStates(previousState, nextState);
+    }
+
+    const updates: Record<string, unknown> = {
+      source: preferredSource,
+      canonicalId: candidate.applicationNumber,
+      severity: preferredOutcome.severity,
+      title: preferredOutcome.title,
+      platform: FieldValue.delete(),
+      theme: existing.theme ?? FieldValue.delete(),
+      provisionalTheme: preferredOutcome.theme ?? existing.provisionalTheme ?? existing.theme ?? FieldValue.delete(),
+      description: preferredOutcome.analysis,
+      llmAnalysis: preferredOutcome.analysis,
+      url: candidate.euipoUrl,
+      applicationNumber: candidate.applicationNumber,
+      applicantName: candidate.applicantName ?? existing.applicantName ?? FieldValue.delete(),
+      filingDate: candidate.filingDate ?? existing.filingDate ?? FieldValue.delete(),
+      status: candidate.status ?? existing.status ?? FieldValue.delete(),
+      niceClasses: candidate.niceClasses ?? existing.niceClasses ?? FieldValue.delete(),
+      markType: candidate.markType ?? existing.markType ?? FieldValue.delete(),
+      rawData: mergedRawData,
+      isFalsePositive: preferredOutcome.isFalsePositive,
+    };
+
+    const llmAnalysisPrompt = preferredOutcome.llmAnalysisPrompt ?? existing.llmAnalysisPrompt;
+    if (typeof llmAnalysisPrompt === 'string') {
+      updates.llmAnalysisPrompt = llmAnalysisPrompt;
+    }
+
+    const rawLlmResponse = preferredOutcome.rawLlmResponse ?? existing.rawLlmResponse;
+    if (typeof rawLlmResponse === 'string') {
+      updates.rawLlmResponse = rawLlmResponse;
+    }
+
+    if (preferredOutcome.isFalsePositive) {
+      updates.isIgnored = true;
+      if (existing.isIgnored !== true) {
+        updates.ignoredAt = FieldValue.serverTimestamp();
+      }
+      updates.isAddressed = false;
+      if (existing.addressedAt) {
+        updates.addressedAt = FieldValue.delete();
+      }
+    } else {
+      updates.isIgnored = false;
+      if (existing.ignoredAt) {
+        updates.ignoredAt = FieldValue.delete();
+      }
+    }
+
+    tx.update(findingRef, updates);
+    return diffFindingStates(previousState, nextState);
+  });
+}
+
 async function reserveSuggestedSearches({
   scanDoc,
   runId,
@@ -5083,6 +5588,23 @@ function buildGitHubFindingOutcome(
   rawLlmResponse: string,
   llmAnalysisPrompt: string,
 ): GitHubFindingOutcome {
+  return {
+    severity: item.severity,
+    title: item.title,
+    theme: item.theme,
+    analysis: item.analysis,
+    isFalsePositive: item.isFalsePositive,
+    llmAnalysisPrompt,
+    rawLlmResponse,
+    classificationSource: 'llm',
+  };
+}
+
+function buildEuipoFindingOutcome(
+  item: EuipoChunkAnalysisItem,
+  rawLlmResponse: string,
+  llmAnalysisPrompt: string,
+): EuipoFindingOutcome {
   return {
     severity: item.severity,
     title: item.title,
@@ -6001,6 +6523,139 @@ function readGitHubStoredFindingRawData(rawData?: Record<string, unknown>): GitH
   };
 }
 
+function buildEuipoStoredFindingRawData({
+  existingRawData,
+  candidate,
+  runContext,
+  source,
+  scannerConfig,
+  runId,
+  searchDepth,
+  searchQuery,
+  displayQuery,
+  classificationSource,
+}: {
+  existingRawData?: Record<string, unknown>;
+  candidate: EuipoTrademarkCandidate;
+  runContext: EuipoRunContext;
+  source: Finding['source'];
+  scannerConfig: ScannerConfig;
+  runId: string;
+  searchDepth: number;
+  searchQuery?: string;
+  displayQuery?: string;
+  classificationSource: 'llm' | 'fallback';
+}): EuipoStoredFindingRawData {
+  const existing = readEuipoStoredFindingRawData(existingRawData);
+  return stripUndefinedDeep({
+    kind: 'euipo-normalized',
+    version: EUIPO_RAW_DATA_VERSION,
+    trademark: {
+      applicationNumber: candidate.applicationNumber,
+      markName: candidate.markName,
+      ...(candidate.applicantName ? { applicantName: candidate.applicantName } : {}),
+      ...(candidate.niceClasses ? { niceClasses: candidate.niceClasses } : {}),
+      ...(candidate.status ? { status: candidate.status } : {}),
+      ...(candidate.filingDate ? { filingDate: candidate.filingDate } : {}),
+      ...(candidate.registrationDate ? { registrationDate: candidate.registrationDate } : {}),
+      ...(candidate.expiryDate ? { expiryDate: candidate.expiryDate } : {}),
+      ...(candidate.markType ? { markType: candidate.markType } : {}),
+      ...(candidate.markKind ? { markKind: candidate.markKind } : {}),
+      ...(candidate.markBasis ? { markBasis: candidate.markBasis } : {}),
+      ...(candidate.representativeName ? { representativeName: candidate.representativeName } : {}),
+      ...(candidate.goodsAndServicesDescription ? { goodsAndServicesDescription: candidate.goodsAndServicesDescription } : {}),
+      ...(candidate.renewalStatus ? { renewalStatus: candidate.renewalStatus } : {}),
+      ...(candidate.markImageUrl ? { markImageUrl: candidate.markImageUrl } : {}),
+      euipoUrl: candidate.euipoUrl,
+      ...(candidate.extractedAt ? { extractedAt: candidate.extractedAt } : {}),
+    },
+    context: {
+      sourceQueries: uniqueStrings([...(existing?.context.sourceQueries ?? []), ...runContext.sourceQueries]),
+      dateFrom: runContext.dateFrom ?? existing?.context.dateFrom,
+      dateTo: runContext.dateTo ?? existing?.context.dateTo,
+      maxResults: runContext.maxResults ?? existing?.context.maxResults,
+      observedStatuses: uniqueStrings([...(existing?.context.observedStatuses ?? []), ...runContext.observedStatuses]),
+      observedApplicants: uniqueStrings([...(existing?.context.observedApplicants ?? []), ...runContext.observedApplicants]).slice(0, 12),
+      observedNiceClasses: uniqueStrings([...(existing?.context.observedNiceClasses ?? []), ...runContext.observedNiceClasses]).slice(0, 12),
+      sampleMarkNames: uniqueStrings([...(existing?.context.sampleMarkNames ?? []), ...runContext.sampleMarkNames]).slice(0, 12),
+    },
+    analysis: {
+      source: classificationSource,
+      runId,
+      findingSource: source,
+      scannerId: scannerConfig.id,
+      searchDepth,
+      ...(searchQuery ? { searchQuery } : {}),
+      ...(displayQuery ? { displayQuery } : {}),
+    },
+  }) as EuipoStoredFindingRawData;
+}
+
+function readEuipoStoredFindingRawData(rawData?: Record<string, unknown>): EuipoStoredFindingRawData | null {
+  if (!rawData || rawData.kind !== 'euipo-normalized' || rawData.version !== EUIPO_RAW_DATA_VERSION) {
+    return null;
+  }
+
+  const trademark = typeof rawData.trademark === 'object' && rawData.trademark !== null
+    ? rawData.trademark as Record<string, unknown>
+    : {};
+  const context = typeof rawData.context === 'object' && rawData.context !== null ? rawData.context as Record<string, unknown> : {};
+  const analysis = typeof rawData.analysis === 'object' && rawData.analysis !== null ? rawData.analysis as Record<string, unknown> : {};
+
+  return {
+    kind: 'euipo-normalized',
+    version: EUIPO_RAW_DATA_VERSION,
+    trademark: {
+      applicationNumber: typeof trademark.applicationNumber === 'string' ? trademark.applicationNumber : '',
+      markName: typeof trademark.markName === 'string' ? trademark.markName : '',
+      applicantName: typeof trademark.applicantName === 'string' ? trademark.applicantName : undefined,
+      niceClasses: typeof trademark.niceClasses === 'string' ? trademark.niceClasses : undefined,
+      status: typeof trademark.status === 'string' ? trademark.status : undefined,
+      filingDate: typeof trademark.filingDate === 'string' ? trademark.filingDate : undefined,
+      registrationDate: typeof trademark.registrationDate === 'string' ? trademark.registrationDate : undefined,
+      expiryDate: typeof trademark.expiryDate === 'string' ? trademark.expiryDate : undefined,
+      markType: typeof trademark.markType === 'string' ? trademark.markType : undefined,
+      markKind: typeof trademark.markKind === 'string' ? trademark.markKind : undefined,
+      markBasis: typeof trademark.markBasis === 'string' ? trademark.markBasis : undefined,
+      representativeName: typeof trademark.representativeName === 'string' ? trademark.representativeName : undefined,
+      goodsAndServicesDescription: typeof trademark.goodsAndServicesDescription === 'string' ? trademark.goodsAndServicesDescription : undefined,
+      renewalStatus: typeof trademark.renewalStatus === 'string' ? trademark.renewalStatus : undefined,
+      markImageUrl: typeof trademark.markImageUrl === 'string' ? trademark.markImageUrl : undefined,
+      euipoUrl: typeof trademark.euipoUrl === 'string' ? trademark.euipoUrl : '',
+      extractedAt: typeof trademark.extractedAt === 'string' ? trademark.extractedAt : undefined,
+    },
+    context: {
+      sourceQueries: Array.isArray(context.sourceQueries)
+        ? context.sourceQueries.filter((value): value is string => typeof value === 'string')
+        : [],
+      dateFrom: typeof context.dateFrom === 'string' ? context.dateFrom : undefined,
+      dateTo: typeof context.dateTo === 'string' ? context.dateTo : undefined,
+      maxResults: typeof context.maxResults === 'number' ? context.maxResults : undefined,
+      observedStatuses: Array.isArray(context.observedStatuses)
+        ? context.observedStatuses.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedApplicants: Array.isArray(context.observedApplicants)
+        ? context.observedApplicants.filter((value): value is string => typeof value === 'string')
+        : [],
+      observedNiceClasses: Array.isArray(context.observedNiceClasses)
+        ? context.observedNiceClasses.filter((value): value is string => typeof value === 'string')
+        : [],
+      sampleMarkNames: Array.isArray(context.sampleMarkNames)
+        ? context.sampleMarkNames.filter((value): value is string => typeof value === 'string')
+        : [],
+    },
+    analysis: {
+      source: analysis.source === 'fallback' ? 'fallback' : 'llm',
+      runId: typeof analysis.runId === 'string' ? analysis.runId : '',
+      findingSource: isKnownFindingSource(analysis.findingSource) ? analysis.findingSource : 'euipo',
+      scannerId: isKnownScannerId(analysis.scannerId) ? analysis.scannerId : 'euipo-trademarks',
+      searchDepth: typeof analysis.searchDepth === 'number' ? analysis.searchDepth : 0,
+      searchQuery: typeof analysis.searchQuery === 'string' ? analysis.searchQuery : undefined,
+      displayQuery: typeof analysis.displayQuery === 'string' ? analysis.displayQuery : undefined,
+    },
+  };
+}
+
 function normalizeGoogleSearchSighting(value: unknown): GoogleSearchSighting | null {
   if (typeof value !== 'object' || value === null) return null;
   const sighting = value as Record<string, unknown>;
@@ -6052,6 +6707,7 @@ function isKnownFindingSource(value: unknown): value is Finding['source'] {
     || value === 'domains'
     || value === 'discord'
     || value === 'github'
+    || value === 'euipo'
     || value === 'x'
     || value === 'unknown'
   );
@@ -6072,6 +6728,7 @@ function isKnownScannerId(value: unknown): value is ActorRunInfo['scannerId'] {
     || value === 'domain-registrations'
     || value === 'discord-servers'
     || value === 'github-repos'
+    || value === 'euipo-trademarks'
     || value === 'x-search'
   );
 }
@@ -6120,6 +6777,7 @@ function resolveScannerConfig(actorRunInfo?: Partial<ActorRunInfo>): ScannerConf
     || actorRunInfo?.source === 'google'
     || actorRunInfo?.source === 'discord'
     || actorRunInfo?.source === 'github'
+    || actorRunInfo?.source === 'euipo'
     || actorRunInfo?.source === 'x'
   ) {
     return getScannerConfigBySource(actorRunInfo.source);
@@ -6145,6 +6803,7 @@ function choosePreferredFindingSource(
       || source === 'domains'
       || source === 'discord'
       || source === 'github'
+      || source === 'euipo'
       || source === 'x'
     ) return 3;
     if (source === 'google') return 2;
@@ -6362,6 +7021,37 @@ function choosePreferredGitHubOutcome(existing: Finding | null, next: GitHubFind
 
   const existingSource = readGitHubStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
   const existingOutcome: GitHubFindingOutcome = {
+    severity: existing.severity,
+    title: existing.title,
+    theme: existing.provisionalTheme ?? existing.theme,
+    analysis: existing.llmAnalysis,
+    isFalsePositive: existing.isFalsePositive === true,
+    llmAnalysisPrompt: existing.llmAnalysisPrompt,
+    rawLlmResponse: existing.rawLlmResponse,
+    classificationSource: existingSource,
+  };
+
+  if (existingOutcome.classificationSource !== next.classificationSource) {
+    return next.classificationSource === 'llm' ? next : existingOutcome;
+  }
+  if (existingOutcome.isFalsePositive !== next.isFalsePositive) {
+    return existingOutcome.isFalsePositive ? next : existingOutcome;
+  }
+
+  const existingRank = getSeverityRank(existingOutcome.severity);
+  const nextRank = getSeverityRank(next.severity);
+  if (nextRank !== existingRank) {
+    return nextRank > existingRank ? next : existingOutcome;
+  }
+
+  return next;
+}
+
+function choosePreferredEuipoOutcome(existing: Finding | null, next: EuipoFindingOutcome): EuipoFindingOutcome {
+  if (!existing) return next;
+
+  const existingSource = readEuipoStoredFindingRawData(existing.rawData)?.analysis.source ?? 'llm';
+  const existingOutcome: EuipoFindingOutcome = {
     severity: existing.severity,
     title: existing.title,
     theme: existing.provisionalTheme ?? existing.theme,
@@ -6625,6 +7315,10 @@ function buildXFindingId(scanId: string, tweetId: string): string {
 
 function buildGitHubFindingId(scanId: string, fullName: string): string {
   return `${GITHUB_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${fullName.toLowerCase()}`).digest('hex')}`;
+}
+
+function buildEuipoFindingId(scanId: string, applicationNumber: string): string {
+  return `${EUIPO_FINDING_ID_PREFIX}-${createHash('sha256').update(`${scanId}:${applicationNumber}`).digest('hex')}`;
 }
 
 function normalizeStoredCanonicalId(canonicalId: unknown, options?: { lowerCase?: boolean }): string | null {
@@ -7185,6 +7879,15 @@ function splitGitHubFullName(fullName: string): [string, string] {
   const [owner, ...rest] = fullName.split('/');
   const repo = rest.join('/').trim();
   return [owner?.trim() ?? '', repo];
+}
+
+function readEuipoApplicationNumber(item: Record<string, unknown>): string | null {
+  return readOptionalTrimmedString(item.applicationNumber) ?? null;
+}
+
+function readEuipoUrl(item: Record<string, unknown>, applicationNumber: string): string {
+  const providedUrl = readOptionalTrimmedString(item.euipoUrl);
+  return providedUrl ?? `https://euipo.europa.eu/eSearch/#basic/1+1+1+1/50+50+50+50/${applicationNumber}`;
 }
 
 function readXTweetId(item: Record<string, unknown>): string | null {

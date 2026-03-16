@@ -152,6 +152,29 @@ function formatDomainRegistrationDate(value?: string) {
   return `Registered on ${dayNumber}${ordinalSuffix(dayNumber)} ${monthLabel} ${year}`;
 }
 
+function formatEuipoFilingDate(value?: string) {
+  const trimmedValue = value?.trim();
+  if (!trimmedValue) return null;
+
+  const match = trimmedValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return `Filed ${trimmedValue}`;
+  }
+
+  const [, year, month, day] = match;
+  const utcDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (Number.isNaN(utcDate.getTime())) {
+    return `Filed ${trimmedValue}`;
+  }
+
+  const monthLabel = utcDate.toLocaleString('en-GB', {
+    month: 'short',
+    timeZone: 'UTC',
+  });
+
+  return `Filed ${Number(day)} ${monthLabel} ${year}`;
+}
+
 function buildSecondaryLabelParts(finding: FindingSummary): { primary: string; suffix?: string } | null {
   if (finding.source === 'domains') {
     const domainLabel = extractDomainLabel(finding.url);
@@ -175,6 +198,34 @@ function buildSecondaryLabelParts(finding: FindingSummary): { primary: string; s
   if (finding.source === 'x') {
     const handleLabel = formatXHandleLabel(finding.xAuthorHandle);
     return handleLabel ? { primary: handleLabel } : null;
+  }
+
+  if (finding.source === 'euipo') {
+    const applicationLabel = finding.applicationNumber?.trim();
+    const applicantLabel = finding.applicantName?.trim();
+    const filingLabel = formatEuipoFilingDate(finding.filingDate);
+    const statusLabel = finding.status?.trim();
+    const suffix = [applicantLabel, filingLabel ?? statusLabel].filter(Boolean).join(' | ');
+
+    if (applicationLabel && suffix) {
+      return { primary: applicationLabel, suffix };
+    }
+
+    if (applicationLabel) {
+      return { primary: applicationLabel };
+    }
+
+    if (applicantLabel && filingLabel) {
+      return { primary: applicantLabel, suffix: filingLabel };
+    }
+
+    if (applicantLabel) {
+      return { primary: applicantLabel };
+    }
+
+    if (filingLabel) {
+      return { primary: filingLabel };
+    }
   }
 
   return null;
@@ -296,6 +347,11 @@ const sourceConfig: Record<
     bgClass: 'bg-brand-50',
     textClass: 'text-brand-600',
     label: getFindingSourceLabel('github'),
+  },
+  euipo: {
+    bgClass: 'bg-brand-50',
+    textClass: 'text-brand-600',
+    label: getFindingSourceLabel('euipo'),
   },
   x: {
     bgClass: 'bg-brand-50',

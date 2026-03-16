@@ -374,7 +374,7 @@ export default function HelpPage() {
                   <ul className="mt-2 list-disc space-y-1.5 pl-5">
                     <li>Google-backed scan types use this as search-result depth.</li>
                     <li>Domain registrations use it as result volume.</li>
-                    <li>GitHub repos and X use it as item volume.</li>
+                    <li>GitHub repos, EUIPO trademarks, and X use it as item volume.</li>
                     <li>Discord servers map it to a higher spend cap per run.</li>
                   </ul>
                 </HelpAccordion>
@@ -383,7 +383,7 @@ export default function HelpPage() {
                   <p>
                     You can turn individual scan types on or off per brand. The current app supports Web search,
                     Reddit, TikTok, YouTube, Facebook, Instagram, Telegram channels, Apple App Store, Google
-                    Play, Discord servers, GitHub repos, X, and recent domain registrations.
+                    Play, Discord servers, GitHub repos, EUIPO trademarks, X, and recent domain registrations.
                   </p>
                 </HelpAccordion>
 
@@ -394,7 +394,7 @@ export default function HelpPage() {
                   </p>
                   <ul className="mt-2 list-disc space-y-1.5 pl-5">
                     <li>Deep search is available on Google-backed scan types plus the first-class Reddit, TikTok, and X scans.</li>
-                    <li>It is not used for Discord servers, GitHub repos, or domain registrations.</li>
+                    <li>It is not used for Discord servers, GitHub repos, EUIPO trademarks, or domain registrations.</li>
                     <li>The <strong className="text-gray-700">Deep search breadth</strong> slider caps how many follow-up searches can run in a scan.</li>
                   </ul>
                 </HelpAccordion>
@@ -460,7 +460,7 @@ export default function HelpPage() {
                     reveal early findings before the scan fully completes.
                   </p>
                   <ul className="mt-2 list-disc space-y-1.5 pl-5">
-                    <li>Use the source icons to switch between Web search, domain registrations, Discord, GitHub, X, and other enabled scan types.</li>
+                    <li>Use the source icons to switch between Web search, domain registrations, Discord, GitHub, EUIPO, X, and other enabled scan types.</li>
                     <li>If deep search runs, the progress labels switch to related-query investigation states.</li>
                     <li>Duplicate results may be skipped automatically if they repeat historical or same-scan findings.</li>
                   </ul>

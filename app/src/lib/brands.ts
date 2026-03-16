@@ -24,6 +24,7 @@ export const DEFAULT_BRAND_SCAN_SOURCES: BrandScanSources = {
   domains: false,
   discord: false,
   github: false,
+  euipo: false,
   x: false,
 };
 
@@ -117,6 +118,11 @@ export function getInitialGitHubMaxResults(searchResultPages?: unknown): number 
   return normalizeSearchResultPages(searchResultPages) * 50;
 }
 
+/** Total EUIPO trademark result budget for a single actor run, mapped from Search depth (1–5) → 50..250. */
+export function getInitialEuipoMaxResults(searchResultPages?: unknown): number {
+  return normalizeSearchResultPages(searchResultPages) * 50;
+}
+
 export function getDeepSearchGooglePageCount(searchResultPages?: unknown): number {
   return normalizeSearchResultPages(searchResultPages);
 }
@@ -148,6 +154,7 @@ export function isValidBrandScanSources(value: unknown): value is BrandScanSourc
     typeof scanSources.domains === 'boolean' &&
     typeof scanSources.discord === 'boolean' &&
     typeof scanSources.github === 'boolean' &&
+    typeof scanSources.euipo === 'boolean' &&
     typeof scanSources.x === 'boolean'
   );
 }
@@ -175,6 +182,7 @@ export function normalizeBrandScanSources(value: unknown): BrandScanSources {
     domains: typeof scanSources.domains === 'boolean' ? scanSources.domains : DEFAULT_BRAND_SCAN_SOURCES.domains,
     discord: typeof scanSources.discord === 'boolean' ? scanSources.discord : DEFAULT_BRAND_SCAN_SOURCES.discord,
     github: typeof scanSources.github === 'boolean' ? scanSources.github : DEFAULT_BRAND_SCAN_SOURCES.github,
+    euipo: typeof scanSources.euipo === 'boolean' ? scanSources.euipo : DEFAULT_BRAND_SCAN_SOURCES.euipo,
     x: typeof scanSources.x === 'boolean' ? scanSources.x : DEFAULT_BRAND_SCAN_SOURCES.x,
   };
 }
@@ -194,6 +202,7 @@ export function hasEnabledBrandScanSource(value: unknown): boolean {
     || scanSources.domains
     || scanSources.discord
     || scanSources.github
+    || scanSources.euipo
     || scanSources.x
   );
 }

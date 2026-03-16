@@ -34,8 +34,12 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
     "facebook": ["Optional short source-specific hint"],
     "instagram": ["Optional short source-specific hint"],
     "telegram": ["Optional short source-specific hint"],
+    "apple_app_store": ["Optional short source-specific hint"],
+    "google_play": ["Optional short source-specific hint"],
+    "domains": ["Optional short source-specific hint"],
     "discord": ["Optional short source-specific hint"],
     "github": ["Optional short source-specific hint"],
+    "euipo": ["Optional short source-specific hint"],
     "x": ["Optional short source-specific hint"]
   }
 }

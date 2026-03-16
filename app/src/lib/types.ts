@@ -102,6 +102,7 @@ export interface BrandScanSources {
   domains: boolean;
   discord: boolean;
   github: boolean;
+  euipo: boolean;
   x: boolean;
 }
 
@@ -281,6 +282,7 @@ export type FindingSource =
   | 'domains'
   | 'discord'
   | 'github'
+  | 'euipo'
   | 'x'
   | 'unknown';
 
@@ -303,6 +305,18 @@ export interface FindingSummary {
   url?: string;
   /** Denormalized recent-domain-registration date for domain findings. */
   registrationDate?: string;
+  /** Denormalized EUIPO application number for trademark findings. */
+  applicationNumber?: string;
+  /** Denormalized EUIPO applicant / owner name for trademark findings. */
+  applicantName?: string;
+  /** Denormalized EUIPO filing date for trademark findings. */
+  filingDate?: string;
+  /** Denormalized EUIPO trademark status for trademark findings. */
+  status?: string;
+  /** Denormalized EUIPO Nice classes for trademark findings. */
+  niceClasses?: string;
+  /** Denormalized EUIPO mark type for trademark findings. */
+  markType?: string;
   /** Denormalized X account id for account-level dedupe and UI subtext. */
   xAuthorId?: string;
   /** Denormalized X handle without the leading @. */
@@ -374,6 +388,7 @@ export type ScannerId =
   | 'domain-registrations'
   | 'discord-servers'
   | 'github-repos'
+  | 'euipo-trademarks'
   | 'x-search';
 
 export type GoogleScannerId = Extract<

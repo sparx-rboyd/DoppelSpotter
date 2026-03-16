@@ -32,6 +32,7 @@ const DASHBOARD_SOURCE_TIMELINE_COLORS: Record<Exclude<FindingSource, 'unknown'>
   domains: '#7c3aed',
   discord: '#0891b2',
   github: '#475569',
+  euipo: '#9333ea',
   x: '#0f172a',
 };
 
