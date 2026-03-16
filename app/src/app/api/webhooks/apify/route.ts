@@ -7229,26 +7229,24 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
   const fresh = scanFromSnapshot(freshSnap);
   if (fresh.status !== 'summarising') return;
 
-  try {
-    const brandDoc = await db.collection('brands').doc(fresh.brandId).get();
-    const brandName = brandDoc.exists ? (brandDoc.data() as BrandProfile).name : undefined;
-    await normalizeAndPersistScanThemes({
+  const brandDoc = await db.collection('brands').doc(fresh.brandId).get();
+  const brandName = brandDoc.exists ? (brandDoc.data() as BrandProfile).name : undefined;
+
+  const [, summaryResult] = await Promise.all([
+    normalizeAndPersistScanThemes({
       scanId: fresh.id,
       brandId: fresh.brandId,
       userId: fresh.userId,
       brandName,
-    });
-  } catch (err) {
-    console.error(`[webhook] Theme normalization failed for scan ${fresh.id}:`, err);
-  }
+    }).catch((err) => {
+      console.error(`[webhook] Theme normalization failed for scan ${fresh.id}:`, err);
+    }),
 
-  let summaryResult: BuiltScanAiSummaryResult;
-  try {
-    summaryResult = await buildScanAiSummary(fresh);
-  } catch (err) {
-    console.error(`[webhook] Unexpected scan summary build error for scan ${fresh.id}:`, err);
-    summaryResult = { summary: buildCountOnlyScanAiSummary(fresh) };
-  }
+    buildScanAiSummary(fresh).catch((err): BuiltScanAiSummaryResult => {
+      console.error(`[webhook] Unexpected scan summary build error for scan ${fresh.id}:`, err);
+      return { summary: buildCountOnlyScanAiSummary(fresh) };
+    }),
+  ]);
 
   await finalizeScanWithSummary(scanRef, summaryResult);
   try {
