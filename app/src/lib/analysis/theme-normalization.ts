@@ -24,7 +24,6 @@ type ThemeNormalizationGroup = {
     nonHit: number;
   };
   exampleTitles: string[];
-  exampleAnalyses: string[];
 };
 
 type ScanThemeNormalizationParams = {
@@ -93,7 +92,7 @@ async function loadPendingThemeFindings(
     .where('scanId', '==', params.scanId)
     .where('brandId', '==', params.brandId)
     .where('userId', '==', params.userId)
-    .select('theme', 'provisionalTheme', 'source', 'severity', 'title', 'llmAnalysis', 'isFalsePositive')
+    .select('theme', 'provisionalTheme', 'source', 'severity', 'title', 'isFalsePositive')
     .get();
 
   return snapshot.docs.filter((doc) => typeof doc.get('provisionalTheme') === 'string' && doc.get('provisionalTheme').trim().length > 0);
@@ -117,7 +116,6 @@ function buildThemeNormalizationGroups(findings: ScanFindingSnapshot[]): ThemeNo
     const source = doc.get('source') as FindingSource;
     const severity = doc.get('severity') as unknown;
     const title = typeof doc.get('title') === 'string' ? doc.get('title').trim() : '';
-    const analysis = typeof doc.get('llmAnalysis') === 'string' ? doc.get('llmAnalysis').trim() : '';
     const isFalsePositive = doc.get('isFalsePositive') === true;
 
     const group = existing ?? {
@@ -126,7 +124,6 @@ function buildThemeNormalizationGroups(findings: ScanFindingSnapshot[]): ThemeNo
       sources: [],
       severityCounts: { high: 0, medium: 0, low: 0, nonHit: 0 },
       exampleTitles: [],
-      exampleAnalyses: [],
     };
 
     group.count++;
@@ -145,9 +142,6 @@ function buildThemeNormalizationGroups(findings: ScanFindingSnapshot[]): ThemeNo
     if (title) {
       group.exampleTitles.push(title);
     }
-    if (analysis) {
-      group.exampleAnalyses.push(analysis);
-    }
 
     groups.set(key, group);
   }
@@ -156,8 +150,7 @@ function buildThemeNormalizationGroups(findings: ScanFindingSnapshot[]): ThemeNo
     .map((group) => ({
       ...group,
       sources: dedupeFindingSources(group.sources),
-      exampleTitles: pickRepresentativeExamples(group.exampleTitles, 4),
-      exampleAnalyses: pickRepresentativeExamples(group.exampleAnalyses, 3),
+      exampleTitles: pickRepresentativeExamples(group.exampleTitles, 5),
     }))
     .sort((left, right) => {
       if (right.count !== left.count) return right.count - left.count;

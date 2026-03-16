@@ -1626,7 +1626,6 @@ export function buildThemeNormalizationPrompt(params: {
       nonHit: number;
     };
     exampleTitles: string[];
-    exampleAnalyses: string[];
   }>;
 }): string {
   const { brandName, historicalThemes, provisionalGroups } = params;
@@ -1636,8 +1635,7 @@ export function buildThemeNormalizationPrompt(params: {
     findingCount: group.count,
     sources: group.sources.map((source) => getFindingSourceLabel(source)),
     severityCounts: group.severityCounts,
-    exampleTitles: uniqueStrings(group.exampleTitles).slice(0, 4).map((title) => truncatePromptValue(title, 120)),
-    exampleAnalyses: uniqueStrings(group.exampleAnalyses).slice(0, 3).map((analysis) => truncatePromptValue(analysis, 220)),
+    exampleTitles: uniqueStrings(group.exampleTitles).slice(0, 5).map((title) => truncatePromptValue(title, 120)),
   }));
 
   return `Brand being protected: "${brandName}"
