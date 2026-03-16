@@ -665,6 +665,8 @@ export interface DashboardExecutiveSummaryData {
   completedScanCount?: number;
   startedAt?: Timestamp;
   completedAt?: Timestamp;
+  leaseToken?: string;
+  leaseExpiresAt?: Timestamp;
   error?: string;
   rawLlmResponse?: string;
 }

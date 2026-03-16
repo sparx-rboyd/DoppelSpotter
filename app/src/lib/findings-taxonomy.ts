@@ -66,11 +66,22 @@ export async function loadBrandFindingTaxonomy(params: {
     .collection('findings')
     .where('brandId', '==', brandId)
     .where('userId', '==', userId)
-    .select('scanId', 'theme')
+    .select('scanId', 'theme', 'isFalsePositive', 'isIgnored', 'isAddressed')
     .get();
   const docs = excludeScanId
-    ? snapshot.docs.filter((doc) => doc.get('scanId') !== excludeScanId && !excludedScanIds.has(doc.get('scanId')))
-    : snapshot.docs.filter((doc) => !excludedScanIds.has(doc.get('scanId')));
+    ? snapshot.docs.filter((doc) => (
+      doc.get('scanId') !== excludeScanId
+      && !excludedScanIds.has(doc.get('scanId'))
+      && doc.get('isFalsePositive') !== true
+      && doc.get('isIgnored') !== true
+      && doc.get('isAddressed') !== true
+    ))
+    : snapshot.docs.filter((doc) => (
+      !excludedScanIds.has(doc.get('scanId'))
+      && doc.get('isFalsePositive') !== true
+      && doc.get('isIgnored') !== true
+      && doc.get('isAddressed') !== true
+    ));
 
   return {
     themes: dedupeFindingTaxonomyLabels(docs.map((doc) => doc.get('theme'))),

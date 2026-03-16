@@ -44,7 +44,11 @@ export async function normalizeAndPersistScanThemes(params: ScanThemeNormalizati
     console.log(`${prefix} no pending findings — skipping`);
     return;
   }
-  console.log(`${prefix} loaded ${pendingFindings.length} pending findings`);
+  const actionablePendingFindings = pendingFindings.filter(isVisibleActionableThemeCandidate);
+  const nonActionablePendingFindings = pendingFindings.filter((doc) => !isVisibleActionableThemeCandidate(doc));
+  console.log(
+    `${prefix} loaded ${pendingFindings.length} pending findings (${actionablePendingFindings.length} actionable, ${nonActionablePendingFindings.length} non-actionable)`,
+  );
 
   const historicalThemes = (
     await loadBrandFindingTaxonomy({
@@ -53,9 +57,13 @@ export async function normalizeAndPersistScanThemes(params: ScanThemeNormalizati
       excludeScanId: params.scanId,
     })
   ).themes;
-  const provisionalGroups = buildThemeNormalizationGroups(pendingFindings);
+  const provisionalGroups = buildThemeNormalizationGroups(actionablePendingFindings);
   if (provisionalGroups.length === 0) {
-    console.log(`${prefix} no provisional groups after grouping — skipping`);
+    console.log(`${prefix} no actionable provisional groups after grouping`);
+    if (nonActionablePendingFindings.length > 0) {
+      await promotePassthroughThemesToFindings(nonActionablePendingFindings);
+      console.log(`${prefix} promoted passthrough themes for ${nonActionablePendingFindings.length} non-actionable findings`);
+    }
     return;
   }
   console.log(`${prefix} ${provisionalGroups.length} provisional groups, ${historicalThemes.length} historical themes`);
@@ -67,9 +75,15 @@ export async function normalizeAndPersistScanThemes(params: ScanThemeNormalizati
     historicalThemes,
     provisionalGroups,
   });
-  console.log(`${prefix} mapping resolved — ${mappingByKey.size} entries. Applying to ${pendingFindings.length} findings`);
+  console.log(
+    `${prefix} mapping resolved — ${mappingByKey.size} entries. Applying to ${actionablePendingFindings.length} actionable findings`,
+  );
 
-  await applyThemeMappingToFindings(params.scanId, pendingFindings, mappingByKey);
+  await applyThemeMappingToFindings(params.scanId, actionablePendingFindings, mappingByKey);
+  if (nonActionablePendingFindings.length > 0) {
+    await promotePassthroughThemesToFindings(nonActionablePendingFindings);
+    console.log(`${prefix} promoted passthrough themes for ${nonActionablePendingFindings.length} non-actionable findings`);
+  }
   console.log(`${prefix} theme normalization complete`);
 }
 
@@ -101,7 +115,7 @@ async function loadPendingThemeFindings(
     .where('scanId', '==', params.scanId)
     .where('brandId', '==', params.brandId)
     .where('userId', '==', params.userId)
-    .select('theme', 'provisionalTheme', 'source', 'severity', 'title', 'isFalsePositive')
+    .select('theme', 'provisionalTheme', 'source', 'severity', 'title', 'isFalsePositive', 'isIgnored', 'isAddressed')
     .get();
 
   return snapshot.docs.filter((doc) => typeof doc.get('provisionalTheme') === 'string' && doc.get('provisionalTheme').trim().length > 0);
@@ -165,6 +179,12 @@ function buildThemeNormalizationGroups(findings: ScanFindingSnapshot[]): ThemeNo
       if (right.count !== left.count) return right.count - left.count;
       return left.provisionalTheme.localeCompare(right.provisionalTheme, 'en', { sensitivity: 'base' });
     });
+}
+
+function isVisibleActionableThemeCandidate(doc: ScanFindingSnapshot): boolean {
+  return doc.get('isFalsePositive') !== true
+    && doc.get('isIgnored') !== true
+    && doc.get('isAddressed') !== true;
 }
 
 async function buildThemeNormalizationMap(params: {
@@ -248,6 +268,22 @@ async function applyThemeMappingToFindings(
     const finalTheme = mappedTheme ?? existingTheme ?? provisionalTheme;
     batch.update(doc.ref, {
       theme: finalTheme,
+      provisionalTheme: FieldValue.delete(),
+    });
+  });
+}
+
+async function promotePassthroughThemesToFindings(findings: ScanFindingSnapshot[]): Promise<void> {
+  await runWriteBatchInChunks(findings, (batch, doc) => {
+    const provisionalTheme = normalizeFindingTaxonomyLabel(doc.get('provisionalTheme'));
+    if (!provisionalTheme) {
+      batch.update(doc.ref, { provisionalTheme: FieldValue.delete() });
+      return;
+    }
+
+    const existingTheme = normalizeFindingTaxonomyLabel(doc.get('theme'));
+    batch.update(doc.ref, {
+      theme: existingTheme ?? provisionalTheme,
       provisionalTheme: FieldValue.delete(),
     });
   });

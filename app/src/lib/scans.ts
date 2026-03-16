@@ -5,7 +5,7 @@ import { rebuildAndPersistDashboardBreakdownsForScanIds } from './dashboard-aggr
 import type { BrandProfile, Scan, ScanStatus } from './types';
 
 type ScanSnapshot = DocumentSnapshot | QueryDocumentSnapshot;
-const STUCK_SUMMARISING_TIMEOUT_MS = 90_000;
+const STUCK_SUMMARISING_TIMEOUT_MS = 120_000;
 const STUCK_PENDING_TIMEOUT_MS = 120_000;
 
 export function isScanInProgress(status: ScanStatus): boolean {

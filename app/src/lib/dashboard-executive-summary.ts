@@ -1,4 +1,5 @@
-import { FieldValue } from '@google-cloud/firestore';
+import { FieldValue, Timestamp } from '@google-cloud/firestore';
+import { randomUUID } from 'crypto';
 import { db } from '@/lib/firestore';
 import { chatCompletion } from '@/lib/analysis/openrouter';
 import {
@@ -25,6 +26,7 @@ const MAX_EXECUTIVE_SUMMARY_FINDINGS = 200;
 const MAX_FINDING_TITLE_LENGTH = 120;
 const MAX_FINDING_DESCRIPTION_LENGTH = 320;
 const DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS = 2;
+const DASHBOARD_EXECUTIVE_SUMMARY_LEASE_MS = 5 * 60_000;
 
 type DashboardExecutiveSummarySeverityBreakdown = NonNullable<DashboardExecutiveSummaryData['severityBreakdown']>;
 type DashboardExecutiveSummaryFindingInput = {
@@ -110,6 +112,16 @@ function normalizeDashboardExecutiveSummaryError(error: unknown): string {
     return error.message.trim();
   }
   return 'Executive summary generation failed';
+}
+
+function isDashboardExecutiveSummaryLeaseActive(summary?: DashboardExecutiveSummaryData | null): boolean {
+  if (!summary?.leaseExpiresAt) return false;
+
+  try {
+    return summary.leaseExpiresAt.toMillis() > Date.now();
+  } catch {
+    return false;
+  }
 }
 
 async function loadVisibleFindingsForScan(params: {
@@ -375,6 +387,8 @@ export async function markDashboardExecutiveSummaryPending(params: {
       : {}),
     'dashboardExecutiveSummary.startedAt': FieldValue.serverTimestamp(),
     'dashboardExecutiveSummary.completedAt': FieldValue.delete(),
+    'dashboardExecutiveSummary.leaseToken': FieldValue.delete(),
+    'dashboardExecutiveSummary.leaseExpiresAt': FieldValue.delete(),
     'dashboardExecutiveSummary.error': FieldValue.delete(),
   });
 }
@@ -382,8 +396,10 @@ export async function markDashboardExecutiveSummaryPending(params: {
 export async function saveDashboardExecutiveSummary(
   brandId: string,
   summaryResult: BuiltDashboardExecutiveSummaryResult,
+  leaseToken?: string,
 ) {
-  await db.collection('brands').doc(brandId).update({
+  const brandRef = db.collection('brands').doc(brandId);
+  const updates = {
     'dashboardExecutiveSummary.version': DASHBOARD_EXECUTIVE_SUMMARY_VERSION,
     'dashboardExecutiveSummary.status': 'ready',
     'dashboardExecutiveSummary.brandId': summaryResult.brandId,
@@ -396,10 +412,27 @@ export async function saveDashboardExecutiveSummary(
     'dashboardExecutiveSummary.latestCompletedAt': summaryResult.latestCompletedAt ?? FieldValue.delete(),
     'dashboardExecutiveSummary.completedScanCount': summaryResult.completedScanCount,
     'dashboardExecutiveSummary.completedAt': FieldValue.serverTimestamp(),
+    'dashboardExecutiveSummary.leaseToken': FieldValue.delete(),
+    'dashboardExecutiveSummary.leaseExpiresAt': FieldValue.delete(),
     'dashboardExecutiveSummary.error': FieldValue.delete(),
     ...(typeof summaryResult.rawLlmResponse === 'string'
       ? { 'dashboardExecutiveSummary.rawLlmResponse': summaryResult.rawLlmResponse }
       : { 'dashboardExecutiveSummary.rawLlmResponse': FieldValue.delete() }),
+  };
+
+  if (!leaseToken) {
+    await brandRef.update(updates);
+    return;
+  }
+
+  await db.runTransaction(async (tx) => {
+    const brandDoc = await tx.get(brandRef);
+    if (!brandDoc.exists) return;
+    const brand = brandDoc.data() as BrandProfile;
+    if (brand.dashboardExecutiveSummary?.leaseToken !== leaseToken) {
+      return;
+    }
+    tx.update(brandRef, updates);
   });
 }
 
@@ -407,16 +440,35 @@ export async function markDashboardExecutiveSummaryFailed(params: {
   brandId: string;
   error: unknown;
   requestedForScanId?: string;
+  leaseToken?: string;
 }) {
-  const { brandId, error, requestedForScanId } = params;
-  await db.collection('brands').doc(brandId).update({
+  const { brandId, error, requestedForScanId, leaseToken } = params;
+  const brandRef = db.collection('brands').doc(brandId);
+  const updates = {
     'dashboardExecutiveSummary.version': DASHBOARD_EXECUTIVE_SUMMARY_VERSION,
     'dashboardExecutiveSummary.status': 'failed',
     ...(requestedForScanId
       ? { 'dashboardExecutiveSummary.requestedForScanId': requestedForScanId }
       : {}),
     'dashboardExecutiveSummary.completedAt': FieldValue.serverTimestamp(),
+    'dashboardExecutiveSummary.leaseToken': FieldValue.delete(),
+    'dashboardExecutiveSummary.leaseExpiresAt': FieldValue.delete(),
     'dashboardExecutiveSummary.error': normalizeDashboardExecutiveSummaryError(error),
+  };
+
+  if (!leaseToken) {
+    await brandRef.update(updates);
+    return;
+  }
+
+  await db.runTransaction(async (tx) => {
+    const brandDoc = await tx.get(brandRef);
+    if (!brandDoc.exists) return;
+    const brand = brandDoc.data() as BrandProfile;
+    if (brand.dashboardExecutiveSummary?.leaseToken !== leaseToken) {
+      return;
+    }
+    tx.update(brandRef, updates);
   });
 }
 
@@ -427,15 +479,39 @@ export async function generateAndPersistDashboardExecutiveSummary(params: {
 }): Promise<{ outcome: 'updated' | 'skipped'; data?: DashboardExecutiveSummaryData }> {
   const { brandId, userId, force = false } = params;
   const brandRef = db.collection('brands').doc(brandId);
-  const brandDoc = await brandRef.get();
-  if (!brandDoc.exists) {
-    return { outcome: 'skipped' };
-  }
+  const leaseToken = randomUUID();
+  const claimed = await db.runTransaction(async (tx) => {
+    const brandDoc = await tx.get(brandRef);
+    if (!brandDoc.exists) {
+      return { outcome: 'skipped' as const };
+    }
 
-  const brand = { id: brandDoc.id, ...(brandDoc.data() as Omit<BrandProfile, 'id'>) } as BrandProfile;
-  if (brand.userId !== userId || isBrandDeletionActive(brand) || isBrandHistoryDeletionActive(brand)) {
-    return { outcome: 'skipped' };
+    const brand = { id: brandDoc.id, ...(brandDoc.data() as Omit<BrandProfile, 'id'>) } as BrandProfile;
+    if (brand.userId !== userId || isBrandDeletionActive(brand) || isBrandHistoryDeletionActive(brand)) {
+      return { outcome: 'skipped' as const };
+    }
+    if (!force && isDashboardExecutiveSummaryLeaseActive(brand.dashboardExecutiveSummary)) {
+      console.log(`[dashboard-executive-summary] Brand ${brandId}: active lease present — skipping duplicate worker`);
+      return { outcome: 'skipped' as const, data: brand.dashboardExecutiveSummary ?? undefined };
+    }
+
+    tx.update(brandRef, {
+      'dashboardExecutiveSummary.version': DASHBOARD_EXECUTIVE_SUMMARY_VERSION,
+      'dashboardExecutiveSummary.status': 'pending',
+      'dashboardExecutiveSummary.startedAt': FieldValue.serverTimestamp(),
+      'dashboardExecutiveSummary.completedAt': FieldValue.delete(),
+      'dashboardExecutiveSummary.leaseToken': leaseToken,
+      'dashboardExecutiveSummary.leaseExpiresAt': Timestamp.fromDate(new Date(Date.now() + DASHBOARD_EXECUTIVE_SUMMARY_LEASE_MS)),
+      'dashboardExecutiveSummary.error': FieldValue.delete(),
+    });
+
+    return { outcome: 'claimed' as const, brand };
+  });
+
+  if (claimed.outcome === 'skipped') {
+    return { outcome: 'skipped', data: claimed.data };
   }
+  const brand = claimed.brand;
 
   let builtResult: BuiltDashboardExecutiveSummaryResult | undefined;
   try {
@@ -450,13 +526,14 @@ export async function generateAndPersistDashboardExecutiveSummary(params: {
       return { outcome: 'skipped', data: existing };
     }
 
-    await saveDashboardExecutiveSummary(brandId, builtResult);
+    await saveDashboardExecutiveSummary(brandId, builtResult, leaseToken);
     return { outcome: 'updated', data: builtResult };
   } catch (error) {
     await markDashboardExecutiveSummaryFailed({
       brandId,
       error,
       requestedForScanId: builtResult?.generatedFromScanId ?? brand.dashboardExecutiveSummary?.requestedForScanId,
+      leaseToken,
     });
     throw error;
   }

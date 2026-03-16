@@ -2,6 +2,7 @@
 docs/
 .DS_Store
 .cursorignore
+.wrangler/
 
 # App
 node_modules/
