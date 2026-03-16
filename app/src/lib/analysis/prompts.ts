@@ -538,8 +538,9 @@ Rules:
 - Reuse the exact same provisionalTheme strings from the input.
 - canonicalTheme must be in title case, preferably 1 word, and never exceed ${MAX_FINDING_TAXONOMY_WORDS} words.
 - Prefer reusing an existing historical theme exactly when it fits.
-- Consolidate near-duplicate provisional themes from the current scan into one shared canonical theme when they clearly describe the same misuse pattern.
-- Do NOT merge materially different misuse patterns just because they share one word.
+- Consolidate aggressively: merge any provisional themes that describe the same broad misuse pattern into a single canonical label even if the wording differs. Err on the side of merging rather than keeping separate labels.
+- Aim for a MAXIMUM of 15 distinct canonical themes across the entire scan. If you have more, merge the least distinct ones into broader categories.
+- Do NOT merge materially different misuse patterns that have no conceptual overlap.
 - Prefer a small number of broad, stable, reusable theme labels over many narrow or repetitive variants.
 - Avoid generic labels like 'Unknown', 'Unlabelled', or 'Unrelated'. Use 'Other' only when no better broad label is warranted.
 - Base your judgement on the representative findings and context provided, not on the theme text alone.`;
@@ -1583,6 +1584,7 @@ export function buildDashboardExecutiveSummaryPrompt(params: {
   }>;
 }): string {
   const { brandName, severityBreakdown, findings } = params;
+  const compactFindings = findings.map((f) => ({ id: f.id, severity: f.severity, title: f.title }));
 
   return `Brand being protected: "${brandName}"
 
@@ -1596,8 +1598,8 @@ Severity breakdown in this input:
 - Medium: ${severityBreakdown.medium}
 - Low: ${severityBreakdown.low}
 
-Selected findings (${findings.length}):
-${JSON.stringify(findings, null, 2)}
+Selected findings (${compactFindings.length}):
+${JSON.stringify(compactFindings, null, 2)}
 
 Write a concise executive summary for a debug-only dashboard experiment.
 
@@ -1646,11 +1648,11 @@ ${historicalThemes && historicalThemes.length > 0 ? historicalThemes.map((theme)
 Provisional theme groups from this completed scan (${compactGroups.length}):
 ${JSON.stringify(compactGroups, null, 2)}
 
-Return one mapping per provisionalTheme so that near-duplicate labels collapse to a single final canonical theme where appropriate.
+Return one mapping per provisionalTheme. Consolidate aggressively — your goal is to produce no more than 15 distinct canonical themes across all mappings. Group broad patterns together under a single label rather than preserving fine-grained distinctions.
 
 Reuse an existing historical theme exactly when it fits well.
 
-If no historical theme fits, choose the best new short label for that provisional group and reuse it across any other clearly equivalent provisional groups.`;
+If no historical theme fits, choose the best short broad label and reuse it across all clearly related provisional groups.`;
 }
 
 function buildUserPreferenceHintsSection(

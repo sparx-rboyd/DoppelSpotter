@@ -165,18 +165,61 @@
                 </p>
             </div>
 
-            <div class="max-w-5xl mx-auto overflow-hidden rounded-3xl border border-gray-200 bg-gray-950 shadow-2xl shadow-gray-200/70">
-                <video
-                    class="block w-full h-auto"
-                    controls
-                    playsinline
-                    preload="metadata"
-                    poster="doppelspotter-pitch.mp4.png"
+            <div class="max-w-5xl mx-auto">
+                <div
+                    class="mb-6 grid gap-3 sm:grid-cols-2"
+                    role="tablist"
+                    aria-label="Demo video options"
                 >
-                    <source src="doppelspotter-pitch.mp4" type="video/mp4">
-                    Your browser does not support inline video playback.
-                    <a href="doppelspotter-pitch.mp4" class="text-brand-300 underline">Download the demo video</a>.
-                </video>
+                    <button
+                        id="demo-tab-5min"
+                        type="button"
+                        role="tab"
+                        aria-selected="true"
+                        aria-controls="demo-video-panel"
+                        data-demo-src="doppelspotter-pitch.mp4"
+                        data-demo-poster="doppelspotter-pitch.mp4.png"
+                        data-demo-download="doppelspotter-pitch.mp4"
+                        class="demo-tab rounded-2xl border border-brand-200 bg-white px-5 py-4 text-left shadow-sm transition hover:border-brand-400 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                    >
+                        <div class="text-base font-semibold text-gray-900">Got 5 minutes?</div>
+                        <div class="mt-1 text-sm text-gray-600">Watch the intro and full demo</div>
+                    </button>
+                    <button
+                        id="demo-tab-1min"
+                        type="button"
+                        role="tab"
+                        aria-selected="false"
+                        aria-controls="demo-video-panel"
+                        data-demo-src="doppelspotter-pitch-1min.mp4"
+                        data-demo-poster="doppelspotter-pitch.mp4.png"
+                        data-demo-download="doppelspotter-pitch-1min.mp4"
+                        class="demo-tab rounded-2xl border border-gray-200 bg-white px-5 py-4 text-left shadow-sm transition hover:border-brand-400 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+                    >
+                        <div class="text-base font-semibold text-gray-900">Got 1 minute?</div>
+                        <div class="mt-1 text-sm text-gray-600">Watch a quick demo</div>
+                    </button>
+                </div>
+
+                <div
+                    id="demo-video-panel"
+                    role="tabpanel"
+                    aria-labelledby="demo-tab-5min"
+                    class="overflow-hidden rounded-3xl border border-gray-200 bg-gray-950 shadow-2xl shadow-gray-200/70"
+                >
+                    <video
+                        id="demo-video-player"
+                        class="block w-full h-auto"
+                        controls
+                        playsinline
+                        preload="metadata"
+                        poster="doppelspotter-pitch.mp4.png"
+                    >
+                        <source id="demo-video-source" src="doppelspotter-pitch.mp4" type="video/mp4">
+                        Your browser does not support inline video playback.
+                        <a id="demo-video-download" href="doppelspotter-pitch.mp4" class="text-brand-300 underline">Download the selected demo video</a>.
+                    </video>
+                </div>
             </div>
         </div>
     </section>
@@ -651,6 +694,54 @@
                 if (window.innerWidth >= 1024) {
                     setMobileMenuOpen(false);
                 }
+            });
+        }
+
+        const demoVideoPanel = document.getElementById('demo-video-panel');
+        const demoVideoPlayer = document.getElementById('demo-video-player');
+        const demoVideoSource = document.getElementById('demo-video-source');
+        const demoVideoDownload = document.getElementById('demo-video-download');
+        const demoTabs = Array.from(document.querySelectorAll('.demo-tab'));
+
+        if (demoVideoPanel && demoVideoPlayer && demoVideoSource && demoVideoDownload && demoTabs.length > 0) {
+            const setActiveDemoTab = (activeTab) => {
+                demoTabs.forEach((tab) => {
+                    const isActive = tab === activeTab;
+                    tab.setAttribute('aria-selected', String(isActive));
+                    tab.setAttribute('tabindex', isActive ? '0' : '-1');
+                    tab.classList.toggle('border-brand-200', isActive);
+                    tab.classList.toggle('bg-brand-50', isActive);
+                    tab.classList.toggle('shadow-md', isActive);
+                    tab.classList.toggle('border-gray-200', !isActive);
+                    tab.classList.toggle('bg-white', !isActive);
+                    tab.classList.toggle('shadow-sm', !isActive);
+                });
+
+                demoVideoPanel.setAttribute('aria-labelledby', activeTab.id);
+
+                const nextSrc = activeTab.dataset.demoSrc;
+                const nextPoster = activeTab.dataset.demoPoster;
+                const nextDownload = activeTab.dataset.demoDownload;
+
+                if (!nextSrc || demoVideoSource.getAttribute('src') === nextSrc) {
+                    return;
+                }
+
+                demoVideoPlayer.pause();
+                demoVideoPlayer.currentTime = 0;
+                demoVideoSource.setAttribute('src', nextSrc);
+                demoVideoPlayer.setAttribute('poster', nextPoster || '');
+                demoVideoDownload.setAttribute('href', nextDownload || nextSrc);
+                demoVideoPlayer.load();
+            };
+
+            const defaultDemoTab = demoTabs.find((tab) => tab.getAttribute('aria-selected') === 'true') || demoTabs[0];
+            setActiveDemoTab(defaultDemoTab);
+
+            demoTabs.forEach((tab) => {
+                tab.addEventListener('click', () => {
+                    setActiveDemoTab(tab);
+                });
             });
         }
 
