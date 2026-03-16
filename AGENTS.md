@@ -105,7 +105,7 @@ The seven active Google logical scanners all reuse the same physical Apify actor
 `apidojo/tiktok-scraper`, and `domain-registrations` uses
 `doppelspotter/recent-domain-registrations`, `discord-servers` uses
 `louisdeconinck/discord-server-scraper`, `github-repos` uses
-`ryanclinton/github-repo-search`, `euipo-trademarks` uses
+`muscular_quadruplet/github-scraper`, `euipo-trademarks` uses
 `doppelspotter/euipo-trademark-search`, and `x-search` uses `apidojo/tweet-scraper`.
 `app/src/lib/apify/actors.ts` therefore keys the registry by logical scanner id rather than raw
 `actorId`.

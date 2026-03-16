@@ -89,7 +89,7 @@ export const REDDIT_POST_SCRAPER_ACTOR_ID = 'fatihtahta/reddit-scraper-search-fa
 export const TIKTOK_POST_SCRAPER_ACTOR_ID = 'apidojo/tiktok-scraper';
 export const DOMAIN_REGISTRATIONS_ACTOR_ID = 'doppelspotter/recent-domain-registrations';
 export const DISCORD_SERVER_SCRAPER_ACTOR_ID = 'louisdeconinck/discord-server-scraper';
-export const GITHUB_REPO_SEARCH_ACTOR_ID = 'ryanclinton/github-repo-search';
+export const GITHUB_REPO_SEARCH_ACTOR_ID = 'muscular_quadruplet/github-scraper';
 export const EUIPO_TRADEMARK_SEARCH_ACTOR_ID = 'doppelspotter/euipo-trademark-search';
 export const X_TWEET_SCRAPER_ACTOR_ID = 'apidojo/tweet-scraper';
 

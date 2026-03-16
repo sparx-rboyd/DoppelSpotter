@@ -7860,7 +7860,9 @@ function readDomainRegistrationEnhancedAnalysis(
 }
 
 function readGitHubRepoFullName(item: Record<string, unknown>): string | null {
-  const value = readOptionalTrimmedString(item.fullName) ?? readOptionalTrimmedString(item.full_name);
+  const value = readOptionalTrimmedString(item.fullName)
+    ?? readOptionalTrimmedString(item.full_name)
+    ?? readOptionalTrimmedString(item.name);
   if (!value || !value.includes('/')) {
     return null;
   }

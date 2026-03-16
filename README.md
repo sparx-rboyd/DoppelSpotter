@@ -62,7 +62,7 @@ DoppelSpotter is designed for a simple user journey:
 | Public TikTok videos | TikTok | `apidojo/tiktok-scraper` |
 | Recent domain registrations | Domain registrations | `doppelspotter/recent-domain-registrations` |
 | Public communities | Discord servers | `louisdeconinck/discord-server-scraper` |
-| Code platforms | GitHub repos | `ryanclinton/github-repo-search` |
+| Code platforms | GitHub repos | `muscular_quadruplet/github-scraper` |
 | Trademark filings | EUIPO trademarks | `doppelspotter/euipo-trademark-search` |
 | Social posts | X | `apidojo/tweet-scraper` |
 

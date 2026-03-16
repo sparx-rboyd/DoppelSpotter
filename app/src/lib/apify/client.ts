@@ -250,9 +250,16 @@ export function buildActorInputs(
       const query = `${term} in:name,description pushed:>${settings.lookbackDate}`;
       return {
         input: {
-          query,
-          sortBy: 'best-match',
-          maxResults: maxResultsPerTerm,
+          mode: 'search',
+          searchQuery: query,
+          includeReadme: false,
+          username: '',
+          language: '',
+          sortBy: 'stars',
+          order: 'desc',
+          maxItems: maxResultsPerTerm,
+          minStars: 0,
+          minForks: 0,
         },
         query,
         displayQuery: term,
