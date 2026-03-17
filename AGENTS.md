@@ -71,11 +71,6 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 │               ├── openrouter.ts # AI analysis client: chatCompletion()
 │               ├── theme-normalization.ts # Scan-wide provisional-theme canonicalisation before scan completion
 │               └── types.ts      # Google + Reddit + TikTok + Discord + GitHub + EUIPO + X analysis output interfaces + parsers
-└── docs/
-    ├── GCP_SETUP.md
-    ├── GCP_DELETION_TASKS_SETUP.md
- ├── GCP_DASHBOARD_SUMMARY_TASKS_SETUP.md
-    └── PIPELINE_SETUP.md
 ```
 
 ---
@@ -862,12 +857,3 @@ The findings API is optimised to minimise Firestore reads and HTTP round-trips o
 - **Recent activity feed remains lightweight** — `GET /api/findings` still pages through the newest findings until it has filled the requested limit, instead of always fetching a fixed `limit * 4` window and filtering in memory. This keeps that cross-brand recent-activity query close to the number of cards rendered.
 - **Debug details fetched on demand** — `FindingCard` fetches `GET /api/brands/[brandId]/findings/[findingId]` only when a debug section is opened (`?debug=true`). The brand page also lazily fetches `GET /api/brands/[brandId]/scans/[scanId]` for stored scan-summary debug fields and, in debug mode only, can call `POST`/`PATCH` on that same route to preview and optionally persist regenerated scan summaries. Normal list views never load raw actor data or raw AI responses.
 - **No redundant brand ownership checks on per-scan findings** — the `GET /api/brands/[brandId]/findings` route relies solely on `userId == uid` in the Firestore query for authorization (no extra brand doc read per request). The PATCH (ignore/un-ignore) route similarly skips the brand doc read, verifying ownership via the finding document itself.
-
----
-
-## Key Docs
-
-- [`docs/GCP_SETUP.md`](docs/GCP_SETUP.md) — GCP / Firestore / Cloud Run setup
-- [`docs/GCP_DASHBOARD_SUMMARY_TASKS_SETUP.md`](docs/GCP_DASHBOARD_SUMMARY_TASKS_SETUP.md) — Cloud Tasks setup for dashboard executive summary refresh jobs
-- [`docs/PIPELINE_SETUP.md`](docs/PIPELINE_SETUP.md) — Apify, OpenRouter, ngrok, env vars
-- [`REVIEW.md`](REVIEW.md) — Ongoing scan quality review: actor details and AI analysis prompts
