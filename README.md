@@ -4,8 +4,6 @@ AI-powered brand protection for SMEs, built for the GenAI Zurich 2026 Hackathon 
 
 DoppelSpotter monitors the open web, communities, code platforms, domain registrations, and app stores for signs of brand abuse. It then uses generative AI to classify likely threats, suppress noise, surface patterns, and turn the output into searchable findings, dashboards, reports, and email summaries.
 
-[Published Actors: Domain Registrations](https://apify.com/doppelspotter/recent-domain-registrations) | [Published Actors: EUIPO Trademark Search](https://apify.com/doppelspotter/euipo-trademark-search) | [Pitch Page Source](landing-page/index.html) | [App Source](app/) | [Actor Sources](actors/)
-
 ## What This Repo Contains
 
 This repository contains four closely related pieces of work:
@@ -430,7 +428,9 @@ This repository works best when read as a complete submission rather than three 
 
 ## Further Reading
 
-- Root architecture notes: `AGENTS.md`
-- Pitch page source: `landing-page/index.html`
-- Domain actor documentation: `actors/recent-domain-registrations/README.md`
-- EUIPO actor documentation: `actors/euipo-trademark-search/README.md`
+- [Architecture notes](AGENTS.md)
+- [App Source](app/)
+- [Pitch Page Source](landing-page/index.html)
+- [Actor Sources](actors/)
+- [Published Actor: Domain Registrations](https://apify.com/doppelspotter/recent-domain-registrations)
+- [Published Actor: EUIPO Trademark Search](https://apify.com/doppelspotter/euipo-trademark-search)
