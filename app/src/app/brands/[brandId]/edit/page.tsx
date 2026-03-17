@@ -34,7 +34,9 @@ import {
   isValidBrandAnalysisSeverityDefinitions,
   normalizeBrandAnalysisSeverityDefinitions,
 } from '@/lib/analysis-severity';
+import { preventImplicitFormSubmit } from '@/lib/forms';
 import {
+  areScanScheduleInputsEqual,
   DEFAULT_SCAN_SCHEDULE_FREQUENCY,
   getBrowserTimeZone,
   getDefaultScheduleStartInput,
@@ -218,16 +220,8 @@ export default function EditBrandPage() {
     setSafeWords(safeWords.filter((x) => x !== w));
   }
 
-  function hasUnchangedScheduleStart(nextSchedule: BrandScanScheduleInput): boolean {
-    if (!initialScanSchedule?.enabled) {
-      return false;
-    }
-
-    return (
-      nextSchedule.timeZone === initialScanSchedule.timeZone &&
-      nextSchedule.startDate === initialScanSchedule.startDate &&
-      nextSchedule.startTime === initialScanSchedule.startTime
-    );
+  function hasUnchangedSchedule(nextSchedule: BrandScanScheduleInput): boolean {
+    return areScanScheduleInputsEqual(nextSchedule, initialScanSchedule);
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -246,10 +240,12 @@ export default function EditBrandPage() {
       return;
     }
 
-    if (scanSchedule.enabled && isScheduleStartInPast(scanSchedule) && !hasUnchangedScheduleStart(scanSchedule)) {
+    if (scanSchedule.enabled && isScheduleStartInPast(scanSchedule) && !hasUnchangedSchedule(scanSchedule)) {
       setSaveError('Scheduled scan start date and time must be in the future');
       return;
     }
+
+    const scheduleUpdate = hasUnchangedSchedule(scanSchedule) ? undefined : scanSchedule;
 
     setSaving(true);
     setSaveError('');
@@ -272,7 +268,7 @@ export default function EditBrandPage() {
           analysisSeverityDefinitions,
           watchWords,
           safeWords,
-          scanSchedule,
+          ...(scheduleUpdate !== undefined ? { scanSchedule: scheduleUpdate } : {}),
         }),
       });
 
@@ -348,7 +344,7 @@ export default function EditBrandPage() {
           )}
 
           {!loadingBrand && !loadError && (
-            <form onSubmit={handleSubmit} className="space-y-6 lg:space-y-8">
+            <form onSubmit={handleSubmit} onKeyDown={preventImplicitFormSubmit} className="space-y-6 lg:space-y-8">
               <Card>
                 <CardHeader className="px-6 py-5">
                   <h2 className="font-semibold text-gray-900">Brand details</h2>

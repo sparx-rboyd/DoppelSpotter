@@ -26,6 +26,7 @@ import {
   hasEnabledBrandScanSource,
 } from '@/lib/brands';
 import { isValidBrandAnalysisSeverityDefinitions } from '@/lib/analysis-severity';
+import { preventImplicitFormSubmit } from '@/lib/forms';
 import {
   DEFAULT_SCAN_SCHEDULE_FREQUENCY,
   getBrowserTimeZone,
@@ -224,7 +225,7 @@ export default function NewBrandPage() {
             </div>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6 lg:space-y-8">
+          <form onSubmit={handleSubmit} onKeyDown={preventImplicitFormSubmit} className="space-y-6 lg:space-y-8">
             <Card>
               <CardHeader className="px-6 py-5">
                 <h2 className="font-semibold text-gray-900">Brand details</h2>

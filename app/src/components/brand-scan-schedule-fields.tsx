@@ -24,8 +24,10 @@ import { InfoTooltip } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 import {
   formatScanScheduleFrequency,
+  getDefaultScheduleStartInput,
   getMinimumScheduleStart,
   getSupportedTimeZones,
+  isScheduleStartInPast,
   parseScheduleStart,
 } from '@/lib/scan-schedules';
 import type { BrandScanScheduleInput } from '@/lib/types';
@@ -608,7 +610,19 @@ export function BrandScanScheduleFields({
           role="switch"
           aria-checked={value.enabled}
           aria-label="Enable scheduled scans"
-          onClick={() => updateValue({ enabled: !value.enabled })}
+          onClick={() => {
+            if (value.enabled) {
+              updateValue({ enabled: false });
+              return;
+            }
+
+            updateValue({
+              enabled: true,
+              ...(isScheduleStartInPast(value)
+                ? getDefaultScheduleStartInput(value.timeZone)
+                : {}),
+            });
+          }}
           className={`inline-flex items-center gap-2 rounded-md text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
             value.enabled ? 'text-brand-700' : 'text-gray-600'
           }`}

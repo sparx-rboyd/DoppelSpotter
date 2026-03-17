@@ -141,7 +141,7 @@ export function getSupportedTimeZones(): string[] {
 }
 
 export function getDefaultScheduleStartDate(now = new Date()): string {
-  return DateTime.fromJSDate(now).toFormat('yyyy-LL-dd');
+  return DateTime.fromJSDate(now).plus({ days: 1 }).toFormat('yyyy-LL-dd');
 }
 
 export function getMinimumScheduleStart(timeZone: string, now = new Date()): DateTime {
@@ -154,7 +154,9 @@ export function getDefaultScheduleStartInput(
   timeZone = getBrowserTimeZone(),
   now = new Date(),
 ): Pick<BrandScanScheduleInput, 'startDate' | 'startTime'> {
-  const start = getMinimumScheduleStart(timeZone, now);
+  const start = DateTime.fromJSDate(now, { zone: timeZone })
+    .plus({ days: 1 })
+    .startOf('minute');
   return {
     startDate: start.toFormat('yyyy-LL-dd'),
     startTime: start.toFormat('HH:mm'),
@@ -179,6 +181,23 @@ export function isScheduleStartInPast(
   }
 
   return start <= reference;
+}
+
+export function areScanScheduleInputsEqual(
+  left: BrandScanScheduleInput | null | undefined,
+  right: BrandScanScheduleInput | null | undefined,
+): boolean {
+  if (!left || !right) {
+    return left === right;
+  }
+
+  return (
+    left.enabled === right.enabled &&
+    left.frequency === right.frequency &&
+    left.timeZone === right.timeZone &&
+    left.startDate === right.startDate &&
+    left.startTime === right.startTime
+  );
 }
 
 export function computeInitialScheduledRun(anchor: ScheduleAnchorLike, now: AnyTimestampLike = new Date()): Date {

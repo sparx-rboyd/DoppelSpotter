@@ -30,6 +30,7 @@ import {
 } from '@/lib/brands';
 import { isScanInProgress, scanFromSnapshot } from '@/lib/scans';
 import {
+  areScanScheduleInputsEqual,
   buildBrandScanSchedule,
   getScheduleInputFromBrandSchedule,
   isScheduleStartInPast,
@@ -157,21 +158,18 @@ export async function PATCH(request: NextRequest, { params }: Params) {
     const existingScheduleInput = existingBrand.scanSchedule
       ? getScheduleInputFromBrandSchedule(existingBrand.scanSchedule)
       : null;
-    const isKeepingExistingPastStart = Boolean(
-      existingScheduleInput?.enabled &&
-      body.scanSchedule.timeZone === existingScheduleInput.timeZone &&
-      body.scanSchedule.startDate === existingScheduleInput.startDate &&
-      body.scanSchedule.startTime === existingScheduleInput.startTime,
-    );
+    const isUnchangedSchedule = areScanScheduleInputsEqual(body.scanSchedule, existingScheduleInput);
 
-    if (body.scanSchedule.enabled && isScheduleStartInPast(body.scanSchedule) && !isKeepingExistingPastStart) {
+    if (!isUnchangedSchedule && body.scanSchedule.enabled && isScheduleStartInPast(body.scanSchedule)) {
       return errorResponse('Scheduled scan start date and time must be in the future');
     }
 
-    try {
-      updates.scanSchedule = buildBrandScanSchedule(body.scanSchedule);
-    } catch (error) {
-      return errorResponse(error instanceof Error ? error.message : 'Invalid scan schedule');
+    if (!isUnchangedSchedule) {
+      try {
+        updates.scanSchedule = buildBrandScanSchedule(body.scanSchedule);
+      } catch (error) {
+        return errorResponse(error instanceof Error ? error.message : 'Invalid scan schedule');
+      }
     }
   }
 
