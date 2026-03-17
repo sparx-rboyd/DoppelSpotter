@@ -10,7 +10,6 @@ import {
 import {
   drainBrandDeletion,
   isBrandDeletionActive,
-  isBrandHistoryDeletionActive,
   markBrandDeletionQueued,
 } from '@/lib/async-deletions';
 import { scheduleDeletionTaskOrRunInline } from '@/lib/deletion-tasks';
@@ -70,9 +69,6 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   const existingBrand = doc.data() as BrandProfile;
   if (existingBrand.userId !== uid) return errorResponse('Forbidden', 403);
   if (isBrandDeletionActive(existingBrand)) return errorResponse('Brand not found', 404);
-  if (isBrandHistoryDeletionActive(existingBrand)) {
-    return errorResponse('Cannot update a brand while its history is being deleted', 409);
-  }
 
   let body: BrandProfileUpdateInput;
   try {
