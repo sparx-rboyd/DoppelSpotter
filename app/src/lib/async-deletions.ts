@@ -10,11 +10,23 @@ const DELETION_LEASE_MS = 60_000;
 const DEFAULT_DRAIN_BUDGET_MS = 8_000;
 const ACCOUNT_DELETION_ABORT_CONCURRENCY = 5;
 const ACCOUNT_DELETION_PENDING_ABORTS_PATH = 'accountDeletion.pendingRunAborts';
+const SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_COLLECTION = 'scanExecutiveSummaryCandidateChunks';
 
 type DeletionPassResult = 'idle' | 'busy' | 'progress' | 'complete';
 type BrandDeletionField = 'historyDeletion' | 'brandDeletion';
 type ScopedDeletionField = BrandDeletionField | 'deletion' | 'accountDeletion';
 type AccountDeletionState = AsyncDeletionState & { pendingRunAborts?: string[] };
+
+function buildScanExecutiveSummaryChunkDocId(scanId: string, chunkIndex: number): string {
+  return `${scanId}__${String(chunkIndex).padStart(3, '0')}`;
+}
+
+function getScanExecutiveSummaryChunkCount(scan?: Pick<Scan, 'executiveSummaryCandidates'> | null): number {
+  const chunkCount = scan?.executiveSummaryCandidates?.chunkCount;
+  return typeof chunkCount === 'number' && Number.isInteger(chunkCount) && chunkCount > 0
+    ? chunkCount
+    : 0;
+}
 
 function getActiveDeletionState(
   value: unknown,
@@ -245,6 +257,21 @@ export async function processScanDeletionPass(params: {
       return 'progress';
     }
 
+    const chunkCount = getScanExecutiveSummaryChunkCount(scan);
+    if (chunkCount > 0) {
+      const batch = db.batch();
+      for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+        batch.delete(
+          db.collection(SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_COLLECTION).doc(
+            buildScanExecutiveSummaryChunkDocId(scanId, chunkIndex),
+          ),
+        );
+      }
+      batch.delete(scanRef);
+      await batch.commit();
+      return 'complete';
+    }
+
     await scanRef.delete();
     return 'complete';
   } catch (error) {
@@ -290,12 +317,23 @@ export async function processBrandHistoryDeletionPass(params: {
       .collection('scans')
       .where('brandId', '==', brandId)
       .where('userId', '==', userId)
-      .select()
+      .select('executiveSummaryCandidates')
       .limit(DELETION_BATCH_LIMIT)
       .get();
 
     if (!scansSnapshot.empty) {
-      await runWriteBatchInChunks(scansSnapshot.docs, (batch, doc) => batch.delete(doc.ref), DELETION_BATCH_LIMIT);
+      await runWriteBatchInChunks(scansSnapshot.docs, (batch, doc) => {
+        const scan = doc.data() as Pick<Scan, 'executiveSummaryCandidates'>;
+        const chunkCount = getScanExecutiveSummaryChunkCount(scan);
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+          batch.delete(
+            db.collection(SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_COLLECTION).doc(
+              buildScanExecutiveSummaryChunkDocId(doc.id, chunkIndex),
+            ),
+          );
+        }
+        batch.delete(doc.ref);
+      }, DELETION_BATCH_LIMIT);
       await releaseDeletionLease(brandPath, 'historyDeletion');
       return 'progress';
     }
@@ -345,7 +383,7 @@ export async function processBrandDeletionPass(params: {
       .collection('scans')
       .where('brandId', '==', brandId)
       .where('userId', '==', userId)
-      .select('status')
+      .select('status', 'executiveSummaryCandidates')
       .limit(DELETION_BATCH_LIMIT)
       .get();
 
@@ -358,7 +396,18 @@ export async function processBrandDeletionPass(params: {
         throw new Error(`Cannot delete brand ${brandId} while scan ${inProgressScan.id} is still in progress`);
       }
 
-      await runWriteBatchInChunks(scansSnapshot.docs, (batch, doc) => batch.delete(doc.ref), DELETION_BATCH_LIMIT);
+      await runWriteBatchInChunks(scansSnapshot.docs, (batch, doc) => {
+        const scan = doc.data() as Pick<Scan, 'executiveSummaryCandidates'>;
+        const chunkCount = getScanExecutiveSummaryChunkCount(scan);
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+          batch.delete(
+            db.collection(SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_COLLECTION).doc(
+              buildScanExecutiveSummaryChunkDocId(doc.id, chunkIndex),
+            ),
+          );
+        }
+        batch.delete(doc.ref);
+      }, DELETION_BATCH_LIMIT);
       await releaseDeletionLease(brandPath, 'brandDeletion');
       return 'progress';
     }
@@ -468,12 +517,23 @@ export async function processAccountDeletionPass(params: {
     const scansSnapshot = await db
       .collection('scans')
       .where('userId', '==', userId)
-      .select()
+      .select('executiveSummaryCandidates')
       .limit(DELETION_BATCH_LIMIT)
       .get();
 
     if (!scansSnapshot.empty) {
-      await runWriteBatchInChunks(scansSnapshot.docs, (batch, doc) => batch.delete(doc.ref), DELETION_BATCH_LIMIT);
+      await runWriteBatchInChunks(scansSnapshot.docs, (batch, doc) => {
+        const scan = doc.data() as Pick<Scan, 'executiveSummaryCandidates'>;
+        const chunkCount = getScanExecutiveSummaryChunkCount(scan);
+        for (let chunkIndex = 0; chunkIndex < chunkCount; chunkIndex += 1) {
+          batch.delete(
+            db.collection(SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_COLLECTION).doc(
+              buildScanExecutiveSummaryChunkDocId(doc.id, chunkIndex),
+            ),
+          );
+        }
+        batch.delete(doc.ref);
+      }, DELETION_BATCH_LIMIT);
       await releaseDeletionLease(userPath, 'accountDeletion');
       return 'progress';
     }

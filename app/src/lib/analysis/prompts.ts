@@ -1581,10 +1581,17 @@ export function buildDashboardExecutiveSummaryPrompt(params: {
     severity: Severity;
     title: string;
     description: string;
+    provisionalTheme?: string;
   }>;
 }): string {
   const { brandName, severityBreakdown, findings } = params;
-  const compactFindings = findings.map((f) => ({ id: f.id, severity: f.severity, title: f.title }));
+  const compactFindings = findings.map((f) => ({
+    id: f.id,
+    severity: f.severity,
+    title: f.title,
+    description: f.description,
+    ...(f.provisionalTheme ? { provisionalTheme: f.provisionalTheme } : {}),
+  }));
 
   return `Brand being protected: "${brandName}"
 
@@ -1592,6 +1599,7 @@ Input selection notes:
 - Findings were preselected from completed scans only.
 - Findings are ordered by severity priority first (high, then medium, then low) and by scan recency within each severity.
 - Findings include only actionable visible threats, excluding non-findings, ignored findings, and addressed findings.
+- "provisionalTheme", when present, is a short provisional working label from finding classification. Treat it as a soft clustering hint only, not as ground truth.
 
 Severity breakdown in this input:
 - High: ${severityBreakdown.high}

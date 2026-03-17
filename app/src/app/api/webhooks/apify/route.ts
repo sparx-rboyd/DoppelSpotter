@@ -7237,9 +7237,6 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
   const brandDoc = await db.collection('brands').doc(fresh.brandId).get();
   const brandName = brandDoc.exists ? (brandDoc.data() as BrandProfile).name : undefined;
 
-  const summariseStart = Date.now();
-  console.log(`[webhook] Scan ${fresh.id}: starting parallel theme normalization + scan summary`);
-
   const summaryPromise = buildScanAiSummary(fresh)
     .catch((err): BuiltScanAiSummaryResult => {
       console.error(`[webhook] Unexpected scan summary build error for scan ${fresh.id}:`, err);
@@ -7265,8 +7262,6 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
     }),
     summaryPromise,
   ]);
-
-  console.log(`[webhook] Scan ${fresh.id}: parallel summarise phase completed in ${((Date.now() - summariseStart) / 1000).toFixed(1)}s — finalizing`);
   await finalizeScanWithSummary(scanRef, summaryResult);
   try {
     await buildAndPersistScanExecutiveSummaryCandidates({
@@ -8259,9 +8254,7 @@ async function markActorRunComplete(
         await clearBrandActiveScanIfMatches(db.collection('brands').doc(fresh.brandId), scanDoc.id, tx);
       }
 
-      if (updates.status === 'summarising') {
-        console.log(`[webhook] Scan ${scanDoc.id} finished actor processing — generating summary`);
-      } else {
+      if (updates.status !== 'summarising') {
         console.log(`[webhook] Scan ${scanDoc.id} is complete — status: ${updates.status}`);
       }
 

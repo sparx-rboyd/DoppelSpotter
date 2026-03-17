@@ -75,9 +75,6 @@ function sortFindingsForSummary(findings: ScanSummaryFindingInput[]): ScanSummar
 }
 
 export async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummaryResult> {
-  const prefix = `[scan-summary] Scan ${scan.id}:`;
-  console.log(`${prefix} starting — loading findings`);
-
   const findingsSnap = await db
     .collection('findings')
     .where('scanId', '==', scan.id)
@@ -96,10 +93,8 @@ export async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummary
         source: finding.source,
       })),
   );
-  console.log(`${prefix} ${findingsSnap.size} total docs, ${findings.length} actionable findings`);
 
   if (findings.length === 0) {
-    console.log(`${prefix} no actionable findings — using count-only summary`);
     return { summary: buildCountOnlyScanAiSummary(scan) };
   }
 
@@ -128,27 +123,23 @@ export async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummary
     })),
     ...(lowTruncated > 0 ? { lowTruncated } : {}),
   });
-  console.log(`${prefix} prompt built — ${cappedFindings.length}/${findings.length} findings sent, prompt ${prompt.length} chars, ${counts.high}h/${counts.medium}m/${counts.low}l, lowTruncated=${lowTruncated}`);
 
   let rawLlmResponse: string | undefined;
   let finalError: unknown;
   for (let attempt = 1; attempt <= SCAN_SUMMARY_LLM_MAX_ATTEMPTS; attempt++) {
     let attemptRawLlmResponse: string | undefined;
     try {
-      console.log(`${prefix} calling LLM (attempt ${attempt}/${SCAN_SUMMARY_LLM_MAX_ATTEMPTS})`);
       attemptRawLlmResponse = await chatCompletion([
         { role: 'system', content: SCAN_SUMMARY_SYSTEM_PROMPT },
         { role: 'user', content: prompt },
       ], { temperature: 1.2 });
       rawLlmResponse = attemptRawLlmResponse;
-      console.log(`${prefix} LLM returned ${attemptRawLlmResponse.length} chars (attempt ${attempt})`);
 
       const parsed = parseScanSummaryOutput(attemptRawLlmResponse);
       if (!parsed) {
         throw new Error(`Failed to parse scan summary output: ${attemptRawLlmResponse.slice(0, 200)}`);
       }
 
-      console.log(`${prefix} scan summary generated successfully`);
       return {
         summary: parsed.summary,
         rawLlmResponse,
@@ -169,7 +160,6 @@ export async function buildScanAiSummary(scan: Scan): Promise<BuiltScanAiSummary
   }
 
   console.error(`[scan-summary] Scan summary generation failed for scan ${scan.id}:`, finalError);
-  console.log(`${prefix} using fallback count-based summary`);
   return {
     summary: buildFallbackScanAiSummary(findings),
     ...(typeof rawLlmResponse === 'string' ? { rawLlmResponse } : {}),

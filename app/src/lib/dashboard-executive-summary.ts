@@ -13,6 +13,7 @@ import {
   isScanDeletionActive,
 } from '@/lib/async-deletions';
 import { scheduleDashboardExecutiveSummaryTaskOrRunInline } from '@/lib/dashboard-summary-tasks';
+import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import type {
   BrandProfile,
   DashboardExecutiveSummaryData,
@@ -21,12 +22,15 @@ import type {
   Scan,
   ScanExecutiveSummaryCandidate,
   ScanExecutiveSummaryCandidates,
+  ScanExecutiveSummaryCandidateChunk,
   Severity,
 } from '@/lib/types';
 
 export const DASHBOARD_EXECUTIVE_SUMMARY_VERSION = 1;
 export const SCAN_EXECUTIVE_SUMMARY_CANDIDATES_VERSION = 1;
-const MAX_EXECUTIVE_SUMMARY_FINDINGS = 200;
+const MAX_EXECUTIVE_SUMMARY_FINDINGS = 300;
+const SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_SIZE = 100;
+const SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_COLLECTION = 'scanExecutiveSummaryCandidateChunks';
 const MAX_FINDING_TITLE_LENGTH = 120;
 const MAX_FINDING_DESCRIPTION_LENGTH = 320;
 const DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS = 2;
@@ -38,6 +42,7 @@ type DashboardExecutiveSummaryFindingInput = {
   severity: Severity;
   title: string;
   description: string;
+  provisionalTheme?: string;
 };
 
 type VisibleExecutiveSummaryFinding = {
@@ -61,6 +66,11 @@ type BuiltDashboardExecutiveSummaryResult = DashboardExecutiveSummaryData & {
   summary: string;
   patterns: DashboardExecutiveSummaryPattern[];
   completedScanCount: number;
+};
+
+type BuiltScanExecutiveSummaryCandidatesPayload = {
+  meta: ScanExecutiveSummaryCandidates;
+  chunks: ScanExecutiveSummaryCandidateChunk[];
 };
 
 function truncateSummaryInput(value: string, maxLength: number): string {
@@ -94,7 +104,43 @@ function isCurrentScanExecutiveSummaryCandidates(
   candidates?: ScanExecutiveSummaryCandidates,
 ): candidates is ScanExecutiveSummaryCandidates {
   return candidates?.version === SCAN_EXECUTIVE_SUMMARY_CANDIDATES_VERSION
-    && Array.isArray(candidates.items);
+    && typeof candidates.itemCount === 'number'
+    && typeof candidates.chunkCount === 'number';
+}
+
+function buildScanExecutiveSummaryChunkDocId(scanId: string, chunkIndex: number): string {
+  return `${scanId}__${String(chunkIndex).padStart(3, '0')}`;
+}
+
+function getScanExecutiveSummaryChunkDocRef(scanId: string, chunkIndex: number) {
+  return db
+    .collection(SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_COLLECTION)
+    .doc(buildScanExecutiveSummaryChunkDocId(scanId, chunkIndex));
+}
+
+function chunkExecutiveSummaryCandidates(
+  scanId: string,
+  brandId: string,
+  userId: string,
+  items: ScanExecutiveSummaryCandidate[],
+): ScanExecutiveSummaryCandidateChunk[] {
+  const chunks: ScanExecutiveSummaryCandidateChunk[] = [];
+
+  for (let chunkIndex = 0; chunkIndex * SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_SIZE < items.length; chunkIndex += 1) {
+    chunks.push({
+      version: SCAN_EXECUTIVE_SUMMARY_CANDIDATES_VERSION,
+      scanId,
+      brandId,
+      userId,
+      chunkIndex,
+      items: items.slice(
+        chunkIndex * SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_SIZE,
+        (chunkIndex + 1) * SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_SIZE,
+      ),
+    });
+  }
+
+  return chunks;
 }
 
 function clampExecutiveSummaryPatterns(
@@ -210,6 +256,14 @@ export async function buildScanExecutiveSummaryCandidates(params: {
   brandId: string;
   userId: string;
 }): Promise<ScanExecutiveSummaryCandidates> {
+  return (await buildScanExecutiveSummaryCandidatesPayload(params)).meta;
+}
+
+async function buildScanExecutiveSummaryCandidatesPayload(params: {
+  scanId: string;
+  brandId: string;
+  userId: string;
+}): Promise<BuiltScanExecutiveSummaryCandidatesPayload> {
   const visibleFindings = await loadVisibleFindingsForScan(params);
   const visibleCounts = visibleFindings.reduce(
     (acc, finding) => {
@@ -224,28 +278,67 @@ export async function buildScanExecutiveSummaryCandidates(params: {
     .map((finding) => ({
       findingId: finding.findingId,
       severity: finding.severity,
-      title: finding.title,
-      description: finding.description,
+      title: truncateSummaryInput(finding.title, MAX_FINDING_TITLE_LENGTH),
+      description: truncateSummaryInput(finding.description, MAX_FINDING_DESCRIPTION_LENGTH),
       ...(finding.provisionalTheme ? { provisionalTheme: finding.provisionalTheme } : {}),
       ...(finding.createdAt ? { createdAt: finding.createdAt } : {}),
     }));
 
-  return {
-    version: SCAN_EXECUTIVE_SUMMARY_CANDIDATES_VERSION,
-    visibleCounts,
+  const chunks = chunkExecutiveSummaryCandidates(
+    params.scanId,
+    params.brandId,
+    params.userId,
     items,
+  );
+
+  return {
+    meta: {
+      version: SCAN_EXECUTIVE_SUMMARY_CANDIDATES_VERSION,
+      visibleCounts,
+      itemCount: items.length,
+      chunkCount: chunks.length,
+    },
+    chunks,
   };
 }
 
 export async function saveScanExecutiveSummaryCandidates(
   scanId: string,
-  candidates: ScanExecutiveSummaryCandidates,
+  payload: BuiltScanExecutiveSummaryCandidatesPayload,
 ) {
+  const existingChunksSnap = await db
+    .collection(SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_COLLECTION)
+    .where('scanId', '==', scanId)
+    .select('chunkIndex')
+    .get();
+
+  const desiredChunkIds = new Set(payload.chunks.map((chunk) => buildScanExecutiveSummaryChunkDocId(scanId, chunk.chunkIndex)));
+  const chunkWrites: Array<
+    | { kind: 'set'; chunk: ScanExecutiveSummaryCandidateChunk }
+    | { kind: 'delete'; id: string }
+  > = [
+    ...payload.chunks.map((chunk) => ({ kind: 'set' as const, chunk })),
+    ...existingChunksSnap.docs
+      .filter((doc) => !desiredChunkIds.has(doc.id))
+      .map((doc) => ({ kind: 'delete' as const, id: doc.id })),
+  ];
+
   await db.collection('scans').doc(scanId).update({
     executiveSummaryCandidates: {
-      ...candidates,
+      ...payload.meta,
       generatedAt: FieldValue.serverTimestamp(),
     },
+  });
+
+  await runWriteBatchInChunks(chunkWrites, (batch, write) => {
+    if (write.kind === 'set') {
+      batch.set(getScanExecutiveSummaryChunkDocRef(scanId, write.chunk.chunkIndex), write.chunk);
+      return;
+    }
+
+    batch.delete(
+      db.collection(SCAN_EXECUTIVE_SUMMARY_CANDIDATE_CHUNK_COLLECTION).doc(write.id),
+    );
   });
 }
 
@@ -254,9 +347,9 @@ export async function buildAndPersistScanExecutiveSummaryCandidates(params: {
   brandId: string;
   userId: string;
 }): Promise<ScanExecutiveSummaryCandidates> {
-  const candidates = await buildScanExecutiveSummaryCandidates(params);
-  await saveScanExecutiveSummaryCandidates(params.scanId, candidates);
-  return candidates;
+  const payload = await buildScanExecutiveSummaryCandidatesPayload(params);
+  await saveScanExecutiveSummaryCandidates(params.scanId, payload);
+  return payload.meta;
 }
 
 export async function rebuildAndPersistScanExecutiveSummaryCandidatesForScanIds(params: {
@@ -305,27 +398,60 @@ async function resolveScanExecutiveSummaryCandidates(params: {
   scan: CompletedScanSummarySource;
   brandId: string;
   userId: string;
-}): Promise<{ candidates: ScanExecutiveSummaryCandidates; source: 'cache' | 'rebuilt' }> {
+}): Promise<{ candidates: ScanExecutiveSummaryCandidate[]; source: 'cache' | 'rebuilt' }> {
   if (isCurrentScanExecutiveSummaryCandidates(params.scan.executiveSummaryCandidates)) {
-    return {
-      candidates: params.scan.executiveSummaryCandidates,
-      source: 'cache',
-    };
+    const cachedCandidates = await loadScanExecutiveSummaryCandidateItems(params.scan);
+    if (cachedCandidates) {
+      return {
+        candidates: cachedCandidates,
+        source: 'cache',
+      };
+    }
   }
 
-  const candidates = await buildScanExecutiveSummaryCandidates({
+  const payload = await buildScanExecutiveSummaryCandidatesPayload({
     scanId: params.scan.id,
     brandId: params.brandId,
     userId: params.userId,
   });
 
   try {
-    await saveScanExecutiveSummaryCandidates(params.scan.id, candidates);
+    await saveScanExecutiveSummaryCandidates(params.scan.id, payload);
   } catch (error) {
     console.error(`[dashboard-executive-summary] Scan ${params.scan.id}: failed to persist rebuilt executive-summary candidates:`, error);
   }
 
-  return { candidates, source: 'rebuilt' };
+  return { candidates: payload.chunks.flatMap((chunk) => chunk.items), source: 'rebuilt' };
+}
+
+async function loadScanExecutiveSummaryCandidateItems(
+  scan: CompletedScanSummarySource,
+): Promise<ScanExecutiveSummaryCandidate[] | null> {
+  const meta = scan.executiveSummaryCandidates;
+  if (!isCurrentScanExecutiveSummaryCandidates(meta)) {
+    return null;
+  }
+  if (meta.chunkCount === 0 || meta.itemCount === 0) {
+    return [];
+  }
+
+  const chunkDocs = await Promise.all(
+    Array.from({ length: meta.chunkCount }, (_, chunkIndex) =>
+      getScanExecutiveSummaryChunkDocRef(scan.id, chunkIndex).get(),
+    ),
+  );
+
+  const chunks = chunkDocs
+    .filter((doc): doc is typeof doc & { exists: true } => doc.exists)
+    .map((doc) => doc.data() as ScanExecutiveSummaryCandidateChunk)
+    .filter((chunk) => chunk.version === SCAN_EXECUTIVE_SUMMARY_CANDIDATES_VERSION)
+    .sort((left, right) => left.chunkIndex - right.chunkIndex);
+
+  if (chunks.length !== meta.chunkCount) {
+    return null;
+  }
+
+  return chunks.flatMap((chunk) => chunk.items).slice(0, meta.itemCount);
 }
 
 export async function buildDashboardExecutiveSummary(params: {
@@ -333,12 +459,10 @@ export async function buildDashboardExecutiveSummary(params: {
   userId: string;
 }): Promise<BuiltDashboardExecutiveSummaryResult> {
   const { brandId, userId } = params;
-  const totalStart = Date.now();
 
   const brandDoc = await db.collection('brands').doc(brandId).get();
   const brandName = brandDoc.exists ? (brandDoc.data() as BrandProfile).name : 'Unknown brand';
 
-  const scanLoadStart = Date.now();
   const scansSnap = await db
     .collection('scans')
     .where('brandId', '==', brandId)
@@ -355,7 +479,6 @@ export async function buildDashboardExecutiveSummary(params: {
       'executiveSummaryCandidates',
     )
     .get();
-  const scanLoadMs = Date.now() - scanLoadStart;
 
   const completedScans = scansSnap.docs
     .map((doc) => ({
@@ -371,10 +494,6 @@ export async function buildDashboardExecutiveSummary(params: {
   const selectedMedium: DashboardExecutiveSummaryFindingInput[] = [];
   const selectedLow: DashboardExecutiveSummaryFindingInput[] = [];
 
-  let cachedCandidateScanCount = 0;
-  let rebuiltCandidateScanCount = 0;
-  const candidateMergeStart = Date.now();
-
   for (const scan of completedScans) {
     if (
       selectedHigh.length >= severityTargets.high
@@ -384,54 +503,54 @@ export async function buildDashboardExecutiveSummary(params: {
       break;
     }
 
-    const { candidates, source } = await resolveScanExecutiveSummaryCandidates({
+    const { candidates } = await resolveScanExecutiveSummaryCandidates({
       scan,
       brandId,
       userId,
     });
-    if (source === 'cache') cachedCandidateScanCount += 1;
-    else rebuiltCandidateScanCount += 1;
 
     if (selectedHigh.length < severityTargets.high) {
-      for (const item of candidates.items) {
+      for (const item of candidates) {
         if (item.severity !== 'high') continue;
         selectedHigh.push({
           id: item.findingId,
           severity: item.severity,
           title: item.title,
           description: item.description,
+          provisionalTheme: item.provisionalTheme,
         });
         if (selectedHigh.length >= severityTargets.high) break;
       }
     }
 
     if (selectedMedium.length < severityTargets.medium) {
-      for (const item of candidates.items) {
+      for (const item of candidates) {
         if (item.severity !== 'medium') continue;
         selectedMedium.push({
           id: item.findingId,
           severity: item.severity,
           title: item.title,
           description: item.description,
+          provisionalTheme: item.provisionalTheme,
         });
         if (selectedMedium.length >= severityTargets.medium) break;
       }
     }
 
     if (selectedLow.length < severityTargets.low) {
-      for (const item of candidates.items) {
+      for (const item of candidates) {
         if (item.severity !== 'low') continue;
         selectedLow.push({
           id: item.findingId,
           severity: item.severity,
           title: item.title,
           description: item.description,
+          provisionalTheme: item.provisionalTheme,
         });
         if (selectedLow.length >= severityTargets.low) break;
       }
     }
   }
-  const candidateMergeMs = Date.now() - candidateMergeStart;
 
   const selectedFindings = [...selectedHigh, ...selectedMedium, ...selectedLow];
   const severityBreakdown = {
@@ -439,10 +558,6 @@ export async function buildDashboardExecutiveSummary(params: {
     medium: selectedMedium.length,
     low: selectedLow.length,
   };
-
-  console.log(
-    `[dashboard-executive-summary] Brand ${brandId}: ${completedScans.length} completed scans, selected ${selectedHigh.length}h/${selectedMedium.length}m/${selectedLow.length}l = ${selectedFindings.length} findings (cap ${MAX_EXECUTIVE_SUMMARY_FINDINGS}); scansLoad=${scanLoadMs}ms cacheMerge=${candidateMergeMs}ms cachedScans=${cachedCandidateScanCount} rebuiltScans=${rebuiltCandidateScanCount}`,
-  );
 
   if (selectedFindings.length === 0) {
     return {
@@ -464,7 +579,6 @@ export async function buildDashboardExecutiveSummary(params: {
     };
   }
 
-  const promptBuildStart = Date.now();
   const prompt = buildDashboardExecutiveSummaryPrompt({
     brandName,
     severityBreakdown,
@@ -473,35 +587,26 @@ export async function buildDashboardExecutiveSummary(params: {
       severity: finding.severity,
       title: truncateSummaryInput(finding.title, MAX_FINDING_TITLE_LENGTH),
       description: truncateSummaryInput(finding.description, MAX_FINDING_DESCRIPTION_LENGTH),
+      ...(finding.provisionalTheme ? { provisionalTheme: finding.provisionalTheme } : {}),
     })),
   });
-  const promptBuildMs = Date.now() - promptBuildStart;
-  console.log(
-    `[dashboard-executive-summary] Brand ${brandId}: prompt built — ${prompt.length} chars, ${selectedFindings.length} findings, promptBuild=${promptBuildMs}ms`,
-  );
 
   let rawLlmResponse: string | undefined;
   let finalError: unknown;
-  const llmStart = Date.now();
   for (let attempt = 1; attempt <= DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS; attempt++) {
     let attemptRawLlmResponse: string | undefined;
     try {
-      console.log(`[dashboard-executive-summary] Brand ${brandId}: calling LLM (attempt ${attempt}/${DASHBOARD_EXECUTIVE_SUMMARY_LLM_MAX_ATTEMPTS})`);
       attemptRawLlmResponse = await chatCompletion([
         { role: 'system', content: DASHBOARD_EXECUTIVE_SUMMARY_SYSTEM_PROMPT },
         { role: 'user', content: prompt },
       ], { temperature: 0.8 });
       rawLlmResponse = attemptRawLlmResponse;
-      console.log(`[dashboard-executive-summary] Brand ${brandId}: LLM returned ${attemptRawLlmResponse.length} chars (attempt ${attempt})`);
 
       const parsed = parseDashboardExecutiveSummaryOutput(attemptRawLlmResponse);
       if (!parsed) {
         throw new Error(`Failed to parse dashboard executive summary output: ${attemptRawLlmResponse.slice(0, 200)}`);
       }
 
-      console.log(
-        `[dashboard-executive-summary] Brand ${brandId}: completed in ${Date.now() - totalStart}ms (llm=${Date.now() - llmStart}ms)`,
-      );
       return {
         version: DASHBOARD_EXECUTIVE_SUMMARY_VERSION,
         status: 'ready',
@@ -531,10 +636,7 @@ export async function buildDashboardExecutiveSummary(params: {
     }
   }
 
-  console.error(
-    `[dashboard-executive-summary] Summary generation failed for brand ${brandId} after ${Date.now() - totalStart}ms:`,
-    finalError,
-  );
+  console.error(`[dashboard-executive-summary] Summary generation failed for brand ${brandId}:`, finalError);
   return {
     version: DASHBOARD_EXECUTIVE_SUMMARY_VERSION,
     status: 'ready',
@@ -702,7 +804,6 @@ export async function generateAndPersistDashboardExecutiveSummary(params: {
       return { outcome: 'skipped' as const };
     }
     if (!force && isDashboardExecutiveSummaryLeaseActive(brand.dashboardExecutiveSummary)) {
-      console.log(`[dashboard-executive-summary] Brand ${brandId}: active lease present — skipping duplicate worker`);
       return { outcome: 'skipped' as const, data: brand.dashboardExecutiveSummary ?? undefined };
     }
 

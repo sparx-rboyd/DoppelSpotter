@@ -503,6 +503,18 @@ export interface ScanExecutiveSummaryCandidates {
     medium: number;
     low: number;
   };
+  /** Total candidate items available across all dedicated chunk docs for this scan. */
+  itemCount: number;
+  /** Number of dedicated chunk docs currently stored for this scan. */
+  chunkCount: number;
+}
+
+export interface ScanExecutiveSummaryCandidateChunk {
+  version: number;
+  scanId: string;
+  brandId: string;
+  userId: string;
+  chunkIndex: number;
   items: ScanExecutiveSummaryCandidate[];
 }
 
@@ -544,7 +556,7 @@ export interface Scan {
   skippedCount?: number;
   /** Precomputed dashboard source/theme breakdowns used to avoid loading raw findings on dashboard reads. */
   dashboardBreakdowns?: DashboardScanBreakdowns;
-  /** Cached visible actionable findings used to build the brand-level dashboard executive summary quickly. */
+  /** Lightweight metadata pointing at dedicated executive-summary candidate chunk documents. */
   executiveSummaryCandidates?: ScanExecutiveSummaryCandidates;
   /** Whether the scan-level soft user-preference hints are still being prepared. */
   userPreferenceHintsStatus?: UserPreferenceHintsStatus;
