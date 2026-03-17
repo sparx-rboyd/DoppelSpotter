@@ -4,7 +4,7 @@ AI-powered brand protection for SMEs, built for the GenAI Zurich 2026 Hackathon 
 
 DoppelSpotter monitors the open web, communities, code platforms, domain registrations, and app stores for signs of brand abuse. It then uses generative AI to classify likely threats, suppress noise, surface patterns, and turn the output into searchable findings, dashboards, reports, and email summaries.
 
-[Published Apify Actor](https://apify.com/doppelspotter/recent-domain-registrations) | [Pitch Page Source](landing-page/index.html) | [App Source](app/) | [Actor Source](actors/recent-domain-registrations/)
+[Published Actors: Domain Registrations](https://apify.com/doppelspotter/recent-domain-registrations) | [Published Actors: EUIPO Trademark Search](https://apify.com/doppelspotter/euipo-trademark-search) | [Pitch Page Source](landing-page/index.html) | [App Source](app/) | [Actor Sources](actors/)
 
 ## What This Repo Contains
 
@@ -13,7 +13,7 @@ This repository contains four closely related pieces of work:
 1. The hackathon submission story and supporting materials.
 2. The pitch page used to explain the product and challenge fit.
 3. The main Next.js application that runs the brand-protection workflow.
-4. A published Apify actor for recent domain registrations that can be used both inside and outside the app.
+4. Two published Apify actors that can be used both inside and outside the app.
 
 ## Hackathon Submission
 
@@ -22,7 +22,7 @@ DoppelSpotter was built for the GenAI Zurich 2026 Hackathon, in the Apify track.
 The project deliberately covers both sides of the challenge:
 
 - `Path 1: AI Agent` - an end-to-end autonomous workflow that gathers live web data, classifies findings with an LLM, and produces ranked, reviewable outputs.
-- `Path 3: Build an Actor` - a reusable, published Apify actor for recent domain registrations, available in the Apify Store.
+- `Path 3: Build an Actor` - two reusable, published Apify actors for recent domain registrations and EUIPO trademark search, both available in the Apify Store.
 
 Why this is a strong hackathon submission:
 
@@ -30,7 +30,7 @@ Why this is a strong hackathon submission:
 - It uses live web data rather than a static or synthetic demo.
 - It uses Apify as core infrastructure, not as a decorative integration.
 - It uses generative AI both in the product experience and in the build process.
-- It ships both a working application and a standalone reusable actor.
+- It ships both a working application and two standalone reusable actors.
 
 ## At A Glance
 
@@ -39,7 +39,7 @@ Why this is a strong hackathon submission:
 - `AI triage` for severity scoring, theme labelling, false-positive suppression, scan summaries, and deep-search follow-ups.
 - `User review workflow` with ignore, address, bookmark, notes, search, and filtering.
 - `Operational outputs` including dashboard analytics, CSV export, PDF reports, and optional scan-summary emails.
-- `Published actor` for recent domain registrations with optional AI homepage analysis.
+- `Published actors` for recent domain registrations with optional AI homepage analysis and EUIPO trademark search with wildcard RSQL support and cached OAuth2 token reuse.
 
 ## The Product
 
@@ -163,17 +163,21 @@ Deep search is supported for Google-backed scan surfaces plus the first-class Re
 
 After the initial scan, the app can use the run-level context to synthesize more targeted follow-up searches. This is intended to uncover adjacent abuse vectors without requiring the user to manually craft every secondary query.
 
-## The Published Actor
+## The Published Actors
 
-The custom actor lives in `actors/recent-domain-registrations/`.
+The custom actors live in:
 
-Published listing:
+- `actors/recent-domain-registrations/`
+- `actors/euipo-trademark-search/`
+
+Published listings:
 
 - [doppelspotter/recent-domain-registrations](https://apify.com/doppelspotter/recent-domain-registrations)
+- [doppelspotter/euipo-trademark-search](https://apify.com/doppelspotter/euipo-trademark-search)
 
-### What The Actor Does
+### Recent Domain Registrations
 
-The actor searches the CodePunch GTLD Domain Name Activity Feed v2 for newly added domains matching one or more keywords.
+This actor searches the CodePunch GTLD Domain Name Activity Feed v2 for newly added domains matching one or more keywords.
 
 It supports:
 
@@ -184,16 +188,7 @@ It supports:
 - one dataset item per matching domain
 - optional AI-enhanced homepage analysis for each matching domain
 
-### Why The Actor Matters
-
-This actor is important for two reasons:
-
-1. It is a useful standalone building block for anyone doing domain-watch or brand-protection work.
-2. It proves that DoppelSpotter contributes something reusable back to the Apify ecosystem, instead of only consuming existing actors.
-
-### Actor Inputs
-
-The actor accepts:
+Inputs:
 
 - `apiKey` and `apiSecret` for CodePunch
 - `date` and `dateComparison`
@@ -205,25 +200,65 @@ The actor accepts:
 - optional sorting fields
 - optional `totalLimit`
 
-### Actor Outputs
+Outputs:
 
-Each dataset item contains the upstream domain-registration fields plus:
-
+- upstream domain-registration fields
 - `requestMetadata`
 - `responseMetadata`
 - `enhancedAnalysis`
 
 When enhanced analysis is enabled, the actor fetches the top-level homepage, extracts visible text, and sends batches to OpenRouter for short summaries. In standalone actor runs, the default analysis model is `deepseek/deepseek-v3.2` unless overridden.
 
-### How The App Uses The Actor
+Inside DoppelSpotter, the app uses this actor as the domain-registration scan surface:
 
-Inside DoppelSpotter itself, the actor is used as one scan surface within the broader pipeline:
-
-- the app passes brand terms as keywords
-- the app uses the scan's resolved lookback date with `dateComparison: gte`
+- brand terms are passed as keywords
+- the scan's resolved lookback date is used with `dateComparison: gte`
 - enhanced analysis is enabled automatically
 - result volume scales with the brand's configured search depth
 - the output is normalized into domain findings alongside the app's other scan surfaces
+
+### EUIPO Trademark Search
+
+This actor queries the official EUIPO Trademark Search API for EU trademark filings matching one or more brand keywords.
+
+It supports:
+
+- multi-keyword OR queries in a single run
+- correct wildcard RSQL quoting for multi-word brand names
+- expiry-aware OAuth2 token caching and refresh-token reuse
+- optional filtering by application date, Nice class, status, and mark type
+- demo-mode output when credentials are not configured
+- one dataset item per matching trademark filing
+
+Inputs:
+
+- `clientId` and `clientSecret` for the EUIPO developer API
+- `keywords`
+- optional `dateFrom` and `dateTo`
+- optional `maxResults`
+- optional `niceClass`
+- optional `status`
+- optional `markFeature`
+- optional `useSandbox`
+
+Outputs:
+
+- trademark application fields such as `applicationNumber`, `markName`, `applicantName`, `filingDate`, `status`, `niceClasses`, and `euipoUrl`
+- `requestMetadata`
+
+Inside DoppelSpotter, the app uses this actor as the EUIPO trademark scan surface:
+
+- the full keyword list is sent in a single actor run
+- the scan lookback window maps to `dateFrom`, while the current day is used as `dateTo`
+- result volume scales with the brand's configured search depth
+- the output is normalized into trademark findings alongside the app's other scan surfaces
+
+### Why The Actors Matter
+
+These actors are important for two reasons:
+
+1. They are useful standalone building blocks for brand-protection, domain-watch, and trademark-monitoring workflows.
+2. They prove that DoppelSpotter contributes reusable tooling back to the Apify ecosystem, instead of only consuming existing actors.
 
 ## End-To-End Architecture
 
@@ -231,7 +266,7 @@ The system is intentionally modular:
 
 1. `landing-page/` explains the product and hackathon story.
 2. `app/` handles authentication, brand configuration, scan orchestration, review workflows, analytics, and exports.
-3. `actors/recent-domain-registrations/` provides a reusable source-specific actor.
+3. `actors/recent-domain-registrations/` and `actors/euipo-trademark-search/` provide reusable source-specific actors.
 4. Apify actors gather live data.
 5. Firestore stores users, brands, scans, and findings.
 6. OpenRouter powers finding classification and scan summaries.
@@ -255,7 +290,12 @@ The system is intentionally modular:
 │   ├── scripts/
 │   └── src/
 └── actors/
-    └── recent-domain-registrations/
+    ├── recent-domain-registrations/
+    │   ├── README.md
+    │   ├── package.json
+    │   ├── src/main.mjs
+    │   └── .actor/
+    └── euipo-trademark-search/
         ├── README.md
         ├── package.json
         ├── src/main.mjs
@@ -316,7 +356,7 @@ Deploy it from the repository root with:
 npm run deploy
 ```
 
-### Work On The Actor
+### Work On The Actors
 
 ```bash
 cd actors/recent-domain-registrations
@@ -324,13 +364,19 @@ npm install
 npm start
 ```
 
-Or from the repository root:
+```bash
+cd actors/euipo-trademark-search
+npm install
+npm start
+```
+
+Or from the repository root for the domain actor:
 
 ```bash
 npm run actor:recent-domain-registrations:run
 ```
 
-The actor reads Apify actor input at runtime, so local execution is easiest when you already have an Apify-compatible local input setup or when testing it through the Apify platform.
+Both actors read Apify actor input at runtime, so local execution is easiest when you already have an Apify-compatible local input setup or when testing them through the Apify platform.
 
 ### Local Webhook Note
 
@@ -380,12 +426,11 @@ This repository works best when read as a complete submission rather than three 
 
 - The `landing-page/` tells the story.
 - The `app/` proves the full workflow exists and is usable.
-- The published actor proves reusable technical depth beyond the core app.
-
-Together they show a credible hackathon project with product thinking, user workflow design, live data integrations, and a reusable artifact published back to the ecosystem.
+- The published actors prove reusable technical depth beyond the core app.
 
 ## Further Reading
 
 - Root architecture notes: `AGENTS.md`
 - Pitch page source: `landing-page/index.html`
-- Actor documentation: `actors/recent-domain-registrations/README.md`
+- Domain actor documentation: `actors/recent-domain-registrations/README.md`
+- EUIPO actor documentation: `actors/euipo-trademark-search/README.md`
