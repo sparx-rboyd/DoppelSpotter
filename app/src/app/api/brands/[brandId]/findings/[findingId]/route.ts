@@ -3,6 +3,10 @@ import { FieldValue, type DocumentSnapshot, type QueryDocumentSnapshot } from '@
 type FindingDocSnapshot = DocumentSnapshot | QueryDocumentSnapshot;
 import { db } from '@/lib/firestore';
 import { rebuildAndPersistDashboardBreakdownsForScanIds } from '@/lib/dashboard-aggregates';
+import {
+  rebuildAndPersistScanExecutiveSummaryCandidatesForScanIds,
+  triggerDashboardExecutiveSummaryRefresh,
+} from '@/lib/dashboard-executive-summary';
 import { runWriteBatchInChunks } from '@/lib/firestore-batches';
 import { requireAuth, errorResponse } from '@/lib/api-utils';
 import type { Finding, FindingCategory, FindingSummary } from '@/lib/types';
@@ -529,10 +533,25 @@ export async function PATCH(request: NextRequest, { params }: Params) {
   }
 
   if (dashboardScanIdsToRefresh.size > 0) {
+    const scanIdsToRefresh = [...dashboardScanIdsToRefresh];
+
     await rebuildAndPersistDashboardBreakdownsForScanIds({
       brandId,
       userId: uid,
-      scanIds: [...dashboardScanIdsToRefresh],
+      scanIds: scanIdsToRefresh,
+    });
+
+    await rebuildAndPersistScanExecutiveSummaryCandidatesForScanIds({
+      brandId,
+      userId: uid,
+      scanIds: scanIdsToRefresh,
+    });
+
+    await triggerDashboardExecutiveSummaryRefresh({
+      brandId,
+      userId: uid,
+      requestHeaders: request.headers,
+      logPrefix: `[dashboard-executive-summary] Finding review mutation for brand ${brandId}`,
     });
   }
 

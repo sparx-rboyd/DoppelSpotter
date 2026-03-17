@@ -8,6 +8,7 @@ import {
 import { verifyGoogleOidcRequest } from '@/lib/internal-google-oidc';
 
 export async function POST(request: NextRequest) {
+  const requestStartedAt = Date.now();
   const authError = await verifyGoogleOidcRequest({
     request,
     expectedServiceAccountEmail: getDashboardSummaryTasksServiceAccountEmail(),
@@ -35,6 +36,9 @@ export async function POST(request: NextRequest) {
     userId: payload.userId,
     force: payload.force === true,
   });
+  console.log(
+    `[dashboard-summary-tasks] Brand ${payload.brandId}: worker completed with result=${result.outcome} in ${Date.now() - requestStartedAt}ms`,
+  );
 
   return NextResponse.json({
     data: {

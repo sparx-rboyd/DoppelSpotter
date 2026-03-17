@@ -6,10 +6,8 @@ import {
   isBrandHistoryDeletionActive,
 } from '@/lib/async-deletions';
 import {
-  generateAndPersistDashboardExecutiveSummary,
-  markDashboardExecutiveSummaryPending,
+  triggerDashboardExecutiveSummaryRefresh,
 } from '@/lib/dashboard-executive-summary';
-import { scheduleDashboardExecutiveSummaryTaskOrRunInline } from '@/lib/dashboard-summary-tasks';
 import type { BrandProfile } from '@/lib/types';
 
 function ensureDebugMode(request: NextRequest) {
@@ -42,25 +40,13 @@ export async function POST(request: NextRequest) {
   const requestedForScanId = brand.dashboardExecutiveSummary?.requestedForScanId
     ?? brand.dashboardExecutiveSummary?.generatedFromScanId;
 
-  await markDashboardExecutiveSummaryPending({
+  await triggerDashboardExecutiveSummaryRefresh({
     brandId,
+    userId: uid,
     requestedForScanId,
-  });
-
-  await scheduleDashboardExecutiveSummaryTaskOrRunInline({
-    payload: {
-      kind: 'dashboard-executive-summary',
-      brandId,
-      userId: uid,
-      force: true,
-    },
     requestHeaders: request.headers,
     logPrefix: `[dashboard-executive-summary] Brand ${brandId}`,
-    runInline: () => generateAndPersistDashboardExecutiveSummary({
-      brandId,
-      userId: uid,
-      force: true,
-    }),
+    force: true,
   });
 
   const refreshedBrandDoc = await db.collection('brands').doc(brandId).get();

@@ -483,6 +483,29 @@ export interface ApifyThrottleState {
   activeLaunchIds?: string[];
 }
 
+export interface ScanExecutiveSummaryCandidate {
+  /** Stable finding document id used by pattern extraction and dashboard deep links. */
+  findingId: string;
+  severity: Severity;
+  title: string;
+  /** Compact evidence text reserved for future executive-summary prompt enrichment. */
+  description: string;
+  /** Hidden per-run label persisted for future executive-summary prompt enrichment. */
+  provisionalTheme?: string;
+  createdAt?: Timestamp;
+}
+
+export interface ScanExecutiveSummaryCandidates {
+  version: number;
+  generatedAt?: Timestamp;
+  visibleCounts: {
+    high: number;
+    medium: number;
+    low: number;
+  };
+  items: ScanExecutiveSummaryCandidate[];
+}
+
 export interface Scan {
   id: string;
   brandId: string;
@@ -521,6 +544,8 @@ export interface Scan {
   skippedCount?: number;
   /** Precomputed dashboard source/theme breakdowns used to avoid loading raw findings on dashboard reads. */
   dashboardBreakdowns?: DashboardScanBreakdowns;
+  /** Cached visible actionable findings used to build the brand-level dashboard executive summary quickly. */
+  executiveSummaryCandidates?: ScanExecutiveSummaryCandidates;
   /** Whether the scan-level soft user-preference hints are still being prepared. */
   userPreferenceHintsStatus?: UserPreferenceHintsStatus;
   /** Tiny scan-level soft guidance derived from prior explicit user-review signals. */

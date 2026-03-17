@@ -8,6 +8,9 @@ import {
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import type { BrandProfile } from '@/lib/types';
 import {
+  triggerDashboardExecutiveSummaryRefresh,
+} from '@/lib/dashboard-executive-summary';
+import {
   clearBrandActiveScanIfMatches,
   isScanInProgress,
   recoverStuckPendingScan,
@@ -72,6 +75,15 @@ export async function GET(request: NextRequest, { params }: Params) {
         return NextResponse.json({ data: null });
       }
       scan = scanFromSnapshot(refreshedScanDoc);
+      if (scan.status === 'completed') {
+        await triggerDashboardExecutiveSummaryRefresh({
+          brandId: scan.brandId,
+          userId: scan.userId,
+          requestedForScanId: scan.id,
+          requestHeaders: request.headers,
+          logPrefix: `[dashboard-executive-summary] Recovered active scan ${scan.id}`,
+        });
+      }
     }
   }
 

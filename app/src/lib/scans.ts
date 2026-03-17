@@ -2,6 +2,7 @@ import { FieldValue, type DocumentReference, type DocumentSnapshot, type QueryDo
 import { promoteProvisionalThemesForScan } from './analysis/theme-normalization';
 import { db } from './firestore';
 import { rebuildAndPersistDashboardBreakdownsForScanIds } from './dashboard-aggregates';
+import { buildAndPersistScanExecutiveSummaryCandidates } from './dashboard-executive-summary';
 import type { BrandProfile, Scan, ScanStatus } from './types';
 
 type ScanSnapshot = DocumentSnapshot | QueryDocumentSnapshot;
@@ -186,6 +187,16 @@ export async function recoverStuckSummarisingScan(scanRef: DocumentReference): P
       });
     } catch (error) {
       console.error(`[scan] Failed to promote provisional themes for recovered scan ${recoveredScanId}:`, error);
+    }
+
+    try {
+      await buildAndPersistScanExecutiveSummaryCandidates({
+        scanId: recoveredScanId,
+        brandId: recoveredBrandId,
+        userId: recoveredUserId,
+      });
+    } catch (error) {
+      console.error(`[scan] Failed to rebuild executive-summary candidates for recovered scan ${recoveredScanId}:`, error);
     }
 
     try {

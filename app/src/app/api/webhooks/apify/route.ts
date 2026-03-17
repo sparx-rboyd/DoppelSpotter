@@ -120,10 +120,9 @@ import {
 } from '@/lib/scan-sources';
 import { sendCompletedScanSummaryEmailIfNeeded } from '@/lib/scan-summary-emails';
 import {
-  generateAndPersistDashboardExecutiveSummary,
-  markDashboardExecutiveSummaryPending,
+  buildAndPersistScanExecutiveSummaryCandidates,
+  triggerDashboardExecutiveSummaryRefresh,
 } from '@/lib/dashboard-executive-summary';
-import { scheduleDashboardExecutiveSummaryTaskOrRunInline } from '@/lib/dashboard-summary-tasks';
 import { buildCountOnlyScanAiSummary, clearBrandActiveScanIfMatches, scanFromSnapshot } from '@/lib/scans';
 
 /** Maximum normalized candidates per LLM request chunk. */
@@ -7270,6 +7269,28 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
   console.log(`[webhook] Scan ${fresh.id}: parallel summarise phase completed in ${((Date.now() - summariseStart) / 1000).toFixed(1)}s — finalizing`);
   await finalizeScanWithSummary(scanRef, summaryResult);
   try {
+    await buildAndPersistScanExecutiveSummaryCandidates({
+      scanId: fresh.id,
+      brandId: fresh.brandId,
+      userId: fresh.userId,
+    });
+  } catch (err) {
+    console.error(`[webhook] Failed to persist executive-summary candidates for scan ${fresh.id}:`, err);
+  }
+
+  try {
+    await triggerDashboardExecutiveSummaryRefresh({
+      brandId: fresh.brandId,
+      userId: fresh.userId,
+      requestedForScanId: fresh.id,
+      requestHeaders: new Headers(),
+      logPrefix: `[dashboard-executive-summary] Completed scan ${fresh.id}`,
+    });
+  } catch (err) {
+    console.error(`[webhook] Failed to schedule dashboard executive summary for scan ${fresh.id}:`, err);
+  }
+
+  try {
     await rebuildAndPersistDashboardBreakdownsForScanIds({
       brandId: fresh.brandId,
       userId: fresh.userId,
@@ -7279,28 +7300,6 @@ async function generateAndPersistScanSummary(scanRef: DocumentReference) {
     console.error(`[webhook] Failed to persist dashboard breakdowns for scan ${fresh.id}:`, err);
   }
   await sendCompletedScanSummaryEmailIfNeeded(scanRef);
-
-  try {
-    await markDashboardExecutiveSummaryPending({
-      brandId: fresh.brandId,
-      requestedForScanId: fresh.id,
-    });
-    await scheduleDashboardExecutiveSummaryTaskOrRunInline({
-      payload: {
-        kind: 'dashboard-executive-summary',
-        brandId: fresh.brandId,
-        userId: fresh.userId,
-      },
-      requestHeaders: new Headers(),
-      logPrefix: `[dashboard-executive-summary] Completed scan ${fresh.id}`,
-      runInline: () => generateAndPersistDashboardExecutiveSummary({
-        brandId: fresh.brandId,
-        userId: fresh.userId,
-      }),
-    });
-  } catch (err) {
-    console.error(`[webhook] Failed to schedule dashboard executive summary for scan ${fresh.id}:`, err);
-  }
 }
 
 function normalizeSuggestedSearchKey(query: string): string {
