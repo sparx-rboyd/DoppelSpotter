@@ -58,8 +58,15 @@ export async function loadBrandFindingTaxonomy(params: {
   userId: string;
   excludeScanId?: string;
   excludeScanIds?: Iterable<string>;
+  includeAllFindingStates?: boolean;
 }): Promise<FindingTaxonomyOptions> {
-  const { brandId, userId, excludeScanId, excludeScanIds } = params;
+  const {
+    brandId,
+    userId,
+    excludeScanId,
+    excludeScanIds,
+    includeAllFindingStates = false,
+  } = params;
   const excludedScanIds = new Set(excludeScanIds);
 
   const snapshot = await db
@@ -68,20 +75,18 @@ export async function loadBrandFindingTaxonomy(params: {
     .where('userId', '==', userId)
     .select('scanId', 'theme', 'isFalsePositive', 'isIgnored', 'isAddressed')
     .get();
-  const docs = excludeScanId
-    ? snapshot.docs.filter((doc) => (
-      doc.get('scanId') !== excludeScanId
-      && !excludedScanIds.has(doc.get('scanId'))
-      && doc.get('isFalsePositive') !== true
-      && doc.get('isIgnored') !== true
-      && doc.get('isAddressed') !== true
-    ))
-    : snapshot.docs.filter((doc) => (
-      !excludedScanIds.has(doc.get('scanId'))
-      && doc.get('isFalsePositive') !== true
-      && doc.get('isIgnored') !== true
-      && doc.get('isAddressed') !== true
-    ));
+  const docs = snapshot.docs.filter((doc) => (
+    doc.get('scanId') !== excludeScanId
+    && !excludedScanIds.has(doc.get('scanId'))
+    && (
+      includeAllFindingStates
+      || (
+        doc.get('isFalsePositive') !== true
+        && doc.get('isIgnored') !== true
+        && doc.get('isAddressed') !== true
+      )
+    )
+  ));
 
   return {
     themes: dedupeFindingTaxonomyLabels(docs.map((doc) => doc.get('theme'))),

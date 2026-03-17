@@ -1585,15 +1585,10 @@ function BrandDetailPageContent() {
     debouncedFindingsSearchQuery,
   ]);
 
-  const loadFindingTaxonomyOptions = useCallback(async (options?: { excludeScanId?: string | null }) => {
+  const loadFindingTaxonomyOptions = useCallback(async () => {
     try {
-      const params = new URLSearchParams();
-      if (options?.excludeScanId) {
-        params.set('excludeScanId', options.excludeScanId);
-      }
-      const queryString = params.toString();
       const res = await fetch(
-        `/api/brands/${brandId}/findings/taxonomy${queryString ? `?${queryString}` : ''}`,
+        `/api/brands/${brandId}/findings/taxonomy`,
         { credentials: 'same-origin' },
       );
       if (res.ok) {
@@ -1610,10 +1605,8 @@ function BrandDetailPageContent() {
   }, [brandId]);
 
   useEffect(() => {
-    void loadFindingTaxonomyOptions({
-      excludeScanId: activeScanId,
-    });
-  }, [activeScanId, loadFindingTaxonomyOptions]);
+    void loadFindingTaxonomyOptions();
+  }, [loadFindingTaxonomyOptions]);
 
   async function fetchLiveFindings(scanId: string) {
     try {
@@ -3891,7 +3884,7 @@ function BrandDetailPageContent() {
                                 e.preventDefault();
                                 e.stopPropagation();
                               }}
-                              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white px-3 py-1.5 text-xs font-medium text-brand-700 opacity-70 cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                              className="inline-flex items-center justify-center gap-2 rounded-full border border-white/15 bg-white px-3 py-1.5 text-xs font-medium text-brand-700 opacity-70 transition cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 lg:px-4 lg:py-2.5 lg:text-sm"
                             >
                               <Play className="w-4 h-4" />
                               Run scan

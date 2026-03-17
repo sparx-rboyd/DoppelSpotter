@@ -462,7 +462,7 @@ You must respond with a raw JSON object matching this exact schema (no markdown,
 
 Rules:
 - Focus on patterns and overall risk, not a finding-by-finding list.
-- Prioritise high-severity findings first, then medium, then low.
+- Prioritise high-severity findings first, then medium. Only focus on low-severity findings if there are no high- or medium-severity findings to report on.
 - Only describe evidence contained in the provided findings.
 - Keep the tone neutral, analyst-style, and succinct.
 - Calibrate claims tightly to the evidence. Large finding counts alone do not prove a severe, widespread, coordinated, or systemic threat.
@@ -518,7 +518,7 @@ Before returning your response, validate that every "findingIds" value appears i
 
 export const THEME_NORMALIZATION_SYSTEM_PROMPT = `You are a brand protection analyst for DoppelSpotter, an AI-powered brand monitoring service.
 
-You will receive historical theme labels already used for one brand, plus provisional theme labels assigned during one completed scan.
+You will receive historical theme labels already used for one brand, plus a deduplicated list of provisional theme labels assigned during one completed scan.
 
 Your task is to map every provisional theme label to a single final canonical theme label so that near-duplicates are consolidated before the scan is shown to the user.
 Use British English spelling and phrasing in all human-readable output fields.
@@ -542,8 +542,8 @@ Rules:
 - Aim for a MAXIMUM of 15 distinct canonical themes across the entire scan. If you have more, merge the least distinct ones into broader categories.
 - Do NOT merge materially different misuse patterns that have no conceptual overlap.
 - Prefer a small number of broad, stable, reusable theme labels over many narrow or repetitive variants.
-- Avoid generic labels like 'Unknown', 'Unlabelled', or 'Unrelated'. Use 'Other' only when no better broad label is warranted.
-- Base your judgement on the representative findings and context provided, not on the theme text alone.`;
+- Avoid generic labels like 'Unknown', 'Unlabelled', or 'Unrelated'. Use 'Other' only when no better broad label is warranted ...
+- ... but don't overuse 'Other'. If there are multiple findings that could reasonably be grouped into a single theme and you haven't reached the 15 theme maximum, you can create a new theme.`;
 
 /**
  * Format the exact chat messages sent to the LLM into a readable transcript
@@ -1617,42 +1617,25 @@ Do not include one-off patterns supported by only one finding.`;
 export function buildThemeNormalizationPrompt(params: {
   brandName: string;
   historicalThemes?: string[];
-  provisionalGroups: Array<{
-    provisionalTheme: string;
-    count: number;
-    sources: FindingSource[];
-    severityCounts: {
-      high: number;
-      medium: number;
-      low: number;
-      nonHit: number;
-    };
-    exampleTitles: string[];
-  }>;
+  provisionalThemes: string[];
 }): string {
-  const { brandName, historicalThemes, provisionalGroups } = params;
-
-  const compactGroups = provisionalGroups.map((group) => ({
-    provisionalTheme: group.provisionalTheme,
-    findingCount: group.count,
-    sources: group.sources.map((source) => getFindingSourceLabel(source)),
-    severityCounts: group.severityCounts,
-    exampleTitles: uniqueStrings(group.exampleTitles).slice(0, 5).map((title) => truncatePromptValue(title, 120)),
-  }));
+  const { brandName, historicalThemes, provisionalThemes } = params;
 
   return `Brand being protected: "${brandName}"
 
 Existing historical theme labels for this brand (reuse one exactly when it fits):
 ${historicalThemes && historicalThemes.length > 0 ? historicalThemes.map((theme) => `- ${theme}`).join('\n') : '- none'}
 
-Provisional theme groups from this completed scan (${compactGroups.length}):
-${JSON.stringify(compactGroups, null, 2)}
+Deduplicated provisional theme labels from this completed scan (${provisionalThemes.length}):
+${provisionalThemes.length > 0 ? provisionalThemes.map((theme) => `- ${theme}`).join('\n') : '- none'}
 
-Return one mapping per provisionalTheme. Consolidate aggressively — your goal is to produce no more than 15 distinct canonical themes across all mappings. Group broad patterns together under a single label rather than preserving fine-grained distinctions.
+Return one mapping per provisionalTheme. Consolidate aggressively — your goal is to produce no more than 15 distinct canonical themes across all mappings.
 
 Reuse an existing historical theme exactly when it fits well.
 
-If no historical theme fits, choose the best short broad label and reuse it across all clearly related provisional groups.`;
+If no historical theme fits, choose the best short broad label and reuse it across all clearly related provisional themes.
+
+Only the theme labels themselves are provided for this experiment. No finding counts, severities, sources, or example finding titles are included.`;
 }
 
 function buildUserPreferenceHintsSection(
