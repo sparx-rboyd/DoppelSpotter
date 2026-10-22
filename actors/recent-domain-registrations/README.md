@@ -1,6 +1,6 @@
 # Recent Domain Registrations
 
-Live Apify Store listing: https://apify.com/doppelspotter/recent-domain-registrations
+Live Apify actor: https://console.apify.com/actors/V6TZmCcIvafDIeWm9
 
 Search recent domain registrations from the CodePunch GTLD Domain Name Activity Feed v2 using keyword, date, and TLD filters, and request enhanced AI analyses of the top level web page for each domain.
 

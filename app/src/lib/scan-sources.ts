@@ -87,10 +87,10 @@ export type ScannerConfig =
 export const GOOGLE_SEARCH_ACTOR_ID = 'apify/google-search-scraper';
 export const REDDIT_POST_SCRAPER_ACTOR_ID = 'fatihtahta/reddit-scraper-search-fast';
 export const TIKTOK_POST_SCRAPER_ACTOR_ID = 'apidojo/tiktok-scraper';
-export const DOMAIN_REGISTRATIONS_ACTOR_ID = 'doppelspotter/recent-domain-registrations';
+export const DOMAIN_REGISTRATIONS_ACTOR_ID = 'sparx-learning/recent-domain-registrations';
 export const DISCORD_SERVER_SCRAPER_ACTOR_ID = 'louisdeconinck/discord-server-scraper';
 export const GITHUB_REPO_SEARCH_ACTOR_ID = 'muscular_quadruplet/github-scraper';
-export const EUIPO_TRADEMARK_SEARCH_ACTOR_ID = 'doppelspotter/euipo-trademark-search';
+export const EUIPO_TRADEMARK_SEARCH_ACTOR_ID = 'sparx-learning/euipo-trademark-search';
 export const X_TWEET_SCRAPER_ACTOR_ID = 'apidojo/tweet-scraper';
 
 export const SCAN_SOURCE_ORDER: ScanFindingSource[] = [

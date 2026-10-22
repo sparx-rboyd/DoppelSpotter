@@ -58,10 +58,10 @@ DoppelSpotter is designed for a simple user journey:
 | Web and specialist Google scans | Web, YouTube, Facebook, Instagram, Telegram, Apple App Store, Google Play | `apify/google-search-scraper` |
 | Public Reddit posts | Reddit | `fatihtahta/reddit-scraper-search-fast` |
 | Public TikTok videos | TikTok | `apidojo/tiktok-scraper` |
-| Recent domain registrations | Domain registrations | `doppelspotter/recent-domain-registrations` |
+| Recent domain registrations | Domain registrations | `sparx-learning/recent-domain-registrations` |
 | Public communities | Discord servers | `louisdeconinck/discord-server-scraper` |
 | Code platforms | GitHub repos | `muscular_quadruplet/github-scraper` |
-| Trademark filings | EUIPO trademarks | `doppelspotter/euipo-trademark-search` |
+| Trademark filings | EUIPO trademarks | `sparx-learning/euipo-trademark-search` |
 | Social posts | X | `apidojo/tweet-scraper` |
 
 ### Why The Breadth Matters
@@ -170,8 +170,8 @@ The custom actors live in:
 
 Published listings:
 
-- [doppelspotter/recent-domain-registrations](https://apify.com/doppelspotter/recent-domain-registrations)
-- [doppelspotter/euipo-trademark-search](https://apify.com/doppelspotter/euipo-trademark-search)
+- [sparx-learning/recent-domain-registrations](https://apify.com/sparx-learning/recent-domain-registrations)
+- [sparx-learning/euipo-trademark-search](https://apify.com/sparx-learning/euipo-trademark-search)
 
 ### Recent Domain Registrations
 
@@ -432,5 +432,5 @@ This repository works best when read as a complete submission rather than three 
 - [App Source](app/)
 - [Pitch Page Source](landing-page/index.html)
 - [Actor Sources](actors/)
-- [Published Actor: Domain Registrations](https://apify.com/doppelspotter/recent-domain-registrations)
-- [Published Actor: EUIPO Trademark Search](https://apify.com/doppelspotter/euipo-trademark-search)
+- [Published Actor: Domain Registrations](https://apify.com/sparx-learning/recent-domain-registrations)
+- [Published Actor: EUIPO Trademark Search](https://apify.com/sparx-learning/euipo-trademark-search)

@@ -1,6 +1,6 @@
 # EUIPO Trademark Search
 
-Search the official [EUIPO Trademark Search API](https://dev.euipo.europa.eu/product/trademark-search_100) for EU trademark filings matching one or more brand keywords. Built by DoppelSpotter and published at `doppelspotter/euipo-trademark-search`.
+Search the official [EUIPO Trademark Search API](https://dev.euipo.europa.eu/product/trademark-search_100) for EU trademark filings matching one or more brand keywords. Built by DoppelSpotter and published at `sparx-learning/euipo-trademark-search`.
 
 ---
 

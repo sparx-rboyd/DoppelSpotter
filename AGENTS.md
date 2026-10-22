@@ -33,7 +33,7 @@ then uses AI analysis to classify likely threats and summarise scan outcomes.
 ├── cloudbuild.yaml               # GCP Cloud Build CI/CD pipeline
 ├── wrangler.toml                 # Cloudflare Workers config (landing page)
 ├── actors/                       # Standalone Apify actors and prototypes
-│   └── recent-domain-registrations/ # CodePunch-backed recent-domain-registrations actor (published at apify.com/doppelspotter/recent-domain-registrations)
+│   └── recent-domain-registrations/ # CodePunch-backed recent-domain-registrations actor (published at apify.com/sparx-learning/recent-domain-registrations)
 ├── landing-page/                 # Static marketing site
 ├── app/                          # Next.js 15 application
 │   └── src/
@@ -98,10 +98,10 @@ The seven active Google logical scanners all reuse the same physical Apify actor
 `apify/google-search-scraper`. `reddit-posts` uses
 `fatihtahta/reddit-scraper-search-fast`, `tiktok-posts` uses
 `apidojo/tiktok-scraper`, and `domain-registrations` uses
-`doppelspotter/recent-domain-registrations`, `discord-servers` uses
+`sparx-learning/recent-domain-registrations`, `discord-servers` uses
 `louisdeconinck/discord-server-scraper`, `github-repos` uses
 `muscular_quadruplet/github-scraper`, `euipo-trademarks` uses
-`doppelspotter/euipo-trademark-search`, and `x-search` uses `apidojo/tweet-scraper`.
+`sparx-learning/euipo-trademark-search`, and `x-search` uses `apidojo/tweet-scraper`.
 `app/src/lib/apify/actors.ts` therefore keys the registry by logical scanner id rather than raw
 `actorId`.
 
@@ -157,7 +157,7 @@ the canonical identity for per-scan upserts and historical repeat suppression, a
 support deep-search follow-up runs.
 
 `euipo-trademarks` is a trademark-filing source. It uses the first-party
-`doppelspotter/euipo-trademark-search` actor — a DoppelSpotter-built actor that fixes RSQL quoting
+`sparx-learning/euipo-trademark-search` actor — a DoppelSpotter-built actor that fixes RSQL quoting
 for multi-word brand names and caches EUIPO OAuth2 tokens with expiry-aware refresh logic. The
 actor receives the full keywords array in a single run and compiles them into an RSQL OR query
 (`(verbalElement==*sparx*,verbalElement==*sparx*maths*);applicationDate>="..."`) so all
@@ -174,7 +174,7 @@ AI-requested deep-search follow-up runs: each follow-up query starts a new X act
 `maxItems = 30` and never recurses beyond depth 1.
 
 `domain-registrations` is a domain-level source. It queries the published
-`doppelspotter/recent-domain-registrations` actor, fixes the actor date filter to UTC "one month
+`sparx-learning/recent-domain-registrations` actor, fixes the actor date filter to UTC "one month
 ago today" with `dateComparison = gte`, always enables the actor's enhanced homepage analysis,
 maps the brand-page `Search depth` setting from `1..5` to `totalLimit = 100..500`, stores one
 finding per domain, denormalizes the actor-provided registration date onto
