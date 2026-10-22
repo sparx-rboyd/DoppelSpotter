@@ -1,4 +1,4 @@
-FROM apify/actor-node:20
+FROM apify/actor-node:22-slim
 
 COPY package*.json ./
 RUN npm --quiet set progress=false \

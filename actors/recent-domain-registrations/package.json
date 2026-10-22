@@ -8,7 +8,7 @@
     "start": "node src/main.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "apify": "^3.4.0",
